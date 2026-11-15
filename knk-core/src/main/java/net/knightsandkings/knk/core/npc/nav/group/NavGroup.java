@@ -94,6 +94,8 @@ public final class NavGroup {
     static final int GUARD_TICKS = 40;
     /** A left-behind follower's tries are spaced out up to this (60 s; developer decision 2026-11-15, 4b.4 question 11). */
     static final int MAX_LOST_RETRY_TICKS = 1200;
+    /** A lane is back on the path's centre this many blocks before a place where it has no floor. */
+    static final double LANE_RETURN = 2.0;
     /** A left-behind follower waits on a free cell at most this far beside its lane. */
     static final int ASIDE_BLOCKS = 2;
 
@@ -139,6 +141,10 @@ public final class NavGroup {
         int rejoinNode = -1;
         /** Stopped before a region the current rules deny it. */
         boolean heldByRule;
+        /** Its waypoints were cut short by a rule (a door, a district edge) at its last hand-out. */
+        boolean cut;
+        /** Followers ahead of it cut short by a rule: it stops this many spacings further back (a queue, not a pile). */
+        int queue;
         /** The waypoints it has lead into a region it did not stand in when it got them. */
         boolean sentIntoRegion;
         /** The rules may have changed since it got its waypoints: they are handed out again. */
@@ -550,6 +556,7 @@ public final class NavGroup {
         f.sentIntoRegion = false;
         f.recheck = false;
         f.leavingDoor = false;
+        f.cut = false;
         normalSpeed(f);
     }
 
@@ -577,9 +584,12 @@ public final class NavGroup {
         if (goal == null) {
             if (rulesPending || finishing() > 0) {
                 rulesPending = false;
+                int queued = 0;
                 for (Follower f : new ArrayList<>(followers)) {
                     if (f.state == FollowerState.FINISHING) {
+                        f.queue = queued;
                         step(f, null, 0, 0); // finishing followers walk on while the group has no order
+                        queued += f.cut && f.state == FollowerState.FINISHING ? 1 : 0;
                     }
                 }
             }
@@ -615,9 +625,12 @@ public final class NavGroup {
         List<Formation.Slot> slots = levelSlots.get(level);
         double maxLag = 0;
         boolean settled = true;
+        int queued = 0;
         for (int i = 0; i < followers.size(); i++) {
             Follower f = followers.get(i);
+            f.queue = queued;
             step(f, slots.get(i), leaderArc, lookahead);
+            queued += f.cut && (f.state == FollowerState.FOLLOWING || f.state == FollowerState.FINISHING) ? 1 : 0;
             if (f.mover.isSpawned() && !f.lost && !f.heldByRule && f.state != FollowerState.FINISHING) {
                 maxLag = Math.max(maxLag, f.lag);
                 settled &= f.settled;
@@ -1166,12 +1179,17 @@ public final class NavGroup {
         GateBox inDoor = null;
         for (GateBox box : doors) {
             if (inDoorWay(box, at)) {
-                inDoor = box; // the door starts moving with it in the way: it walks on out, never stops in there
+                if (!underDoor(box, at) && aheadUnder(f, box)) {
+                    backOutOf(f, box); // in the margin before a moving door: a step back, not through it
+                    return;
+                }
+                inDoor = box; // under the door when it starts moving: it walks on out, never stops in there
                 break;
             }
         }
         int end = path.indexAtArc(targetArc);
         List<NavPoint> waypoints = new ArrayList<>();
+        List<Double> arcs = new ArrayList<>();
         double endArc = a;
         boolean cut = false;
         f.recheck = false;
@@ -1182,9 +1200,24 @@ public final class NavGroup {
                 cut = true;
                 break;
             }
-            add(waypoints, continuous(waypoints, at, lanePoint(k, 0, slot.side()), k));
+            if (add(waypoints, continuous(waypoints, at, lanePoint(k, 0, slot.side()), k))) {
+                arcs.add(path.arc(k));
+            }
             endArc = path.arc(k);
         }
+        if (cut && f.queue > 0) {
+            // followers ahead of it stand before the same door or edge: it stops a spacing behind each of them,
+            // counted from the last point before the door or edge (where the first of them stands)
+            double keep = f.queue * settings.formation().spacing();
+            int stopIdx = Math.max(0, k - 1);
+            double stopArc = path.arc(stopIdx);
+            while (!waypoints.isEmpty() && stopArc - arcs.get(arcs.size() - 1) < keep) {
+                waypoints.remove(waypoints.size() - 1);
+                arcs.remove(arcs.size() - 1);
+            }
+            endArc = arcs.isEmpty() ? a : arcs.get(arcs.size() - 1);
+        }
+        f.cut = cut;
         if (!cut && k > end) {
             // the slot itself: between two path points, or past the path's end (a slot ahead of the leader)
             double along = targetArc - path.arc(end);
@@ -1233,11 +1266,14 @@ public final class NavGroup {
         return HopPlanner.feet(path.get(index).floor);
     }
 
-    private static void add(List<NavPoint> waypoints, NavPoint p) {
+    /** Adds a waypoint unless it is where the last one is; true when added. */
+    private static boolean add(List<NavPoint> waypoints, NavPoint p) {
         if (waypoints.isEmpty() || waypoints.get(waypoints.size() - 1).horizontalDistance(p) > 0.3
             || waypoints.get(waypoints.size() - 1).y() != p.y()) {
             waypoints.add(p);
+            return true;
         }
+        return false;
     }
 
     /**
@@ -1248,14 +1284,36 @@ public final class NavGroup {
     private NavPoint lanePoint(int index, double along, double side) {
         NavPoint p = null;
         double lane = laneSide(index, side);
-        if (Math.abs(lane) > 1e-9 && laneFree(index - 1, side, lane) && laneFree(index, side, lane)
-            && laneFree(index + 1, side, lane) && (along == 0 || laneFree(index + 2, side, lane))) {
+        if (Math.abs(lane) > 1e-9 && laneFree(index - 1, side, lane) && laneAhead(index, along, side, lane)) {
             p = path.point(ports.world(), index, along, lane);
         }
         if (p == null && along != 0) {
             p = path.point(ports.world(), index, along, 0);
         }
         return p != null ? p : HopPlanner.feet(path.get(index).floor);
+    }
+
+    /**
+     * Whether the lane exists from a path point on for {@link #LANE_RETURN} blocks along the path (and the next point
+     * past it): a lane is back on the path's centre that far before a place where it has no floor, so a follower
+     * steps in behind the one ahead before a 1-wide opening, never diagonally across its wall corner (found by
+     * {@code npc-corners-walk} and {@code npc-group-narrows} once 2 abreast fit the scene's 2-wide passage).
+     */
+    private boolean laneAhead(int index, double along, double side, double lane) {
+        if (!laneFree(index, side, lane) || !laneFree(index + 1, side, lane)
+            || (along != 0 && !laneFree(index + 2, side, lane))) {
+            return false;
+        }
+        if (index < 0 || index >= path.size()) {
+            return true;
+        }
+        double until = path.arc(index) + along + LANE_RETURN;
+        for (int k = index + 2; k < path.size() && path.arc(k - 1) <= until; k++) {
+            if (!laneFree(k, side, lane)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -1337,6 +1395,65 @@ public final class NavGroup {
             }
         }
         return false;
+    }
+
+    /** Whether an NPC with its feet here stands under a door: in its box itself, not only in the margin round it. */
+    static boolean underDoor(GateBox box, NavPoint feet) {
+        return feet.x() >= box.minX() && feet.x() <= box.maxX() && feet.z() >= box.minZ() && feet.z() <= box.maxZ()
+            && feet.y() + 2 > box.minY() && feet.y() < box.maxY();
+    }
+
+    /** Whether the group's path passes under a door within a few points ahead of a follower: it has the door ahead. */
+    private boolean aheadUnder(Follower f, GateBox box) {
+        if (f.pathIdx < 0 || f.pathIdx >= path.size()) {
+            return false;
+        }
+        double until = path.arc(f.pathIdx) + 2 * DOOR_MARGIN + 1;
+        for (int k = f.pathIdx; k < path.size() && path.arc(k) <= until; k++) {
+            if (underDoor(box, HopPlanner.feet(path.get(k).floor))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A follower in the margin before a door that started moving steps back along its lane out of the door's way and
+     * waits there like a follower stopped by a rule (implementation plan 4b.3, found by
+     * {@code npc-group-gate-finish-trip}: a closing portcullis blocks a body a third of the way into its close, so a
+     * follower a block short of it never got through and was pressed against it).
+     */
+    private void backOutOf(Follower f, GateBox box) {
+        NavPoint back = null;
+        int k = Math.min(f.pathIdx, path.size() - 1);
+        double edge = Double.NaN;
+        for (; k >= 0; k--) {
+            NavPoint p = HopPlanner.feet(path.get(k).floor);
+            if (!inDoorWay(box, p)) {
+                if (Double.isNaN(edge)) {
+                    edge = path.arc(k);
+                }
+                // behind the followers that stand before the same door already: a queue, not a pile
+                if (edge - path.arc(k) >= f.queue * settings.formation().spacing() || k == 0) {
+                    back = p;
+                    break;
+                }
+            }
+        }
+        f.recheck = false;
+        f.cut = true;
+        f.heldByRule = true;
+        f.progressTick = now;
+        if (back == null) {
+            if (f.mover.isMoving()) {
+                f.mover.stop();
+            }
+            f.leavingDoor = false;
+            return;
+        }
+        f.mover.follow(List.of(back), settings.waypointMargin());
+        f.sentEndArc = path.arc(k);
+        f.leavingDoor = true; // not interrupted on its way back
     }
 
     /** Whether an NPC with its feet here is in a door's way: in its box or within {@link #DOOR_MARGIN} of it. */
@@ -1644,7 +1761,9 @@ public final class NavGroup {
             f.recheck = true;
         }
         boolean handover = f.tripSent >= 0 && f.tripSent < size - 1 && f.tripSent - best < 3;
-        if (f.recheck || handover || (!f.mover.isMoving() && !f.heldByRule)) {
+        if (f.recheck || handover || !f.mover.isMoving()) {
+            // a held one looks again every turn, as a following follower does: a door that was still opening at its
+            // event lets it through once it is open
             sendTrip(f, at);
         }
     }
@@ -1682,6 +1801,14 @@ public final class NavGroup {
             add(waypoints, p.feet());
             sent = k;
         }
+        if (cut && f.queue > 0 && k < f.trip.size()) {
+            NavPoint stop = f.trip.get(k).feet();
+            double keep = f.queue * settings.formation().spacing();
+            while (!waypoints.isEmpty() && stop.horizontalDistance(waypoints.get(waypoints.size() - 1)) < keep) {
+                waypoints.remove(waypoints.size() - 1);
+            }
+        }
+        f.cut = cut;
         f.heldByRule = cut && waypoints.isEmpty();
         f.tripSent = sent;
         if (waypoints.isEmpty()) {

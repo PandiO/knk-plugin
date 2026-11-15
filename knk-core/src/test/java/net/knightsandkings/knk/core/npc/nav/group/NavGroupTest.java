@@ -614,7 +614,9 @@ class NavGroupTest {
             }
         }
 
-        assertTrue(inDoor.position.x() > 62, inDoor.name() + " left the door's way forwards");
+        // 4b.3 (npc-group-gate-finish-trip): one in the margin before the door steps back out of it, as a closing
+        // portcullis blocks a body long before it is shut; only one under the door walks on through
+        assertTrue(inDoor.position.x() < 59, inDoor.name() + " stepped back out of the door's way, at " + inDoor.position);
         for (SimMover m : before) {
             assertTrue(m.position.x() < 59, m.name() + " stands short of the door");
             assertFalse(m.isMoving(), m.name() + " waits at the door");
@@ -630,6 +632,27 @@ class NavGroupTest {
 
         assertArrived();
         assertEquals(200.5 - 2 * 11, follower(10).position.x(), 1.2, "the rest followed once the gate opened");
+    }
+
+    @Test
+    void aFollowerUnderTheDoorWhenItStartsClosingWalksOnOutForwards() {
+        gatedRoad();
+        sim.rules.doorBoxes.put(7, DOOR_7);
+        NavGroup group = sim.group(12, COLUMN);
+        group.navigate(feet(200.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> sim.movers.stream().skip(2).anyMatch(m -> NavGroup.underDoor(DOOR_7, m.position)),
+            3000));
+        SimMover under = sim.movers.stream().skip(2).filter(m -> NavGroup.underDoor(DOOR_7, m.position)).findFirst()
+            .orElseThrow();
+        sim.rules.closedGates.add(7);
+        sim.service.onGateChanged(7);
+        sim.groups.onRulesChanged();
+        sim.run(60);
+
+        assertTrue(under.position.x() > 62, under.name() + " left the door's way forwards, at " + under.position);
+        for (SimMover m : sim.movers.subList(1, sim.movers.size())) {
+            assertFalse(inDoorWay(m) && !m.isMoving(), m.name() + " waits in the door's way at " + m.position);
+        }
     }
 
     @Test

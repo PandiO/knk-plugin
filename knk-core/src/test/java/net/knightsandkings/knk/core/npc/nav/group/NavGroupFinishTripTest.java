@@ -98,6 +98,12 @@ class NavGroupFinishTripTest {
         for (SimMover m : held) {
             assertTrue(m.position.x() < 59, m.name() + " held short of the door");
         }
+        for (int i = 0; i < held.size(); i++) {
+            for (int j = i + 1; j < held.size(); j++) {
+                assertTrue(held.get(i).position.horizontalDistance(held.get(j).position) >= 0.3,
+                    "held followers queue, not on one spot: " + held.get(i).position + " " + held.get(j).position);
+            }
+        }
         group.navigate(feet(0.5, 0.5), back);
         sim.run(20);
         gate(false);
@@ -166,6 +172,27 @@ class NavGroupFinishTripTest {
         assertEquals(0, group.finishing());
         assertTrue(sim.log.stream().anyMatch(l -> l.contains("finished its trip at ")));
         assertEquals(0, sim.metrics.total(Event.TRESPASS));
+    }
+
+    @Test
+    void onAFollowerHeldByADoorThatWasStillOpeningAtItsEventFinishesOnceItIsOpen() {
+        NavGroup group = group(8, true);
+        gatedRoad();
+        group.navigate(feet(100.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> leader().position.x() > 63.5, 3000));
+        gate(true);
+        sim.run(40);
+        List<SimMover> held = sim.movers.stream().skip(1).filter(m -> m.position.x() < 59 && !m.isMoving()).toList();
+        assertTrue(sim.runUntil(results::ended, 3000));
+        Results back = new Results();
+        group.navigate(feet(0.5, 0.5), back);
+        sim.run(20);
+        sim.service.onGateChanged(7); // the open event comes while the door still moves: it blocks
+        sim.groups.onRulesChanged();
+        sim.run(20);
+        sim.rules.closedGates.clear(); // open now, and no event says so
+        assertTrue(sim.runUntil(() -> arrivals.keySet().containsAll(held.stream().map(SimMover::id).toList()), 3000),
+            "held followers finished their trip once the door was open: " + arrivals);
     }
 
     @Test

@@ -18,6 +18,9 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnUnderRoofSce
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersLineScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupGateFinishTripScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupNarrowsScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStuckLadderScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.TempRegionSweepScenario;
 
@@ -54,6 +57,9 @@ public final class PaperScenarios {
             // walking ones need Citizens, which CI's paper-boot server has as a pinned build
             .register(new NpcCornersLineScenario())
             .register(new NpcCornersWalkScenario())
-            .register(new NpcStuckLadderScenario());
+            .register(new NpcStuckLadderScenario())
+            .register(new NpcGroupNarrowsScenario())
+            .register(new NpcGroupGateFinishTripScenario())
+            .register(new NpcGroupAccessChangeScenario());
     }
 }

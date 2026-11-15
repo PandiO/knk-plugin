@@ -40,7 +40,7 @@ env:
 jobs:
   paper-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -103,7 +103,7 @@ jobs:
         # (tools/paper-boot/check_scenarios.py; the result table also goes to the job summary). Raise MIN_SCENARIOS
         # when a scenario is added, so a scenario that silently stops registering fails the job.
         env:
-          MIN_SCENARIOS: 19
+          MIN_SCENARIOS: 22
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
@@ -112,7 +112,7 @@ jobs:
           --expect-commit "${{ steps.build.outputs.commit }}"
           --scenarios
           --min-scenarios "$MIN_SCENARIOS"
-          --expect-timeout 360
+          --expect-timeout 600
 
       - name: Upload the server log
         if: always()

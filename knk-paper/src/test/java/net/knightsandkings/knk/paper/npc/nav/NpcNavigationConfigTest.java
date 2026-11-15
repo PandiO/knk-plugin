@@ -301,4 +301,57 @@ class NpcNavigationConfigTest {
         assertEquals("column", bad.settings().value(NavigationSettings.GROUP_FORMATION, elsewhere), "the default stays");
         assertEquals(1.3, bad.settings().value(NavigationSettings.GROUP_CATCH_UP_SPEED, elsewhere));
     }
+
+    @Test
+    void readsTheNarrowedFormationKeysInEveryConfigLayer() throws Exception {
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                group-lateral-spacing: 1.25
+                group-width-hysteresis-blocks: 5
+                group-followers-finish-trip: false
+                worlds:
+                  w:
+                    group-followers-finish-trip: true
+                regions:
+                  market:
+                    group-width-hysteresis-blocks: 0
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        Scope elsewhere = Scope.of("other");
+        assertEquals(1.25, config.settings().value(NavigationSettings.GROUP_LATERAL_SPACING, elsewhere));
+        assertEquals(1.5, config.settings().value(NavigationSettings.GROUP_SPACING, elsewhere), "the new default");
+        assertEquals(5, config.settings().value(NavigationSettings.GROUP_WIDTH_HYSTERESIS_BLOCKS, elsewhere));
+        assertEquals(false, config.settings().value(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, elsewhere));
+        assertEquals(new NavigationSettings.Resolved<>(true, Layer.WORLD, "w"),
+            config.settings().resolve(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, Scope.of("w")));
+        Scope inTheMarket = new Scope("w", java.util.List.of("market"), null, null);
+        net.knightsandkings.knk.core.npc.nav.group.GroupSettings group =
+            net.knightsandkings.knk.core.npc.nav.group.GroupSettings.of(config.settings(), inTheMarket);
+        assertEquals(0, group.widthHysteresisBlocks());
+        assertTrue(group.followersFinishTrip());
+        assertEquals(1.25, group.formation().lateralSpacing());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                group-lateral-spacing: 0.5
+                group-width-hysteresis-blocks: 20
+                group-followers-finish-trip: sometimes
+            """);
+        assertEquals(3, bad.rejected().size(), bad.rejected().toString());
+        assertEquals(1.0, bad.settings().value(NavigationSettings.GROUP_LATERAL_SPACING, elsewhere), "the default stays");
+    }
+
+    @Test
+    void theShippedConfigHasTheNarrowedFormationKeysWithTheirDefaults() throws Exception {
+        String shipped;
+        try (java.io.InputStream in = getClass().getClassLoader().getResourceAsStream("config.yml")) {
+            shipped = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        assertTrue(shipped.contains("    group-spacing: 1.5\n"), "group-spacing 1.5");
+        assertTrue(shipped.contains("    group-lateral-spacing: 1.0\n"));
+        assertTrue(shipped.contains("    group-width-hysteresis-blocks: 3\n"));
+        assertTrue(shipped.contains("    group-followers-finish-trip: false\n"));
+    }
 }

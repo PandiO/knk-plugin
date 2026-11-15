@@ -152,6 +152,8 @@ class GroupPathTest {
             "2 abreast in a 2-wide passage whose line runs down one column: block centres, not the block edge");
         assertTrue(Double.isNaN(path.shift(world, 3, 0)), "3 abreast do not fit there");
         assertEquals(0.0, path.shift(world, 4, 2), "the column needs no shift");
+        assertNull(path.point(world, 4, 0, -0.5),
+            "a lane on the block edge of a 1-wide passage has a floor under it but a wall at its shoulder");
     }
 
     @Test
@@ -163,5 +165,23 @@ class GroupPathTest {
         path.levels(new double[] {2.0, 0});
         assertEquals(1, path.widest(world, 1), "a 3-wide road is too narrow for a half width of 2");
         assertEquals(2, path.levelCount());
+    }
+
+    @Test
+    void aFlightOfStairsIsWalkedAsAColumnHoweverWide() {
+        GroupPath path = new GroupPath();
+        path.levels(new double[] {0.5, 0});
+        path.add(floor(0.5, 0.5));
+        path.add(floor(1.5, 0.5));
+        path.add(new NavPoint(GroupSim.WORLD, 2.5, 65, 0.5)); // a step up
+        path.add(new NavPoint(GroupSim.WORLD, 3.5, 65, 0.5));
+        path.add(new NavPoint(GroupSim.WORLD, 4.5, 65, 0.5));
+        world.noFloor = (x, z) -> false;
+
+        assertEquals(0, path.widest(world, 0), "flat: 2 abreast");
+        assertTrue(path.stair(1));
+        assertEquals(1, path.widest(world, 1), "the foot of the step");
+        assertEquals(1, path.widest(world, 2), "the step");
+        assertFalse(path.stair(3));
     }
 }

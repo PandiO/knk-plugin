@@ -352,8 +352,8 @@ class NpcNavRunnerTest {
             assertEquals(NpcNavState.IDLE, service.state(follower.id()), "a follower has no order of its own");
         }
         String line = runner.report(0, 0).stream().filter(l -> l.startsWith("groups ")).findFirst().orElseThrow();
-        assertTrue(line.startsWith("groups 1 (5 NPCs, ranks): trips 0 | folds 0, reforms 0, folded now 0 | own legs back 0"),
-            line);
+        assertTrue(line.startsWith("groups 1 (5 NPCs, ranks): trips 0 | widths: narrows 0, widens 0 | folds 0, reforms 0, "
+            + "folded now 0 | abreast now 2 | finished trips 0 (finishing now 0) | own legs back 0"), line);
         assertTrue(line.endsWith("road plans per group event: max 0 | local legs at once: max 0"),
             "this test's planner answers at once: " + line);
 
@@ -371,16 +371,22 @@ class NpcNavRunnerTest {
     @Test
     void aGroupTakesItsFormationFromTheSettingsUnlessTheCommandNamesOne() throws Exception {
         runner.spawnGroup(3, NpcAccessProfile.DEFAULT, null);
-        runner.spawnGroup(3, NpcAccessProfile.DEFAULT, net.knightsandkings.knk.core.npc.nav.group.Formation.Type.ESCORT_RING);
+        runner.spawnGroup(3, NpcAccessProfile.DEFAULT, net.knightsandkings.knk.core.npc.nav.group.Formation.Type.ESCORT_RING,
+            true);
         ticks(4);
 
         assertEquals(2, runner.groupCount());
         assertTrue(runner.report(0, 0).stream().anyMatch(l -> l.startsWith("groups 2 (6 NPCs, column/escort-ring)")));
+        assertTrue(runner.report(0, 0).stream().anyMatch(l -> l.contains("abreast now 1/ring")), runner.report(0, 0)
+            .toString());
         try (var files = Files.list(folder.resolve("npc-logs"))) {
             String log = Files.readString(files.filter(f -> f.getFileName().toString().endsWith("_npc-nav.log"))
                 .findFirst().orElseThrow());
-            assertTrue(log.contains("column, spacing 2.0, group-formation from default"), log);
-            assertTrue(log.contains("escort-ring, spacing 2.0, group-formation from assignment"), log);
+            assertTrue(log.contains("column, spacing 1.5, lateral spacing 1.0, group-formation from default, "
+                + "group-followers-finish-trip false (default)"), log);
+            assertTrue(log.contains("escort-ring, spacing 1.5, lateral spacing 1.0, group-formation from assignment, "
+                + "group-followers-finish-trip true (assignment)"), log);
+            assertTrue(log.contains("formation escort-ring, finish-trip, profile default"), log);
         }
     }
 

@@ -573,14 +573,26 @@ npc:
     # too: a group takes them once, for its leader, so a world, a region, a template or an assignment can give
     # groups their own formation. /knk npc nav group <n> [formation] tries one.
     # A group's formation: column (single file, the default) | ranks (rows behind the leader; pairs with
-    # group-ranks-width 2) | cluster (a loose crowd) | escort-ring (an octagon around the leader, then wider rings).
-    # Where the road is too narrow for the formation (a gate, stairs, a wall walk) a group folds into a column and
-    # takes up its formation again after.
+    # group-ranks-width 2) | cluster (a loose crowd, 3 abreast) | escort-ring (an octagon around the leader, then
+    # wider rings). Where the road is too narrow, a formation narrows before it folds: ranks one fewer abreast down
+    # to 2, a cluster 3 then 2, the escort ring rows of 3 with the leader in the middle of the second row, then 2
+    # abreast; only where 2 abreast do not fit (a gate, stairs, a wall walk) the group folds into a column, and it
+    # takes up its widest width that fits again after.
     group-formation: column
-    # Blocks between neighbouring formation slots.
-    group-spacing: 2.0
-    # NPCs per row in the ranks formation.
+    # Blocks between the rows of a formation and between NPCs in a column.
+    group-spacing: 1.5
+    # Blocks between neighbours in a row (1 = shoulder to shoulder): 3 abreast need a road 1 + 2 x this wide,
+    # rounded down to whole blocks.
+    group-lateral-spacing: 1.0
+    # NPCs per row in the ranks formation (its widest width; it narrows one by one down to 2 before it folds).
     group-ranks-width: 2
+    # A group changes to a narrower width (still 2 abreast or more) or a wider one only when it lasts this many
+    # blocks along the path; a column at a gate or a stair is taken at once.
+    group-width-hysteresis-blocks: 3
+    # When the leader has arrived and the group gets its next order (it turns back), followers still on their way
+    # (held at a gate, behind) finish their trip to their place at the goal first and then rejoin the group
+    # (couriers). false: they follow the leader at once. /knk npc nav group <n> ... finish-trip|follow-leader.
+    group-followers-finish-trip: false
     # A follower further than this from its lane (pushed away, fallen off) plans its own leg back to the group's path:
     # one local leg, never the whole route. A follower without progress for no-progress-ticks takes the recovery
     # steps first (back-off, side-step), then its own leg back to a point ahead of it on its own floor.

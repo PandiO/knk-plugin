@@ -175,8 +175,9 @@ final class GroupPath {
     /**
      * The feet position {@code along} blocks past a path point (in its direction) and {@code side} blocks to the
      * right of it, or null when an NPC cannot walk there as part of this path: no floor within a block of the
-     * path's height there or on the way out from the path's centre, a chunk that is not loaded, or other WorldGuard
-     * regions than the path's own point (a lane never enters a region the path does not).
+     * path's height there, {@link #LANE_CLEARANCE} to either side of it across the path, or on the way out from the
+     * path's centre, a chunk that is not loaded, or other WorldGuard regions than the path's own point (a lane never
+     * enters a region the path does not).
      */
     NavPoint point(NavWorld world, int index, double along, double side) {
         if (Math.abs(side) < 1e-9) {
@@ -232,6 +233,13 @@ final class GroupPath {
                     .equals(regions(world, index))) {
                     return null;
                 }
+                // a body, not a line: a lane exactly on a block edge (x 26.0 in a 1-wide passage at x 26) has a floor
+                // under its point but a wall at its shoulder (found by npc-corners-walk)
+                for (double edge : new double[] {LANE_CLEARANCE, -LANE_CLEARANCE}) {
+                    if (floorNear(world, c.world(), x + rx * edge, y, z + rz * edge) == Integer.MIN_VALUE) {
+                        return null;
+                    }
+                }
                 return new NavPoint(c.world(), x, y + 1, z);
             }
         }
@@ -258,11 +266,14 @@ final class GroupPath {
 
     /**
      * The widest of the formation's widths that fits at a path point (an index into {@link #levels}; the column,
-     * the last, always fits), worked out once per point (implementation plan 4b.3 item 6): the tick cost of a
+     * the last, always fits, and is the only one on a flight of stairs), worked out once per point (implementation plan 4b.3 item 6): the tick cost of a
      * window scan stays one cached look per point.
      */
     int widest(NavWorld world, int index) {
         Node node = nodes.get(index);
+        if (node.widest < 0 && stair(index)) {
+            node.widest = levels.length - 1; // a flight of stairs is walked as a column (4b.3 item 3), however wide
+        }
         if (node.widest < 0) {
             int level = 0;
             while (level < levels.length - 1 && Double.isNaN(shift(world, index, level))) {
@@ -271,6 +282,13 @@ final class GroupPath {
             node.widest = level;
         }
         return node.widest;
+    }
+
+    /** Whether the path climbs or descends a block or more at this point (from the point before or to the next). */
+    boolean stair(int index) {
+        double y = nodes.get(index).floor.y();
+        return (index > 0 && Math.abs(nodes.get(index - 1).floor.y() - y) >= 1)
+            || (index + 1 < nodes.size() && Math.abs(nodes.get(index + 1).floor.y() - y) >= 1);
     }
 
     /**
@@ -308,27 +326,12 @@ final class GroupPath {
         return known == Double.POSITIVE_INFINITY ? Double.NaN : known;
     }
 
-    /** How far a lane point keeps from a block edge across the path to count as fitting (a body, not a line). */
+    /** How far a lane point keeps from a block edge without a floor, across the path (a body, not a line). */
     static final double LANE_CLEARANCE = 0.2;
 
-    /**
-     * Whether a lane exists {@code side} blocks beside a path point with a floor {@link #LANE_CLEARANCE} to either side
-     * of it across the path: a lane exactly on a block edge (2 abreast in a 2-wide passage, unshifted) would put a body
-     * against the wall.
-     */
+    /** Whether a lane exists {@code side} blocks beside a path point (its point keeps the clearance, see {@link #point}). */
     private boolean clear(NavWorld world, int index, double side) {
-        NavPoint lane = point(world, index, 0, side);
-        if (lane == null) {
-            return false;
-        }
-        double[] h = heading(index);
-        int y = lane.blockY() - 1;
-        for (double d : new double[] {LANE_CLEARANCE, -LANE_CLEARANCE}) {
-            if (floorNear(world, lane.world(), lane.x() - h[1] * d, y, lane.z() + h[0] * d) == Integer.MIN_VALUE) {
-                return false;
-            }
-        }
-        return true;
+        return point(world, index, 0, side) != null;
     }
 
     /** Whether the path is wide enough at a point for slots {@code halfWidth} blocks to either side. */

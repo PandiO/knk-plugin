@@ -54,6 +54,8 @@ public final class ScenarioNpcs {
 
     private final ScenarioScene scene;
     private final List<NavPoint> loop;
+    /** Gate crossings on the scene's road: a plan whose line passes one names its door (4b.3 item 14). */
+    private final List<RoadPlanner.GateCrossing> gates;
     private final NpcMoverFactory factory;
     private final NavigationSettings settings;
     private final NpcNavigationMetrics metrics = new NpcNavigationMetrics();
@@ -69,17 +71,21 @@ public final class ScenarioNpcs {
     private String longestStillWho = "-";
     private BukkitTask task;
 
-    private ScenarioNpcs(ScenarioScene scene, List<NavPoint> loop, NpcMoverFactory factory, NavigationSettings settings) {
+    private ScenarioNpcs(ScenarioScene scene, List<NavPoint> loop, NpcMoverFactory factory, NavigationSettings settings,
+                         AccessRules rules, List<RoadPlanner.GateCrossing> gates) {
         this.scene = scene;
         this.loop = HopPlanner.resampleKeepingCorners(loop, 1.0);
+        this.gates = List.copyOf(gates);
         this.factory = factory;
         this.settings = settings;
         metrics.setEnabled(true);
-        BukkitNavWorld world = new BukkitNavWorld(null);
+        // the scenarios with rules of their own see WorldGuard's regions (a scenario region); the others none, as in L3
+        BukkitNavWorld world = new BukkitNavWorld(rules == AccessRules.OPEN ? null
+            : new net.knightsandkings.knk.paper.regions.RegionIds());
         Consumer<String> logLine = line -> log.add(new LogLine(tick, line));
         service = new NpcNavigationService(new NpcNavigationService.Ports(this::plan, this::prepare, world, metrics,
-            System::nanoTime, logLine, AccessRules.OPEN), 4);
-        groups = new NavGroupService(new NavGroupService.Ports(service, world, AccessRules.OPEN, metrics,
+            System::nanoTime, logLine, rules), 4);
+        groups = new NavGroupService(new NavGroupService.Ports(service, world, rules, metrics,
             System::nanoTime, logLine));
     }
 
@@ -90,13 +96,23 @@ public final class ScenarioNpcs {
      * @param settings the per-NPC settings (code defaults with the scenario's own values)
      */
     public static ScenarioNpcs start(ScenarioScene scene, List<NavPoint> loop, NavigationSettings settings) {
+        return start(scene, loop, settings, AccessRules.OPEN, List.of());
+    }
+
+    /**
+     * As {@link #start(ScenarioScene, List, NavigationSettings)} with the scenario's own access rules (fake access
+     * data, a scenario gate's real state) and the gate crossings on its road (implementation plan 4b.3 item 14).
+     * After a rule changes, call {@link #rulesChanged()} (the gate or availability event).
+     */
+    public static ScenarioNpcs start(ScenarioScene scene, List<NavPoint> loop, NavigationSettings settings,
+                                     AccessRules rules, List<RoadPlanner.GateCrossing> gates) {
         CitizensBootstrap.unavailableReason().ifPresent(reason -> {
             throw new ScenarioAssertionError("NPC scenarios need Citizens: " + reason);
         });
         NpcMoverFactory factory = CitizensBootstrap.start(scene.services().plugin(),
             scene.uniqueName("npcs").replace('_', '-')).orElseThrow(
                 () -> new ScenarioAssertionError("Citizens did not start for the scenario"));
-        ScenarioNpcs npcs = new ScenarioNpcs(scene, loop, factory, settings);
+        ScenarioNpcs npcs = new ScenarioNpcs(scene, loop, factory, settings, rules, gates);
         npcs.task = Bukkit.getScheduler().runTaskTimer(scene.services().plugin(), npcs::tick, 1L, 1L);
         return npcs;
     }
@@ -119,6 +135,13 @@ public final class ScenarioNpcs {
     }
 
     private NpcMover traced;
+    private final List<Runnable> watchers = new ArrayList<>();
+    private final Map<NavGroup, List<NpcMover>> groupMembers = new HashMap<>();
+
+    /** Runs {@code watcher} every tick after the NPCs moved (a scenario's own per-tick check). */
+    public void everyTick(Runnable watcher) {
+        watchers.add(watcher);
+    }
 
     /** Writes an NPC's position and state to the run log every 5 ticks (for failure reasons). */
     public void trace(NpcMover mover) {
@@ -138,6 +161,21 @@ public final class ScenarioNpcs {
         for (NpcMover mover : movers) {
             watchStill(mover);
         }
+        for (Runnable watcher : watchers) {
+            watcher.run();
+        }
+    }
+
+    /** Ends a group and removes its NPCs (a scenario that runs two groups one after the other). */
+    public void dismiss(NavGroup group) {
+        groups.disband(group);
+        groupList.remove(group);
+        for (NpcMover mover : groupMembers.getOrDefault(group, List.of())) {
+            service.unregister(mover.id());
+            mover.remove();
+            movers.remove(mover);
+        }
+        groupMembers.remove(group);
     }
 
     private void watchStill(NpcMover mover) {
@@ -194,7 +232,16 @@ public final class ScenarioNpcs {
         if (line.size() < 2) {
             line.add(loop.get((a + 1) % n));
         }
-        return CompletableFuture.completedFuture(RoadPlanner.RoadPlan.found(line));
+        List<RoadPlanner.GateCrossing> crossed = new ArrayList<>();
+        for (RoadPlanner.GateCrossing gate : gates) {
+            for (NavPoint p : line) {
+                if (p.horizontalDistance(gate.at()) <= 1.0 && Math.abs(p.y() - gate.at().y()) <= 2) {
+                    crossed.add(gate);
+                    break;
+                }
+            }
+        }
+        return CompletableFuture.completedFuture(RoadPlanner.RoadPlan.found(line, crossed));
     }
 
     private CompletableFuture<LocalLegPreparer.Prepared> prepare(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
@@ -236,12 +283,21 @@ public final class ScenarioNpcs {
 
     /** A group of the movers (the first leads) in {@code formation}, sent round the loop for good. */
     public NavGroup patrolGroup(List<NpcMover> members, Formation.Type formation, NavPoint first, NavPoint second) {
-        NavigationSettings.Scope scope = NavigationSettings.Scope.of(members.get(0).position().orElseThrow().world());
+        return patrolGroup(members, groupSettings(members.get(0), formation), first, second);
+    }
+
+    /** The scenario's group settings for a group led by {@code leader}, in {@code formation}. */
+    public GroupSettings groupSettings(NpcMover leader, Formation.Type formation) {
+        NavigationSettings.Scope scope = NavigationSettings.Scope.of(leader.position().orElseThrow().world());
         GroupSettings base = GroupSettings.of(settings, scope);
-        GroupSettings own = base.withFormation(new Formation(formation, base.formation().spacing(),
-            base.formation().ranksWidth()));
+        return base.withFormation(base.formation().with(formation));
+    }
+
+    /** A group of the movers (the first leads) with its own settings, sent round the loop for good. */
+    public NavGroup patrolGroup(List<NpcMover> members, GroupSettings own, NavPoint first, NavPoint second) {
         NavGroup group = groups.create(members.get(0), members.subList(1, members.size()), NpcAccessProfile.DEFAULT, own);
         groupList.add(group);
+        groupMembers.put(group, List.copyOf(members));
         patrolGroup(group, first, second);
         return group;
     }
@@ -254,6 +310,18 @@ public final class ScenarioNpcs {
                 log.add(new LogLine(tick, "group " + group.id() + " order ended: " + result));
             }
         });
+    }
+
+    /** A gate or an access rule changed: the events the plugin sends the navigation and group services. */
+    public void rulesChanged() {
+        service.onAvailabilityChanged();
+        groups.onRulesChanged();
+    }
+
+    /** A gate door changed state: its event to the navigation and group services. */
+    public void gateChanged(int doorId) {
+        service.onGateChanged(doorId);
+        groups.onRulesChanged();
     }
 
     /** Moves an NPC's body somewhere else at once (a player pushing it into a corner). */
