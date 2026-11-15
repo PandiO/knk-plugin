@@ -28,3 +28,6 @@ knk-paper/bin
 
 # Python (tools/)
 __pycache__/
+
+# Node (tools/bot-tests)
+node_modules/
