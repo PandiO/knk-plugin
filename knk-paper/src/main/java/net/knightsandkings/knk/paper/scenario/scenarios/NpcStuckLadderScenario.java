@@ -118,6 +118,14 @@ public final class NpcStuckLadderScenario implements Scenario<ScenarioScene> {
             })
             .check("the ladder's local leg freed it, found by K&K without an engine search (M6)", () -> {
                 var m = npcs.get().metrics();
+                new NpcMovementReport(scene, name())
+                    .add("freed", "back-off %d, side-step %d, local leg %d, replan %d, not freed %d",
+                        m.total(Event.FREED_BACK_OFF), m.total(Event.FREED_SIDE_STEP), m.total(Event.FREED_LOCAL_LEG),
+                        m.total(Event.FREED_REPLAN), m.total(Event.NOT_FREED))
+                    .add("steps per spell max", m.spells().maxSteps())
+                    .add("recovery no path", m.total(Event.RECOVERY_NO_PATH))
+                    .add("legs", npcs.get().localLegs())
+                    .log("pushed into the pocket");
                 return m.total(Event.FREED_LOCAL_LEG) >= 1 && m.total(Event.LOCAL_LEG_KNK) >= 1
                     && m.total(Event.LOCAL_LEG_ENGINE) == 0 && m.total(Event.LOCAL_LEG_NONE) == 0
                     && m.total(Event.RECOVERY_NO_PATH) == 0 ? null
