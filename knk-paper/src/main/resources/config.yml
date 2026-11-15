@@ -560,11 +560,23 @@ npc:
     # Ticks between two recovery steps of a stuck NPC (back-off, side-step, local leg, replan).
     recovery-wait-ticks: 20
     # Blocks an NPC keeps between itself and a wall on the inside of a turn of its route, as far as the road allows;
-    # straight stretches may run along a wall (0 = off).
+    # straight stretches may run along a wall unless corridor-steering is on (0 = off).
     corner-clearance: 1.0
     # How close an NPC comes to a route waypoint before it heads for the next one; smaller walks turns through the
-    # corner point (Citizens' own default is 1).
+    # corner point (Citizens' own default is 1). A stretch with a doorway that corridor steering lined up uses 0.35.
     waypoint-margin: 0.5
+    # Corridor steering (off until tested): each stretch of the route line is re-placed in the walkable corridor around
+    # it before the NPC walks it: away from walls, posts and drops by wall-clearance where the road is wide enough
+    # (on straights too), straightened where the corridor allows, and through the middle of doorways and entrances on
+    # their axis. Corner clearance and the other safety steps still run on the shaped line. The corridor of a stretch is
+    # built once and shared by every NPC on it.
+    corridor-steering: false
+    # Blocks either side of the route line the corridor looks at (1 to 8).
+    corridor-half-width: 4
+    # Blocks from the NPC's centre to a wall, post or drop that corridor steering keeps where the road allows (the
+    # body's half width is 0.3). Narrower places are walked through their middle, so one-block doors stay open.
+    # 0.35 to 2.
+    wall-clearance: 0.8
     # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded. An NPC
     # waiting at a closed gate or a district edge is woken by the gate or access change itself; this is the fallback.
     no-route-wait-ticks: 100

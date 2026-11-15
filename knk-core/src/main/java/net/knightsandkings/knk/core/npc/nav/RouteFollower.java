@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper;
+
 /**
  * One NPC's progress along a K&K route (BEHAVIOR_MODEL NAV-14, NAV-15; decision Q8): the road line as floor points
  * every {@link #STEP} blocks plus its corners, handed to the mover one stretch at a time as feet waypoints with floor
@@ -27,8 +29,27 @@ public final class RouteFollower {
         DONE
     }
 
-    /** @param waypoints feet positions at block centres, for {@link Kind#WAYPOINTS} */
-    public record Stretch(Kind kind, List<NavPoint> waypoints) {
+    /**
+     * @param waypoints   feet positions (at block centres unless corridor steering shaped them), for
+     *                    {@link Kind#WAYPOINTS}
+     * @param chokepoints chokepoints corridor steering aligned on this stretch (0 without it); the mover then walks it
+     *                    with {@link CorridorShaper#CHOKE_MARGIN} (plan 4c.3 decision 1.4)
+     */
+    public record Stretch(Kind kind, List<NavPoint> waypoints, int chokepoints) {
+        public Stretch(Kind kind, List<NavPoint> waypoints) {
+            this(kind, waypoints, 0);
+        }
+    }
+
+    /**
+     * Corridor steering for a stretch (implementation plan 4c.3 decision 1, link M2; key {@code corridor-steering}):
+     * the shared shaper and the decided values.
+     */
+    public record Steering(CorridorShaper shaper, CorridorShaper.Options options) {
+        public Steering {
+            Objects.requireNonNull(shaper, "shaper");
+            Objects.requireNonNull(options, "options");
+        }
     }
 
     private final List<NavPoint> line;
@@ -175,6 +196,16 @@ public final class RouteFollower {
      * the line's turns ({@link CornerClearance}; 0 = off).
      */
     public Stretch next(NavWorld world, double stretchBlocks, int npcFloorY, double cornerClearance) {
+        return next(world, stretchBlocks, npcFloorY, cornerClearance, null);
+    }
+
+    /**
+     * As {@link #next(NavWorld, double, int, double)}, with the stretch shaped in its corridor first when
+     * {@code steering} is given (implementation plan 4c.3 decision 1; null = off, today's line). Corner clearance and
+     * the waypoint chain still run on the shaped line (decision 4).
+     */
+    public Stretch next(NavWorld world, double stretchBlocks, int npcFloorY, double cornerClearance,
+                        Steering steering) {
         if (!hasMore()) {
             return new Stretch(Kind.DONE, List.of());
         }
@@ -222,13 +253,36 @@ public final class RouteFollower {
         if (points.isEmpty()) {
             return new Stretch(Kind.DONE, List.of());
         }
+        int chokepoints = 0;
+        if (steering != null && points.size() >= 2) {
+            CorridorShaper.ShapedLine shaped = steering.shaper().shape(world, shapingInput(points, indexes), indexes,
+                steering.options(), end == line.size());
+            points = new ArrayList<>(shaped.waypoints());
+            indexes = new ArrayList<>(shaped.lineIndexes());
+            chokepoints = shaped.chokepoints();
+        }
         if (cornerClearance > 0) {
             points = corners.apply(world, points, indexes, cornerClearance);
         }
         points = WaypointChain.bridged(world, straightOn ? lastWaypoint : null, points);
         lastSent = List.copyOf(points);
         lastWaypoint = points.get(points.size() - 1);
-        return new Stretch(Kind.WAYPOINTS, lastSent);
+        return new Stretch(Kind.WAYPOINTS, lastSent, chokepoints);
+    }
+
+    /**
+     * The waypoints as the corridor shaper starts from: the road line's own position where it lies in the waypoint's
+     * block (not the block centre, so the line is not made to wobble), else the block centre.
+     */
+    private List<NavPoint> shapingInput(List<NavPoint> points, List<Integer> indexes) {
+        List<NavPoint> out = new ArrayList<>(points.size());
+        for (int k = 0; k < points.size(); k++) {
+            NavPoint p = points.get(k);
+            NavPoint raw = line.get(indexes.get(k));
+            out.add(raw.blockX() == p.blockX() && raw.blockZ() == p.blockZ()
+                ? new NavPoint(p.world(), raw.x(), p.y(), raw.z()) : p);
+        }
+        return out;
     }
 
     /**

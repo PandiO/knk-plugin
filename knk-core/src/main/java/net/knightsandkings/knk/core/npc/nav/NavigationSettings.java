@@ -90,6 +90,23 @@ public final class NavigationSettings {
      */
     public static final Key<Double> WAYPOINT_MARGIN = new Key<>("waypoint-margin", 0.5,
         decimal(0.2, 1.5), "how close an NPC comes to a route waypoint before it heads for the next one");
+    /**
+     * Corridor steering (implementation plan 4c.3 decision 1, option A, link M2; BEHAVIOR_MODEL NAV-24): each stretch
+     * of the route line is re-placed in its walkable corridor before the engine walks it, away from walls, straight
+     * where the road allows and through the middle of doorways. Off by default until the developer has tested it.
+     */
+    public static final Key<Boolean> CORRIDOR_STEERING = new Key<>("corridor-steering", false, bool(),
+        "shape each stretch of the route line in its corridor: off walls, straightened, through doorways' middles");
+    /** Blocks either side of the route line the corridor looks at (plan 4c.6 question 3, decided 2026-11-15: 4). */
+    public static final Key<Double> CORRIDOR_HALF_WIDTH = new Key<>("corridor-half-width", 4.0,
+        decimal(1, 8), "blocks either side of the route line that corridor steering looks at");
+    /**
+     * Blocks corridor steering keeps from the body's centre to a wall, post or drop where the road allows (plan 4c.6
+     * question 4, decided 2026-11-15: 0.8; never less than 0.35, so one-block doors stay open).
+     */
+    public static final Key<Double> WALL_CLEARANCE = new Key<>("wall-clearance", 0.8,
+        decimal(0.35, 2), "blocks from the body's centre to a wall, post or drop that corridor steering keeps where "
+            + "the road allows (at least 0.35)");
     /** Ticks an NPC waits before asking again when the rules allow no route or the way ahead is not loaded (NAV-03). */
     public static final Key<Integer> NO_ROUTE_WAIT_TICKS = new Key<>("no-route-wait-ticks", 100,
         integer(20, 6000), "ticks between asks while no route is allowed or the way ahead is not loaded");
@@ -149,7 +166,7 @@ public final class NavigationSettings {
     /** Every per-NPC setting, in display order. */
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
-        NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
+        CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
         COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
         GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FOLLOWERS_FINISH_TRIP, GROUP_REJOIN_BLOCKS, GROUP_REGROUP_BLOCKS,
         GROUP_CATCH_UP_SPEED);
