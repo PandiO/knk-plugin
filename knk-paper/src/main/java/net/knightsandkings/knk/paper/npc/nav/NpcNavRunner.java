@@ -11,6 +11,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 
+import net.knightsandkings.knk.core.npc.nav.NavGeometry;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
@@ -132,6 +133,8 @@ public final class NpcNavRunner {
     private Path traceFile;
     private NavPoint tracePrev;
     private boolean tracePrevGround;
+    /** The traced NPC's stretch last written to its trace. */
+    private java.util.List<NavPoint> traceSent;
 
     /**
      * @param spawnsPerTick       NPCs spawned per tick at most
@@ -588,9 +591,11 @@ public final class NpcNavRunner {
         traceId = pick.mover.id();
         traceUntil = tick + seconds * 20L;
         tracePrev = null;
+        traceSent = null;
         traceFile = log.newFile("trace_" + pick.mover.name());
         log.append(traceFile, "# trace " + pick.mover.name() + " for " + seconds
-            + " s; columns: tick x y z onGround dx dy dz | state bestIndex nearestIndex | JUMP when it leaves the ground upwards");
+            + " s; columns: tick x y z onGround dx dy dz | state bestIndex nearestIndex | JUMP when it leaves the ground upwards;"
+            + " '# waypoints:' lines list each stretch's waypoints (feet blocks) when it is handed out");
         log.fileOnly("trace " + pick.mover.name() + " -> " + traceFile.getFileName());
         return "Tracing " + pick.mover.name() + " for " + seconds + " s -> npc-logs/" + traceFile.getFileName();
     }
@@ -610,6 +615,15 @@ public final class NpcNavRunner {
         double dy = tracePrev == null ? 0 : at.y() - tracePrev.y();
         double dz = tracePrev == null ? 0 : at.z() - tracePrev.z();
         RouteFollower follower = service.followerOf(traceId);
+        if (follower != null && follower.lastSent() != traceSent && !follower.lastSent().isEmpty()) {
+            // each stretch handed out, so a trace shows where the waypoints lie (#592: a waypoint cut a turn)
+            traceSent = follower.lastSent();
+            StringBuilder line = new StringBuilder("# waypoints:");
+            for (NavPoint p : traceSent) {
+                line.append(' ').append(NavGeometry.block(p)).append(';');
+            }
+            log.append(traceFile, line.substring(0, line.length() - 1));
+        }
         boolean jump = tracePrev != null && tracePrevGround && dy > 0.2;
         log.append(traceFile, String.format(Locale.ROOT, "%d %.2f %.2f %.2f %s %.3f %.3f %.3f | %s %d %d%s", tick,
             at.x(), at.y(), at.z(), ground ? "G" : "-", dx, dy, dz, service.state(traceId),

@@ -302,6 +302,18 @@ public final class ScenarioNpcs {
         return group;
     }
 
+    /**
+     * A group of the movers (the first leads) in {@code formation} with no order yet: the scenario sends it with
+     * {@link NavGroup#navigate} (one trip, PandiO/knk-workspace#592).
+     */
+    public NavGroup group(List<NpcMover> members, Formation.Type formation) {
+        NavGroup group = groups.create(members.get(0), members.subList(1, members.size()), NpcAccessProfile.DEFAULT,
+            groupSettings(members.get(0), formation));
+        groupList.add(group);
+        groupMembers.put(group, List.copyOf(members));
+        return group;
+    }
+
     private void patrolGroup(NavGroup group, NavPoint first, NavPoint second) {
         group.navigate(first, result -> {
             if (result instanceof NavigationResult.Arrived) {
