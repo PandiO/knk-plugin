@@ -1,6 +1,8 @@
 package net.knightsandkings.knk.paper.scenario;
 
 import net.knightsandkings.knk.core.gates.GateManager;
+import net.knightsandkings.knk.core.npc.nav.NpcMoverFactory;
+import net.knightsandkings.knk.paper.navigation.NavigationService;
 import net.knightsandkings.knk.paper.gates.GateDisplayManager;
 import net.knightsandkings.knk.paper.gates.GateLoaderAdapter;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -21,7 +23,10 @@ public record ScenarioServices(
     Supplier<GateManager> gateManager,
     Supplier<GateLoaderAdapter> gateLoader,
     Supplier<GateDisplayManager> gateDisplays,
-    Supplier<InetSocketAddress> regionHttpAddress
+    Supplier<InetSocketAddress> regionHttpAddress,
+    Supplier<NavigationService> roadNavigationService,
+    Supplier<NpcMoverFactory> npcMoverFactory,
+    Supplier<String> npcUnavailableReason
 ) {
 
     public FileConfiguration config() {
@@ -49,6 +54,28 @@ public record ScenarioServices(
      */
     public InetSocketAddress regionHttp() {
         return required(regionHttpAddress.get(), "the region HTTP server");
+    }
+
+    /**
+     * The live road navigation service (/navigate), whose walk capture prepares an NPC's local legs; fails the step
+     * when road navigation did not start ({@code navigation.enabled}).
+     */
+    public NavigationService roadNavigation() {
+        return required(roadNavigationService.get(), "road navigation (navigation.enabled)");
+    }
+
+    /**
+     * The live NPC engine (Citizens) that spawns and moves NPCs (PandiO/knk-workspace#543); fails the step with the
+     * reason {@code /knk npc status} gives when NPC navigation is off (no Citizens, {@code npc.navigation.enabled}).
+     */
+    public NpcMoverFactory npcMovers() {
+        NpcMoverFactory factory = npcMoverFactory.get();
+        if (factory == null) {
+            String reason = npcUnavailableReason.get();
+            throw new net.knightsandkings.knk.core.scenario.ScenarioAssertionError("NPC navigation is not running: "
+                + (reason == null ? "it did not start" : reason));
+        }
+        return factory;
     }
 
     private static <T> T required(T service, String what) {

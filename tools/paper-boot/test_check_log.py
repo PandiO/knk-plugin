@@ -39,6 +39,21 @@ org.bukkit.plugin.InvalidPluginException: java.lang.NoClassDefFoundError: net/kn
 """
 
 
+# PandiO/knk-workspace#543: the same boot with Citizens and npc.navigation.enabled on (lines from a Paper 26.3 run).
+CITIZENS_BOOT = GOOD_BOOT.replace(
+    "[16:30:47] [Server thread/INFO]: [KnightsAndKings] Enabling KnightsAndKings v0.1.0+bd7b78a8\n",
+    "[16:30:46] [Server thread/INFO]: [Citizens] Enabling Citizens v2.0.44-SNAPSHOT (build 4269)\n"
+    "[16:30:46] [Server thread/INFO]: [Citizens] Downloaded library https://repo1.maven.org/maven2/org/ow2/asm/asm/9.2/asm-9.2.jar\n"
+    "[16:30:46] [Server thread/INFO]: [Citizens] Loaded 2 templates.\n"
+    "[16:30:47] [Server thread/INFO]: [KnightsAndKings] Enabling KnightsAndKings v0.1.0+bd7b78a8\n",
+).replace(
+    "[16:30:48] [Server thread/INFO]: [KnightsAndKings] KnightsAndKings Plugin Enabled!\n",
+    "[16:30:48] [Server thread/INFO]: [KnightsAndKings] [NPC] navigation: Citizens 2.0.44-SNAPSHOT (build 4269), "
+    "override scopes {GLOBAL=1, WORLD=0, REGION=0, TEMPLATE=0}\n"
+    "[16:30:48] [Server thread/INFO]: [KnightsAndKings] KnightsAndKings Plugin Enabled!\n",
+)
+
+
 def lines(text):
     return text.splitlines(keepends=True)
 
@@ -114,6 +129,35 @@ class CheckLogTest(unittest.TestCase):
         errors, _ = check(lines(log), unreachable_api=API)
         self.assertEqual(1, len(errors))
         self.assertIn("did not finish starting", errors[0])
+
+    def test_citizens_boot_passes_with_npc_navigation_expected(self):
+        errors, notes = check(lines(CITIZENS_BOOT), unreachable_api=API, expect_shutdown=True,
+                              expect_npc_navigation=True)
+        self.assertEqual([], errors)
+        self.assertIn("NPC navigation running on Citizens", notes)
+
+    def test_npc_navigation_unavailable_fails_with_its_reason(self):
+        log = CITIZENS_BOOT.replace(
+            "[NPC] navigation: Citizens 2.0.44-SNAPSHOT (build 4269), override scopes {GLOBAL=1, WORLD=0, REGION=0, "
+            "TEMPLATE=0}", "[NPC] navigation unavailable: npc.navigation.enabled is false")
+        errors, _ = check(lines(log), unreachable_api=API, expect_npc_navigation=True)
+        self.assertEqual(["KnK's NPC navigation did not start on Citizens: npc.navigation.enabled is false"], errors)
+
+    def test_missing_citizens_fails_only_when_npc_navigation_is_expected(self):
+        self.assertEqual([], check(lines(GOOD_BOOT), unreachable_api=API)[0])
+        errors, _ = check(lines(GOOD_BOOT), unreachable_api=API, expect_npc_navigation=True)
+        self.assertIn("Citizens was not enabled", errors)
+        self.assertEqual(2, len(errors))
+
+    def test_citizens_error_fails(self):
+        log = CITIZENS_BOOT + (
+            "[16:30:50] [Server thread/ERROR]: [Citizens] Could not load NPC 3\n"
+            "java.lang.IllegalStateException: bad save\n"
+            "\tat net.citizensnpcs.npc.CitizensNPCRegistry.load(CitizensNPCRegistry.java:1)\n"
+        )
+        errors, _ = check(lines(log), unreachable_api=API, expect_npc_navigation=True)
+        self.assertEqual(1, len(errors))
+        self.assertIn("Could not load NPC", errors[0])
 
     def test_stack_trace_lines_belong_to_the_entry_above(self):
         entries = parse_entries(lines(GOOD_BOOT))

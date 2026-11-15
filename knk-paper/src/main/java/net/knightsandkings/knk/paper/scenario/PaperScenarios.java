@@ -22,6 +22,9 @@ import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScen
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupGateFinishTripScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupNarrowsScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStuckLadderScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupSpacingScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcWalksRoadRouteScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.TempRegionSweepScenario;
 
 /**
@@ -60,6 +63,10 @@ public final class PaperScenarios {
             .register(new NpcStuckLadderScenario())
             .register(new NpcGroupNarrowsScenario())
             .register(new NpcGroupGateFinishTripScenario())
-            .register(new NpcGroupAccessChangeScenario());
+            .register(new NpcGroupAccessChangeScenario())
+            // NPC navigation on Citizens, on a fake road network (PandiO/knk-workspace#543)
+            .register(new NpcWalksRoadRouteScenario())
+            .register(new NpcKeepsToRoadScenario())
+            .register(new NpcGroupSpacingScenario());
     }
 }
