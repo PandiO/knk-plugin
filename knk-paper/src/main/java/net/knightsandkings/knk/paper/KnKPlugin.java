@@ -2797,7 +2797,10 @@ public class KnKPlugin extends JavaPlugin {
         }
         var services = new net.knightsandkings.knk.paper.scenario.ScenarioServices(
             this, () -> gateManager, () -> gateLoaderAdapter, () -> gateDisplayManager,
-            () -> regionHttpServer != null ? regionHttpServer.getAddress() : null);
+            () -> regionHttpServer != null ? regionHttpServer.getAddress() : null,
+            () -> navigationService,
+            () -> npcNavigation != null ? npcNavigation.moverFactory() : null,
+            () -> npcNavigation != null ? npcNavigation.unavailableReason() : "the NPC module did not start");
         var scenarioCommand = new net.knightsandkings.knk.paper.scenario.ScenarioCommand(this,
             net.knightsandkings.knk.paper.scenario.PaperScenarios.registry(),
             new net.knightsandkings.knk.paper.scenario.PaperScenarioHost(settings, services));

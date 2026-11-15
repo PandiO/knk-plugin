@@ -16,6 +16,9 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxAreaReplaceScenar
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnOnGroundScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnUnderRoofScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupSpacingScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcWalksRoadRouteScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.TempRegionSweepScenario;
 
 /**
@@ -46,6 +49,10 @@ public final class PaperScenarios {
             .register(new TempRegionSweepScenario())
             .register(new LootboxSpawnOnGroundScenario())
             .register(new LootboxSpawnUnderRoofScenario())
-            .register(new LootboxSwitchedOffScenario());
+            .register(new LootboxSwitchedOffScenario())
+            // NPC navigation on Citizens, on a fake road network (PandiO/knk-workspace#543)
+            .register(new NpcWalksRoadRouteScenario())
+            .register(new NpcKeepsToRoadScenario())
+            .register(new NpcGroupSpacingScenario());
     }
 }
