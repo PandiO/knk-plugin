@@ -33,7 +33,8 @@ import net.knightsandkings.knk.core.npc.nav.group.NavGroup.FollowerState;
  */
 class NavGroupTest {
 
-    private static final GroupSettings COLUMN = GroupSettings.defaults();
+    /** The Phase 4 tests' column: 2 blocks apart (the default is 1.5 since 4b.3; the distances below are in 2s). */
+    private static final GroupSettings COLUMN = GroupSettings.defaults().withFormation(Formation.column(2.0));
 
     private final GroupSim sim = new GroupSim();
     private final Results results = new Results();
@@ -663,8 +664,8 @@ class NavGroupTest {
         }
 
         assertArrived();
-        assertEquals(1, sim.metrics.total(Event.GROUP_FOLD));
-        assertEquals(1, sim.metrics.total(Event.GROUP_REFORM));
+        // 4b.3 item 4: the pairs shift to the open side of the path beside the yard instead of folding
+        assertEquals(0, sim.metrics.total(Event.GROUP_FOLD));
     }
 
     // ==================== orders ====================

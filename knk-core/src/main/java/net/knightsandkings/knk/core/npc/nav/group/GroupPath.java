@@ -24,6 +24,13 @@ final class GroupPath {
         private boolean wide;
         /** Lane points at this path point by side, looked up in the world once ({@link #NO_LANE}: none). */
         private java.util.Map<Double, NavPoint> lanes;
+        /**
+         * Per width of the group's formation ({@link #levels}): the shift of its lanes off the path's centre that
+         * lets it fit here; NaN not looked at yet, {@link Double#POSITIVE_INFINITY} it does not fit (4b.3 item 6).
+         */
+        private double[] shifts;
+        /** The widest width that fits here (an index into {@link #levels}); -1 not looked at yet. */
+        private int widest = -1;
 
         Node(NavPoint floor, double arc) {
             this.floor = floor;
@@ -32,6 +39,8 @@ final class GroupPath {
     }
 
     private final List<Node> nodes = new ArrayList<>();
+    /** The half widths of the group's formation widths, widest first, the column (0) last (4b.3 item 3). */
+    private double[] levels = {0};
 
     int size() {
         return nodes.size();
@@ -170,6 +179,9 @@ final class GroupPath {
      * regions than the path's own point (a lane never enters a region the path does not).
      */
     NavPoint point(NavWorld world, int index, double along, double side) {
+        if (Math.abs(side) < 1e-9) {
+            side = 0; // a shifted lane can land on the centre: one key for it
+        }
         if (along != 0 || side == 0) {
             return lookUp(world, index, along, side);
         }
@@ -223,6 +235,100 @@ final class GroupPath {
                 return new NavPoint(c.world(), x, y + 1, z);
             }
         }
+    }
+
+    /**
+     * The half widths of the formation's widths, widest first, ending with the column's 0 (implementation plan 4b.3
+     * item 3). Changing them forgets what was worked out per point.
+     */
+    void levels(double[] halfWidths) {
+        if (java.util.Arrays.equals(levels, halfWidths)) {
+            return;
+        }
+        levels = halfWidths.clone();
+        for (Node node : nodes) {
+            node.shifts = null;
+            node.widest = -1;
+        }
+    }
+
+    int levelCount() {
+        return levels.length;
+    }
+
+    /**
+     * The widest of the formation's widths that fits at a path point (an index into {@link #levels}; the column,
+     * the last, always fits), worked out once per point (implementation plan 4b.3 item 6): the tick cost of a
+     * window scan stays one cached look per point.
+     */
+    int widest(NavWorld world, int index) {
+        Node node = nodes.get(index);
+        if (node.widest < 0) {
+            int level = 0;
+            while (level < levels.length - 1 && Double.isNaN(shift(world, index, level))) {
+                level++;
+            }
+            node.widest = level;
+        }
+        return node.widest;
+    }
+
+    /**
+     * Where the lanes of width {@code level} lie at a path point: the shift of the formation's centre off the path's
+     * centre (to the right, in blocks) that lets its outermost lanes stand there, or NaN when the width does not fit
+     * (implementation plan 4b.3 item 4, today's lane rule). The path's own centre is tried first, then shifts of half
+     * a block to either side up to the width's half width (at least half a block), so 2 abreast fit a 2-wide passage
+     * whose route line runs down one of its two columns, and 3 abreast a 3-wide road whose line hugs a wall. Looked
+     * up once per point and width.
+     */
+    double shift(NavWorld world, int index, int level) {
+        double half = levels[Math.max(0, Math.min(level, levels.length - 1))];
+        if (half <= 0.01) {
+            return 0;
+        }
+        Node node = nodes.get(index);
+        if (node.shifts == null) {
+            node.shifts = new double[levels.length];
+            java.util.Arrays.fill(node.shifts, Double.NaN);
+        }
+        double known = node.shifts[level];
+        if (Double.isNaN(known)) {
+            known = Double.POSITIVE_INFINITY;
+            double most = Math.max(0.5, half);
+            for (double step = 0; step <= most + 1e-9 && known == Double.POSITIVE_INFINITY; step += 0.5) {
+                for (double shift : step == 0 ? new double[] {0} : new double[] {step, -step}) {
+                    if (clear(world, index, shift + half) && clear(world, index, shift - half)) {
+                        known = shift;
+                        break;
+                    }
+                }
+            }
+            node.shifts[level] = known;
+        }
+        return known == Double.POSITIVE_INFINITY ? Double.NaN : known;
+    }
+
+    /** How far a lane point keeps from a block edge across the path to count as fitting (a body, not a line). */
+    static final double LANE_CLEARANCE = 0.2;
+
+    /**
+     * Whether a lane exists {@code side} blocks beside a path point with a floor {@link #LANE_CLEARANCE} to either side
+     * of it across the path: a lane exactly on a block edge (2 abreast in a 2-wide passage, unshifted) would put a body
+     * against the wall.
+     */
+    private boolean clear(NavWorld world, int index, double side) {
+        NavPoint lane = point(world, index, 0, side);
+        if (lane == null) {
+            return false;
+        }
+        double[] h = heading(index);
+        int y = lane.blockY() - 1;
+        for (double d : new double[] {LANE_CLEARANCE, -LANE_CLEARANCE}) {
+            if (floorNear(world, lane.world(), lane.x() - h[1] * d, y, lane.z() + h[0] * d) == Integer.MIN_VALUE) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Whether the path is wide enough at a point for slots {@code halfWidth} blocks to either side. */

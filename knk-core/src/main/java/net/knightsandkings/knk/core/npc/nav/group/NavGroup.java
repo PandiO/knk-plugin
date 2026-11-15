@@ -103,7 +103,23 @@ public final class NavGroup {
         /** Walks its own leg back to the path (an order of its own in the navigation service). */
         REJOINING,
         /** Its own leg failed: waits before the next try. */
-        RETRY_WAIT
+        RETRY_WAIT,
+        /**
+         * Finishes its trip of the group's last order to its slot at the goal before it follows the group's current
+         * order ({@code group-followers-finish-trip}; implementation plan 4b.3 item 10).
+         */
+        FINISHING
+    }
+
+    /** Hears about single members of the group (implementation plan 4b.3 item 10: a courier hands over its goods). */
+    @FunctionalInterface
+    public interface MemberListener {
+        /** A follower that finished its trip reached its slot at the goal of the order it was on. */
+        void onMemberArrived(NpcMover member, NavPoint goal);
+    }
+
+    /** A point of a finishing follower's own trip: where its feet go and the regions of the group's path there. */
+    private record TripPoint(NavPoint feet, Set<String> regions) {
     }
 
     private final class Follower {
@@ -149,6 +165,15 @@ public final class NavGroup {
         /** The path index an own leg back failed to reach, and from where (never aimed at again from there). */
         int failedTarget = -1;
         NavPoint failedFrom;
+        // ---- its own trip to the goal while FINISHING (implementation plan 4b.3 item 10) ----
+        List<TripPoint> trip = List.of();
+        int tripIdx;
+        /** The trip index of the last waypoint handed to it; -1: none. */
+        int tripSent = -1;
+        /** The gate doors of the order it finishes (the group's current order has its own). */
+        Set<Integer> tripDoors = Set.of();
+        NavPoint tripGoal;
+        int tripTries;
 
         Follower(NpcMover mover) {
             this.mover = mover;
@@ -164,11 +189,19 @@ public final class NavGroup {
     private final GroupSettings settings;
     private NpcMover leader;
     private final List<Follower> followers = new ArrayList<>();
-    private List<Formation.Slot> formed = List.of();
-    private List<Formation.Slot> column = List.of();
-    private double halfWidth;
-    private double depth;
-    private double front;
+    /** The formation's widths, widest first, the column last, and per width its slots and extent (4b.3 item 3). */
+    private List<Formation.Width> widths = List.of();
+    private List<List<Formation.Slot>> levelSlots = List.of();
+    private double[] levelHalf = {0};
+    private double[] levelDepth = {0};
+    private double[] levelFront = {0};
+    private double maxDepth;
+    private double maxFront;
+    /** The width the group walks in now (an index into {@link #widths}). */
+    private int level;
+    /** A new path: the next look takes the width that fits at once, without the hysteresis. */
+    private boolean widthFresh = true;
+    private MemberListener memberListener;
 
     private final GroupPath path = new GroupPath();
     private int leaderIdx = -1;
@@ -177,7 +210,6 @@ public final class NavGroup {
     private int lineBase;
     private int lineAdded;
     private boolean onLine;
-    private boolean folded;
 
     private NavPoint goal;
     private Consumer<NavigationResult> onResult;
@@ -215,11 +247,28 @@ public final class NavGroup {
     private void slotsChanged() {
         Formation formation = settings.formation();
         int n = followers.size();
-        formed = formation.slots(n);
-        column = formation.columnSlots(n);
-        halfWidth = formation.halfWidth(n);
-        depth = formation.depth(n);
-        front = formation.front(n);
+        widths = formation.widths();
+        int count = widths.size();
+        List<List<Formation.Slot>> slots = new ArrayList<>(count);
+        levelHalf = new double[count];
+        levelDepth = new double[count];
+        levelFront = new double[count];
+        maxDepth = 0;
+        maxFront = 0;
+        for (int l = 0; l < count; l++) {
+            slots.add(formation.slots(n, l));
+            levelHalf[l] = formation.halfWidth(n, l);
+            levelDepth[l] = formation.depth(n, l);
+            levelFront[l] = formation.front(n, l);
+            maxDepth = Math.max(maxDepth, levelDepth[l]);
+            maxFront = Math.max(maxFront, levelFront[l]);
+        }
+        if (n > 0 && levelHalf[count - 1] <= 0.01) {
+            levelHalf[count - 1] = 0;
+        }
+        levelSlots = slots;
+        level = Math.min(level, count - 1);
+        path.levels(levelHalf);
     }
 
     // ==================== callers ====================
@@ -246,9 +295,19 @@ public final class NavGroup {
         return goal != null;
     }
 
-    /** Whether the group walks as a column now because its path is too narrow for its formation. */
+    /** Whether the group walks as a column now because its path is too narrow for 2 abreast. */
     public boolean folded() {
-        return folded;
+        return widths.size() > 1 && level == widths.size() - 1;
+    }
+
+    /** The width the group walks in now (implementation plan 4b.3 item 3). */
+    public Formation.Width width() {
+        return widths.get(level);
+    }
+
+    /** Listens for followers that finished their trip (implementation plan 4b.3 item 10); null: nobody. */
+    public void onMemberArrived(MemberListener listener) {
+        this.memberListener = listener;
     }
 
     /** Whether the leader waits for followers that fell behind. */
@@ -323,6 +382,9 @@ public final class NavGroup {
         reportedElement = null;
         resetPath();
         for (Follower f : followers) {
+            if (f.state == FollowerState.FINISHING) {
+                continue; // still on the trip of an order that arrived: it follows this one when it is done
+            }
             f.failures = 0;
             f.lost = false;
             f.lag = 0;
@@ -393,7 +455,7 @@ public final class NavGroup {
         verdicts.clear();
         doorVerdicts.clear();
         doorBoxes.clear();
-        rulesPending = goal != null;
+        rulesPending = goal != null || finishing() > 0;
         for (Follower f : followers) {
             // the trespass guard judges entries from here on by the new rules, not the ones made under the old rules
             if (goal != null && f.state != FollowerState.REJOINING) {
@@ -441,6 +503,11 @@ public final class NavGroup {
 
     private void finish(NavigationResult result) {
         Consumer<NavigationResult> callback = onResult;
+        NavPoint ended = goal;
+        boolean arrived = result instanceof NavigationResult.Arrived;
+        if (arrived && settings.followersFinishTrip()) {
+            beginTrips(ended); // before the path is gone: followers still on their way keep their part of it
+        }
         goal = null;
         onResult = null;
         seq++;
@@ -450,7 +517,9 @@ public final class NavGroup {
             ports.navigation().cancel(leader.id(), "the group's order ended");
         }
         for (Follower f : followers) {
-            releaseFollower(f);
+            if (!(arrived && f.state == FollowerState.FINISHING)) {
+                releaseFollower(f); // a replaced, cancelled or failed order releases finishing followers too (item 11)
+            }
         }
         if (callback != null) {
             callback.accept(result);
@@ -470,6 +539,10 @@ public final class NavGroup {
         }
         f.recoveryMove = false;
         f.engineStuck = null;
+        f.trip = List.of();
+        f.tripSent = -1;
+        f.tripDoors = Set.of();
+        f.tripGoal = null;
         f.state = FollowerState.FOLLOWING;
         f.pathIdx = -1;
         f.sentEndArc = Double.NaN;
@@ -486,8 +559,11 @@ public final class NavGroup {
         leaderIdx = -1;
         line = null;
         onLine = false;
+        widthFresh = true;
         for (Follower f : followers) {
-            releaseFollower(f);
+            if (f.state != FollowerState.FINISHING) {
+                releaseFollower(f);
+            }
         }
     }
 
@@ -495,7 +571,18 @@ public final class NavGroup {
 
     void tick(long tick) {
         now = tick;
-        if (goal == null || ((tick + id) % GROUP_TICKS != 0 && !rulesPending)) {
+        if ((tick + id) % GROUP_TICKS != 0 && !rulesPending) {
+            return;
+        }
+        if (goal == null) {
+            if (rulesPending || finishing() > 0) {
+                rulesPending = false;
+                for (Follower f : new ArrayList<>(followers)) {
+                    if (f.state == FollowerState.FINISHING) {
+                        step(f, null, 0, 0); // finishing followers walk on while the group has no order
+                    }
+                }
+            }
             return;
         }
         rulesPending = false;
@@ -520,18 +607,18 @@ public final class NavGroup {
         }
         trackLeader(at);
         routeDoors.addAll(ports.navigation().gateDoorsOf(leader.id()));
-        decideFold();
+        decideWidth();
         NpcNavState leaderState = ports.navigation().state(leader.id());
         boolean walking = leaderState == NpcNavState.MOVING && onLine && leaderDoneTick < 0 && !holding;
         double leaderArc = path.arcOf(at, leaderIdx);
-        double lookahead = walking ? Math.max(0, Math.min(LOOKAHEAD, path.endArc() - leaderArc - front)) : 0;
-        List<Formation.Slot> slots = folded ? column : formed;
+        double lookahead = walking ? Math.max(0, Math.min(LOOKAHEAD, path.endArc() - leaderArc - levelFront[level])) : 0;
+        List<Formation.Slot> slots = levelSlots.get(level);
         double maxLag = 0;
         boolean settled = true;
         for (int i = 0; i < followers.size(); i++) {
             Follower f = followers.get(i);
             step(f, slots.get(i), leaderArc, lookahead);
-            if (f.mover.isSpawned() && !f.lost && !f.heldByRule) {
+            if (f.mover.isSpawned() && !f.lost && !f.heldByRule && f.state != FollowerState.FINISHING) {
                 maxLag = Math.max(maxLag, f.lag);
                 settled &= f.settled;
             }
@@ -565,7 +652,8 @@ public final class NavGroup {
                     lineAdded = 0;
                 }
                 int index = lineBase + (nearest - lineStart);
-                double wanted = LOOKAHEAD + front + 2 * RouteFollower.STEP;
+                double wanted = Math.max(LOOKAHEAD, settings.widthHysteresisBlocks() + 1) + maxFront
+                    + 2 * RouteFollower.STEP;
                 while (lineStart + lineAdded < points.size() && (lineBase + lineAdded <= index
                     || path.endArc() - path.arc(index) < wanted)) {
                     path.addSnapped(ports.world(), points.get(lineStart + lineAdded), leaderFloorY);
@@ -589,28 +677,133 @@ public final class NavGroup {
         onLine = on;
     }
 
-    /** Column where the path is too narrow for the formation under the group, the formation again after. */
-    private void decideFold() {
-        boolean narrow = false;
-        if (halfWidth > 0.01) {
-            double leaderArc = path.arc(leaderIdx);
-            double to = leaderArc + front + 1;
-            for (int i = path.indexAtArc(Math.max(0, leaderArc - depth - 1)); i < path.size() && path.arc(i) <= to; i++) {
-                if (!path.wide(ports.world(), i, halfWidth)) {
-                    narrow = true;
+    /**
+     * The width the group walks in (implementation plan 4b.3 items 3 to 7): the widest of its formation's widths that
+     * fits over the stretch of path under it (from the rearmost slot to the foremost, plus a block). A column is
+     * taken at once (a gate, a door, a stair); a narrower width that is still 2 abreast or more only when the narrow
+     * part lasts longer than {@code group-width-hysteresis-blocks} along the path (a shorter bump is passed by the
+     * lanes that do not fit stepping in for those points); a wider width only when it fits the stretch plus the
+     * hysteresis ahead of the foremost slot. One pass over the stretch, a cached look per point.
+     */
+    private void decideWidth() {
+        int count = widths.size();
+        if (count <= 1 || leaderIdx < 0) {
+            return;
+        }
+        double leaderArc = path.arc(leaderIdx);
+        double hysteresis = settings.widthHysteresisBlocks();
+        int from = path.indexAtArc(Math.max(0, leaderArc - maxDepth - 1));
+        double toArc = leaderArc + maxFront + 1 + hysteresis;
+        int to = from;
+        while (to + 1 < path.size() && path.arc(to + 1) <= toArc) {
+            to++;
+        }
+        int[] widest = new int[to - from + 1];
+        for (int i = from; i <= to; i++) {
+            widest[i - from] = path.widest(ports.world(), i);
+        }
+        int target = level;
+        int narrowAt = -1;
+        if (widthFresh) {
+            widthFresh = false;
+            target = count - 1;
+            for (int l = 0; l < count; l++) {
+                if (firstMisfit(widest, from, leaderArc, l, 0) < 0) {
+                    target = l;
                     break;
                 }
             }
+            narrowAt = target > level ? firstMisfit(widest, from, leaderArc, level, 0) : -1;
+        } else {
+            int misfit = firstMisfit(widest, from, leaderArc, level, 0);
+            if (misfit >= 0) {
+                int next = count - 1;
+                for (int l = level + 1; l < count - 1; l++) {
+                    if (firstMisfit(widest, from, leaderArc, l, 0) < 0) {
+                        next = l;
+                        break;
+                    }
+                }
+                // to the column at once; to a narrower width that still is 2 abreast or more when it lasts
+                if (next == count - 1 || narrowLasts(misfit, level, hysteresis)) {
+                    target = next;
+                    narrowAt = misfit;
+                }
+            } else {
+                boolean more = onLine && line != null && lineStart + lineAdded < line.line().size();
+                for (int l = 0; l < level; l++) {
+                    boolean seen = !more || path.endArc() >= leaderArc + levelFront[l] + 1 + hysteresis;
+                    if (seen && firstMisfit(widest, from, leaderArc, l, hysteresis) < 0) {
+                        target = l;
+                        break;
+                    }
+                }
+            }
         }
-        if (narrow == folded) {
-            return;
+        if (target != level) {
+            changeWidth(target, narrowAt >= 0 ? narrowAt : leaderIdx);
         }
-        folded = narrow;
-        ports.metrics().count(narrow ? Event.GROUP_FOLD : Event.GROUP_REFORM);
-        NavPoint at = path.get(leaderIdx).floor;
+    }
+
+    /**
+     * The first path point of the stretch under width {@code l} (plus {@code ahead} blocks before its foremost slot)
+     * where it does not fit, or -1 when it fits all of it.
+     */
+    private int firstMisfit(int[] widest, int from, double leaderArc, int l, double ahead) {
+        double rear = leaderArc - levelDepth[l] - 1;
+        double fore = leaderArc + levelFront[l] + 1 + ahead;
+        for (int k = 0; k < widest.length; k++) {
+            double arc = path.arc(from + k);
+            if (arc > fore) {
+                break;
+            }
+            if (arc >= rear && widest[k] > l) {
+                return from + k;
+            }
+        }
+        return -1;
+    }
+
+    /** Whether the stretch where width {@code l} does not fit, from {@code misfit} on, is longer than the hysteresis. */
+    private boolean narrowLasts(int misfit, int l, double hysteresis) {
+        double start = path.arc(misfit);
+        for (int i = misfit + 1; i < path.size(); i++) {
+            if (path.arc(i) - start > hysteresis) {
+                return true;
+            }
+            if (path.widest(ports.world(), i) <= l) {
+                return false; // it fits again within the hysteresis: a bump
+            }
+        }
+        // narrow up to the end of the path known so far: lasting if no more of the leader's line is to come
+        return !(onLine && line != null && lineStart + lineAdded < line.line().size()) && path.endArc() - start > hysteresis;
+    }
+
+    private void changeWidth(int target, int atIndex) {
+        int before = level;
+        Formation.Width was = widths.get(before);
+        Formation.Width now = widths.get(target);
+        int count = widths.size();
+        level = target;
+        NavPoint at = path.get(Math.max(0, Math.min(atIndex, path.size() - 1))).floor;
+        String what;
+        Event event;
+        if (now.column()) {
+            event = Event.GROUP_FOLD;
+            what = "folds into a column: the path is too narrow for " + widths.get(count - 2).describe();
+        } else if (was.column()) {
+            event = Event.GROUP_REFORM;
+            what = "takes up " + now.describe() + " again";
+        } else if (target > before) {
+            event = Event.GROUP_NARROW;
+            what = "narrows to " + now.describe() + ": the path is too narrow for " + was.describe();
+        } else {
+            event = Event.GROUP_WIDEN;
+            what = "widens to " + now.describe();
+        }
+        ports.metrics().count(event);
         ports.log().accept(String.format(Locale.ROOT, "group %d (%s, %d NPCs) %s at %d %d %d", id, leader.name(), size(),
-            narrow ? "folds into a column: the path is too narrow for " + settings.formation()
-                : "takes up its formation again", at.blockX(), at.blockY() + 1, at.blockZ()));
+            what, at.blockX(), at.blockY() + 1, at.blockZ()));
     }
 
     private void step(Follower f, Formation.Slot slot, double leaderArc, double lookahead) {
@@ -632,6 +825,11 @@ public final class NavGroup {
             f.regions = null; // on a leg of its own the navigation service's trespass guard watches it
         } else if (now - f.guardTick >= (settings.recheckTicks() > 0 ? settings.recheckTicks() : GUARD_TICKS)) {
             f.mover.position().ifPresent(feet -> guard(f, feet, regionsAt(feet)));
+        }
+        if (f.state == FollowerState.FINISHING) {
+            f.lag = 0; // not waited for: it counts like a held follower (4b.3 item 10)
+            finishingStep(f);
+            return;
         }
         double slotArc = leaderArc - slot.back();
         if (f.state != FollowerState.FOLLOWING) {
@@ -671,6 +869,19 @@ public final class NavGroup {
         double allowed = Math.abs(slot.side()) + (f.joining ? Math.max(JOIN_DISTANCE, settings.rejoinBlocks())
             : settings.rejoinBlocks());
         if (at.horizontalDistance(node) > allowed || Math.abs(node.y() + 1 - at.y()) > 3) {
+            if (aheadOnLeadersLine(at, allowed)) {
+                // it stands on the leader's route further along than the group's path is known (a group that turned
+                // back with followers held behind it, group-followers-finish-trip false: 4b.3 item 9): it waits for
+                // the column to reach it and falls in, rather than walking an own leg to the leader
+                if (f.mover.isMoving()) {
+                    f.mover.stop();
+                }
+                f.pathIdx = -1;
+                f.lag = 0;
+                f.settled = true;
+                f.progressTick = now;
+                return;
+            }
             rejoin(f, slotArc, "is off its lane");
             return;
         }
@@ -739,13 +950,28 @@ public final class NavGroup {
         }
     }
 
+    /** Whether a feet position lies on the leader's route line beyond the part of it that is on the group's path. */
+    private boolean aheadOnLeadersLine(NavPoint at, double allowed) {
+        if (!onLine || line == null) {
+            return false;
+        }
+        List<NavPoint> points = line.line();
+        for (int i = lineStart + lineAdded; i < points.size(); i++) {
+            NavPoint p = points.get(i);
+            if (at.horizontalDistance(p) <= allowed && Math.abs(p.y() + 1 - at.y()) <= 3) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ==================== a stuck follower's ladder (implementation plan 4b.2 items 9 to 11) ====================
 
     /** The engine reported a follower of this group stuck on its waypoints; false when it is not one of them. */
     boolean engineStuck(int moverId, NpcMover.StuckKind kind) {
         for (Follower f : followers) {
             if (f.mover.id() == moverId) {
-                if (goal != null && f.state == FollowerState.FOLLOWING) {
+                if ((goal != null && f.state == FollowerState.FOLLOWING) || f.state == FollowerState.FINISHING) {
                     if (kind == NpcMover.StuckKind.NO_PATH) {
                         ports.metrics().count(Event.RECOVERY_NO_PATH);
                     }
@@ -1021,14 +1247,25 @@ public final class NavGroup {
      */
     private NavPoint lanePoint(int index, double along, double side) {
         NavPoint p = null;
-        if (side != 0 && laneFree(index - 1, side) && laneFree(index, side) && laneFree(index + 1, side)
-            && (along == 0 || laneFree(index + 2, side))) {
-            p = path.point(ports.world(), index, along, side);
+        double lane = laneSide(index, side);
+        if (Math.abs(lane) > 1e-9 && laneFree(index - 1, side, lane) && laneFree(index, side, lane)
+            && laneFree(index + 1, side, lane) && (along == 0 || laneFree(index + 2, side, lane))) {
+            p = path.point(ports.world(), index, along, lane);
         }
         if (p == null && along != 0) {
             p = path.point(ports.world(), index, along, 0);
         }
         return p != null ? p : HopPlanner.feet(path.get(index).floor);
+    }
+
+    /**
+     * Whether a lane exists at a path point both where the slot's lane lies there and {@code lane} blocks beside the
+     * path (the lane of the point it is asked for): where the width's shift changes between two points the walk from
+     * one lane point to the next stays on floor and in the path's regions (true before the path's start).
+     */
+    private boolean laneFree(int index, double side, double lane) {
+        return laneFree(index, side) && (index < 0 || index >= path.size()
+            || path.point(ports.world(), index, 0, lane) != null);
     }
 
     /** Whether the lane {@code side} blocks beside the path exists at a path point (true before the path's start). */
@@ -1040,7 +1277,20 @@ public final class NavGroup {
             // past the path's last point: free, unless more of the leader's line is still to come (not known yet)
             return !(onLine && line != null && lineStart + lineAdded < line.line().size());
         }
-        return path.point(ports.world(), index, 0, side) != null;
+        return path.point(ports.world(), index, 0, laneSide(index, side)) != null;
+    }
+
+    /**
+     * A slot's lane at a path point: its side plus the shift that lets the group's current width fit there (4b.3
+     * item 4: 2 abreast in a 2-wide passage whose line runs down one column); the plain side where the width does
+     * not fit (a bump: the lane falls back to the path's centre).
+     */
+    private double laneSide(int index, double side) {
+        if (index < 0 || index >= path.size()) {
+            return side;
+        }
+        double shift = path.shift(ports.world(), index, level);
+        return Double.isNaN(shift) ? side : side + shift;
     }
 
     private Set<String> regionsAt(NavPoint feet) {
@@ -1052,11 +1302,15 @@ public final class NavGroup {
      * doors whose box is not known are left out.
      */
     private List<GateBox> blockingDoors(Follower f, String world, Set<String> here) {
-        if (routeDoors.isEmpty()) {
+        return blockingDoors(f, world, here, routeDoors);
+    }
+
+    private List<GateBox> blockingDoors(Follower f, String world, Set<String> here, Set<Integer> doorIds) {
+        if (doorIds.isEmpty()) {
             return List.of();
         }
         List<GateBox> out = new ArrayList<>(2);
-        for (int doorId : routeDoors) {
+        for (int doorId : doorIds) {
             Optional<GateBox> box = doorBoxes.computeIfAbsent(doorId, id -> ports.rules().doorBox(id));
             if (box.isPresent() && doorVerdicts.computeIfAbsent(doorId, id -> ports.rules()
                 .gateBlocks(new NpcAccessSubject(f.mover.name(), profile, world, here), id))) {
@@ -1117,14 +1371,18 @@ public final class NavGroup {
 
     /** Whether a follower standing in the regions {@code here} may walk on to a path point under the current rules. */
     private boolean mayWalk(Follower f, Set<String> here, int index) {
-        Set<String> regions = path.regions(ports.world(), index);
+        return mayEnterAll(f, here, path.regions(ports.world(), index), path.get(index).floor.world());
+    }
+
+    /** Whether a follower standing in the regions {@code here} may walk into {@code regions} under the current rules. */
+    private boolean mayEnterAll(Follower f, Set<String> here, Set<String> regions, String world) {
         if (here.containsAll(regions)) {
             return true; // a region it stands in is not entered
         }
         f.sentIntoRegion = true;
         for (String region : regions) {
             if (!here.contains(region) && !verdicts.computeIfAbsent(new Verdict(here, region), v -> ports.rules()
-                .mayEnter(new NpcAccessSubject(f.mover.name(), profile, path.get(index).floor.world(), here))
+                .mayEnter(new NpcAccessSubject(f.mover.name(), profile, world, here))
                 .test(region))) {
                 return false;
             }
@@ -1267,6 +1525,189 @@ public final class NavGroup {
             stepAside(f);
         } else {
             f.retryAt = now + REJOIN_RETRY_TICKS;
+        }
+    }
+
+    // ==================== followers that finish their trip (implementation plan 4b.3 items 8 to 11) ====================
+
+    /** How many followers finish a trip of their own now. */
+    public int finishing() {
+        return followers(FollowerState.FINISHING);
+    }
+
+    /**
+     * The leader of an order with {@code group-followers-finish-trip} on has arrived and the order ends: every
+     * follower still on its way keeps the group's path from its place to its slot at the goal as a trip of its own.
+     */
+    private void beginTrips(NavPoint ended) {
+        NavPoint at = leader.position().orElse(null);
+        if (at == null || path.isEmpty() || leaderIdx < 0) {
+            return;
+        }
+        double leaderArc = path.arcOf(at, leaderIdx);
+        List<Formation.Slot> slots = levelSlots.get(level);
+        for (int i = 0; i < followers.size(); i++) {
+            Follower f = followers.get(i);
+            if (f.state != FollowerState.FOLLOWING || !f.mover.isSpawned() || f.lost || f.ladder.isOpen()
+                || f.pathIdx < 0 || f.pathIdx >= path.size() || !(f.heldByRule || !f.settled || f.lag > CATCH_UP_LAG)) {
+                continue;
+            }
+            NavPoint feet = f.mover.position().orElse(null);
+            if (feet == null) {
+                continue;
+            }
+            Formation.Slot slot = slots.get(i);
+            double slotArc = leaderArc - slot.back();
+            int end = path.indexAtArc(slotArc);
+            double a = path.arcOf(feet, f.pathIdx);
+            List<TripPoint> trip = new ArrayList<>();
+            List<NavPoint> points = new ArrayList<>();
+            for (int k = path.arc(f.pathIdx) > a + 0.3 ? f.pathIdx : f.pathIdx + 1; k <= end; k++) {
+                NavPoint p = continuous(points, feet, lanePoint(k, 0, slot.side()), k);
+                if (points.isEmpty() || points.get(points.size() - 1).horizontalDistance(p) > 0.3
+                    || points.get(points.size() - 1).y() != p.y()) {
+                    points.add(p);
+                    trip.add(new TripPoint(p, path.regions(ports.world(), k)));
+                }
+            }
+            double along = slotArc - path.arc(end);
+            if (along > 0.2) {
+                trip.add(new TripPoint(lanePoint(end, along, slot.side()), path.regions(ports.world(), end)));
+            }
+            if (trip.isEmpty() || feet.horizontalDistance(trip.get(trip.size() - 1).feet()) <= 1.0) {
+                continue; // at its slot after all
+            }
+            f.state = FollowerState.FINISHING;
+            f.trip = trip;
+            f.tripIdx = 0;
+            f.tripSent = -1;
+            f.tripTries = 0;
+            f.tripDoors = new LinkedHashSet<>(routeDoors);
+            f.tripGoal = ended;
+            f.recheck = true;
+            f.progressArc = trip.size();
+            f.progressTick = now;
+            NavPoint last = trip.get(trip.size() - 1).feet();
+            ports.log().accept(String.format(Locale.ROOT, "%s (group %d) finishes its trip to %d %d %d first%s",
+                f.mover.name(), id, last.blockX(), last.blockY(), last.blockZ(), f.heldByRule ? " (held by a rule now)" : ""));
+        }
+    }
+
+    /**
+     * A finishing follower: its trip with the group's lanes, rule checks, door box and trespass guard; it waits at a
+     * door or district edge that stops it and walks on when the rule allows. A stuck report or no progress for
+     * {@code no-progress-ticks} hands it its waypoints again; after {@code max-retries} such tries it gives the
+     * trip up and follows the group.
+     */
+    private void finishingStep(Follower f) {
+        NavPoint at = f.mover.position().orElse(null);
+        if (at == null) {
+            return;
+        }
+        int size = f.trip.size();
+        NavPoint last = f.trip.get(size - 1).feet();
+        if (at.horizontalDistance(last) <= 1.0 && Math.abs(last.y() - at.y()) < 1.5) {
+            tripDone(f, at);
+            return;
+        }
+        int best = f.tripIdx;
+        double bestD = Double.MAX_VALUE;
+        for (int k = f.tripIdx; k < Math.min(size, f.tripIdx + WINDOW); k++) {
+            NavPoint p = f.trip.get(k).feet();
+            double d = at.horizontalDistance(p) + Math.abs(p.y() - at.y());
+            if (d < bestD) {
+                bestD = d;
+                best = k;
+            }
+        }
+        f.tripIdx = best;
+        double remaining = size - best;
+        if (remaining < f.progressArc - 0.5) {
+            f.progressArc = remaining;
+            f.progressTick = now;
+            f.tripTries = 0;
+        }
+        boolean stuck = f.engineStuck != null
+            || (!f.heldByRule && now - f.progressTick >= settings.noProgressTicks());
+        f.engineStuck = null;
+        if (stuck) {
+            f.progressTick = now;
+            if (++f.tripTries > Math.max(1, settings.maxRetries())) {
+                ports.log().accept(String.format(Locale.ROOT, "%s (group %d) gives up its trip at %d %d %d: it follows the"
+                    + " group", f.mover.name(), id, at.blockX(), at.blockY(), at.blockZ()));
+                releaseFollower(f);
+                return;
+            }
+            if (f.mover.isMoving()) {
+                f.mover.stop();
+            }
+            f.recheck = true;
+        }
+        boolean handover = f.tripSent >= 0 && f.tripSent < size - 1 && f.tripSent - best < 3;
+        if (f.recheck || handover || (!f.mover.isMoving() && !f.heldByRule)) {
+            sendTrip(f, at);
+        }
+    }
+
+    /** Hands a finishing follower the next stretch of its trip, as far as the current rules let it walk. */
+    private void sendTrip(Follower f, NavPoint at) {
+        Set<String> here = regionsAt(at);
+        guard(f, at, here);
+        List<GateBox> doors = blockingDoors(f, at.world(), here, f.tripDoors);
+        GateBox inDoor = null;
+        for (GateBox box : doors) {
+            if (inDoorWay(box, at)) {
+                inDoor = box;
+                break;
+            }
+        }
+        f.recheck = false;
+        f.sentIntoRegion = false;
+        List<NavPoint> waypoints = new ArrayList<>();
+        boolean cut = false;
+        int k = f.tripIdx;
+        if (k < f.trip.size() - 1 && at.horizontalDistance(f.trip.get(k).feet()) < 0.75) {
+            k++;
+        }
+        int sent = -1;
+        for (; k < f.trip.size() && waypoints.size() < MAX_WAYPOINTS; k++) {
+            TripPoint p = f.trip.get(k);
+            if (!here.containsAll(p.regions())) {
+                f.sentIntoRegion = true;
+            }
+            if (!mayEnterAll(f, here, p.regions(), at.world()) || intoDoor(doors, inDoor, p.feet())) {
+                cut = true;
+                break;
+            }
+            add(waypoints, p.feet());
+            sent = k;
+        }
+        f.heldByRule = cut && waypoints.isEmpty();
+        f.tripSent = sent;
+        if (waypoints.isEmpty()) {
+            if (f.mover.isMoving()) {
+                f.mover.stop();
+            }
+            f.progressTick = now; // waiting at a door or an edge is not being stuck
+            return;
+        }
+        f.mover.follow(waypoints, settings.waypointMargin());
+    }
+
+    private void tripDone(Follower f, NavPoint at) {
+        NavPoint goalOfTrip = f.tripGoal;
+        ports.metrics().count(Event.GROUP_FINISH_TRIP);
+        ports.log().accept(String.format(Locale.ROOT, "%s (group %d) finished its trip at %d %d %d", f.mover.name(), id,
+            at.blockX(), at.blockY(), at.blockZ()));
+        releaseFollower(f); // it follows the group's current order from where it is (an own leg back if far off)
+        f.progressTick = now;
+        f.failures = 0;
+        f.lost = false;
+        f.lag = 0;
+        f.settled = true;
+        f.regions = null;
+        if (memberListener != null) {
+            memberListener.onMemberArrived(f.mover, goalOfTrip);
         }
     }
 

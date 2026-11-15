@@ -70,10 +70,16 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         BLOCKED_WALK,
         /** An NPC waiting at a blocking element was woken by an event instead of its safety timer. */
         WOKEN,
-        /** A group folded into a column where its path is too narrow for its formation (NAV-05). */
+        /** A group folded into a column where its path is too narrow for 2 abreast (NAV-05, NAV-22). */
         GROUP_FOLD,
-        /** A folded group took up its formation again. */
+        /** A folded group took up 2 abreast or more again. */
         GROUP_REFORM,
+        /** A group stepped down to a narrower width that is still 2 abreast or more (NAV-22). */
+        GROUP_NARROW,
+        /** A group of 2 abreast or more took up a wider width again (NAV-22). */
+        GROUP_WIDEN,
+        /** A follower finished its trip to its slot at the goal after the leader had arrived (NAV-23). */
+        GROUP_FINISH_TRIP,
         /** A follower that fell off its lane or got stuck planned its own leg back to the group's path. */
         GROUP_REJOIN,
         /** A group's leader waited for followers that had fallen too far behind. */
