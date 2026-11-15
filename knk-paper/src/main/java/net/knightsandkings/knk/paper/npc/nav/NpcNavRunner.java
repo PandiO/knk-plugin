@@ -717,6 +717,9 @@ public final class NpcNavRunner {
             trips == 0 ? 0.0 : tripSecondsSum / trips, since(Event.STRETCH), since(Event.FAILED)));
         // stuck spells (implementation plan 4b.2 item 14): one per spell, split by where, how each ended
         lines.add(metrics.spells().describe(since(Event.RECOVERY_NO_PATH), since(Event.FELL)));
+        // local legs (link M6): found by K&K's own search, walked with the engine's, or no path either way
+        lines.add(NpcNavigationMetrics.localLegsLine(since(Event.LOCAL_LEG_KNK), since(Event.LOCAL_LEG_ENGINE),
+            since(Event.LOCAL_LEG_NONE)));
         lines.add(String.format(Locale.ROOT,
             "waits: no allowed route %d (reported blocked %d), way ahead not loaded %d | chunk-unload pauses %d, resumes %d",
             since(Event.NO_ROUTE_WAIT), blockedReports, since(Event.UNLOADED_WAIT), since(Event.PAUSED),

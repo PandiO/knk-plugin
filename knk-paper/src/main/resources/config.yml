@@ -577,6 +577,13 @@ npc:
     # body's half width is 0.3). Narrower places are walked through their middle, so one-block doors stay open.
     # 0.35 to 2.
     wall-clearance: 0.8
+    # Clearance-aware local legs (off until tested): short trips, a group follower's own leg back to its group and the
+    # recovery ladder's local leg are searched by K&K on its own walk grid, with the corridor's clearance per cell (the
+    # body's width as the hard minimum, so one-block doors stay open, and wall-clearance as a preferred margin),
+    # smoothed into a few straight steps and walked as waypoints. When K&K's search finds nothing within its cell
+    # budget, Citizens' own search walks the leg as before. /knk npc nav stats counts "local legs: k&k N, engine N,
+    # none N".
+    local-legs-clearance: false
     # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded. An NPC
     # waiting at a closed gate or a district edge is woken by the gate or access change itself; this is the fallback.
     no-route-wait-ticks: 100
