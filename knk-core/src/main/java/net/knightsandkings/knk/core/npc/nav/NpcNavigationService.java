@@ -1232,7 +1232,8 @@ public final class NpcNavigationService {
         if (at == null) {
             return;
         }
-        double fell = nav.steps.record(at, nav.mover.onGround(), nav.mover.fallDistance());
+        double fell = nav.steps.record(at, nav.mover.onGround(), nav.mover.fallDistance(),
+            nav.mover.verticalSpeed());
         if (fell > 0) {
             ports.metrics().count(Event.FELL);
             ports.log().accept(String.format(Locale.ROOT, "%s fell %.1f blocks to %s (%s)", nav.mover.name(), fell,

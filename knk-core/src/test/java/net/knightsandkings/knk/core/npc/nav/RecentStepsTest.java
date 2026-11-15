@@ -66,6 +66,24 @@ class RecentStepsTest {
     }
 
     @Test
+    void aBodyWhoseEngineFallDistanceStaysZeroIsSeenFallingByItsSpeed() {
+        // a Citizens player NPC: fall distance near 0 all the way down (#592: 7-block falls counted as none)
+        steps.record(feet(0.5, 74), true, 0, 0);
+        steps.record(feet(1.5, 73.9), false, 0, -0.08);
+        steps.record(feet(1.6, 71.5), false, 0, -0.62);
+        assertEquals(7, steps.record(feet(1.7, 67), true, 0, 0), 1e-9);
+    }
+
+    @Test
+    void stepsDownAStaircaseNeverGetFastEnoughToBeAFall() {
+        steps.record(feet(0.5, 70), true, 0, 0);
+        steps.record(feet(1.5, 69), false, 0, -0.32); // one-block steps, airborne at most looks
+        steps.record(feet(2.5, 68), false, 0, -0.40);
+        steps.record(feet(3.5, 67.4), false, 0, -0.30);
+        assertEquals(0, steps.record(feet(4.5, 66), true, 0, 0), 1e-9);
+    }
+
+    @Test
     void aPushedBodysOldFootstepsAreNoWayBack() {
         for (int i = 0; i < 6; i++) {
             steps.record(feet(10.5 + i, 65), true);

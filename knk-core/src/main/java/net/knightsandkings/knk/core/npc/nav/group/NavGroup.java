@@ -828,7 +828,8 @@ public final class NavGroup {
             return;
         }
         f.mover.position().ifPresent(feet -> {
-            double fell = f.steps.record(feet, f.mover.onGround(), f.mover.fallDistance());
+            double fell = f.steps.record(feet, f.mover.onGround(), f.mover.fallDistance(),
+                f.mover.verticalSpeed());
             if (fell > 0) {
                 ports.metrics().count(Event.FELL);
                 ports.log().accept(String.format(Locale.ROOT, "%s (group %d) fell %.1f blocks to %s", f.mover.name(), id,

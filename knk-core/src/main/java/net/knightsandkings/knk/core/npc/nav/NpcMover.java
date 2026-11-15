@@ -33,6 +33,15 @@ public interface NpcMover {
     }
 
     /**
+     * The body's vertical speed in blocks per tick, negative while it falls (PandiO/knk-workspace#592: a Citizens
+     * player NPC's {@link #fallDistance()} stays near 0, so a fall is told from a stair step by its speed). NaN when
+     * the engine cannot tell.
+     */
+    default double verticalSpeed() {
+        return Double.NaN;
+    }
+
+    /**
      * Walk the given points in order without the engine's own path search (NAV-15 trail mode). The engine's block
      * rules are not consulted, so K&K's recheck keeps access rules binding (NAV-02).
      */
