@@ -299,6 +299,19 @@ public final class NavGroup {
     }
 
     /** Whether the group has an order. */
+    /** Whether the mover is this group's leader or one of its followers. */
+    public boolean isMember(int moverId) {
+        if (leader != null && leader.id() == moverId) {
+            return true;
+        }
+        for (Follower f : followers) {
+            if (f.mover.id() == moverId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean hasOrder() {
         return goal != null;
     }

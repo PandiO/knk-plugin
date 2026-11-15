@@ -17,6 +17,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
+import net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper;
 
 /**
  * Walks NPCs along K&K routes (implementation plan Phase 2; BEHAVIOR_MODEL NAV-01, 03, 11, 13, 14, 15, 17): a state
@@ -105,7 +106,18 @@ public final class NpcNavigationService {
      */
     public record Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
                            int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
-                           double cornerClearance, double waypointMargin, int recoveryWaitTicks) {
+                           double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                           boolean corridorSteering, double corridorHalfWidth, double wallClearance) {
+
+        /** With corridor steering off (plan 4c.3 decision 1; its keys at their code defaults). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks,
+                NavigationSettings.CORRIDOR_STEERING.defaultValue(),
+                NavigationSettings.CORRIDOR_HALF_WIDTH.defaultValue(), NavigationSettings.WALL_CLEARANCE.defaultValue());
+        }
 
         /** With the code defaults for the Phase 3 settings ({@code recheck-ticks}, {@code stop-on-trespass}). */
         public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
@@ -133,7 +145,15 @@ public final class NpcNavigationService {
                 settings.value(NavigationSettings.STOP_ON_TRESPASS, scope),
                 settings.value(NavigationSettings.CORNER_CLEARANCE, scope),
                 settings.value(NavigationSettings.WAYPOINT_MARGIN, scope),
-                settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope));
+                settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope),
+                settings.value(NavigationSettings.CORRIDOR_STEERING, scope),
+                settings.value(NavigationSettings.CORRIDOR_HALF_WIDTH, scope),
+                settings.value(NavigationSettings.WALL_CLEARANCE, scope));
+        }
+
+        /** The waypoint margin for a stretch: {@link CorridorShaper#CHOKE_MARGIN} with an aligned chokepoint. */
+        double marginFor(RouteFollower.Stretch stretch) {
+            return stretch.chokepoints() > 0 ? Math.min(waypointMargin, CorridorShaper.CHOKE_MARGIN) : waypointMargin;
         }
 
         public static Settings defaults() {
@@ -298,6 +318,9 @@ public final class NpcNavigationService {
     private int inFlight;
     private int localInFlight;
     private long tick;
+    /** Corridor steering's shaped stretches, shared by every NPC here (plan 4c.3 decision 1.5). */
+    private final CorridorShaper corridors;
+    private java.util.function.IntPredicate unshaped = id -> false;
     private long busyNanos;
     private long lastTickNanos;
     private int depth;
@@ -317,6 +340,29 @@ public final class NpcNavigationService {
         }
         this.maxPlansInFlight = maxPlansInFlight;
         this.ruleChecksPerTick = ruleChecksPerTick;
+        this.corridors = new CorridorShaper(() -> tick, ports.nanoTime());
+    }
+
+    /**
+     * Corridor steering's shared shaper (plan 4c.3 decision 1, link M2): its counts and cost, and for later links the
+     * corridors it built.
+     */
+    public CorridorShaper corridors() {
+        return corridors;
+    }
+
+    /**
+     * The movers whose stretches corridor steering leaves alone although their key is on: a group's members, until
+     * link M3 fits formations to the corridor (the group path follows the leader's route line).
+     */
+    public void setUnshapedMembers(java.util.function.IntPredicate unshaped) {
+        this.unshaped = unshaped == null ? id -> false : unshaped;
+    }
+
+    /** The corridor steering an NPC's stretches get: null when its {@code corridor-steering} is off or it is in a group. */
+    private RouteFollower.Steering steering(Nav nav) {
+        return nav.settings.corridorSteering() && !unshaped.test(nav.mover.id()) ? new RouteFollower.Steering(corridors,
+            new CorridorShaper.Options(nav.settings.corridorHalfWidth(), nav.settings.wallClearance())) : null;
     }
 
     // ==================== callers ====================
@@ -891,7 +937,7 @@ public final class NpcNavigationService {
             return;
         }
         RouteFollower.Stretch stretch = nav.follower.next(ports.world(), nav.settings.stretchBlocks(),
-            at.blockY() - 1, nav.settings.cornerClearance());
+            at.blockY() - 1, nav.settings.cornerClearance(), steering(nav));
         switch (stretch.kind()) {
             case UNLOADED -> {
                 if (required) {
@@ -914,7 +960,7 @@ public final class NpcNavigationService {
                 nav.onTrail = true;
                 nav.state = NpcNavState.MOVING;
                 ports.metrics().count(Event.STRETCH);
-                nav.mover.follow(stretch.waypoints(), nav.settings.waypointMargin());
+                nav.mover.follow(stretch.waypoints(), nav.settings.marginFor(stretch));
             }
             default -> { }
         }
@@ -1376,7 +1422,7 @@ public final class NpcNavigationService {
                     NavPoint end = waypoints.get(waypoints.size() - 1);
                     nav.follower.restartAtNpc(end);
                     RouteFollower.Stretch rest = nav.follower.next(ports.world(), nav.settings.stretchBlocks(),
-                        end.blockY() - 1, nav.settings.cornerClearance());
+                        end.blockY() - 1, nav.settings.cornerClearance(), steering(nav));
                     if (rest.kind() == RouteFollower.Kind.WAYPOINTS) {
                         waypoints.addAll(rest.waypoints());
                     }

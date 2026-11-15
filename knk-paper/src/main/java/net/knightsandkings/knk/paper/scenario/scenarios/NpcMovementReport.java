@@ -19,7 +19,8 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * PandiO/knk-workspace#621). In M1 they run in <b>report mode</b>: each logs one {@value #TAG} line per phase with its
  * numbers and passes; links M2 to M7 turn the numbers they fix into checks. Each scenario runs with
  * {@code npc.navigation.collidable} off (its plain name) and on (the name with {@value #COLLISION_SUFFIX}, decision
- * 3.6).
+ * 3.6). Link M2 turned the singles' numbers of {@code npc-stairhouse-singles} and {@code npc-jagged-straight} into
+ * checks, run with {@code corridor-steering} on ({@link #singlesFailures}).
  * <p>
  * A line reads {@code KNK-NPC-REPORT <scenario> | <phase> | key value | key value ...}; CI copies the lines into the
  * {@code paper-boot} job's summary.
@@ -50,9 +51,64 @@ public final class NpcMovementReport {
      * "20 in ranks of 3", 4c.1 item 4.2; the code default is 2).
      */
     static NavigationSettings settings(boolean collisionOn) {
+        return settings(collisionOn, false);
+    }
+
+    /**
+     * As {@link #settings(boolean)}, with {@code corridor-steering} on or off (link M2; its other keys at their decided
+     * defaults).
+     */
+    static NavigationSettings settings(boolean collisionOn, boolean corridorSteering) {
         return NavigationSettings.builder()
             .global(NavigationSettings.Overrides.of(NavigationSettings.COLLIDABLE, collisionOn)
-                .with(NavigationSettings.GROUP_RANKS_WIDTH, 3)).build();
+                .with(NavigationSettings.GROUP_RANKS_WIDTH, 3)
+                .with(NavigationSettings.CORRIDOR_STEERING, corridorSteering)).build();
+    }
+
+    /** The longest a single may stand still (plan 4c.4 item 2.3: nobody still longer than 3 s). */
+    static final int MAX_STILL_TICKS = 3 * 20;
+    /**
+     * Corridor steering's own cost per NPC per tick that the scenarios allow: the 0.03 ms budget of plan 4c.1 item 7.
+     * Its share is checked rather than the whole K&K figure, which in these short runs includes Citizens port calls
+     * and start-up (M1's notes). Warm, the share is about 0.005 ms here; the first run in a server pays the JIT.
+     */
+    static final double MAX_CORRIDOR_MS = 0.03;
+
+    /** Corridor steering's counts and cost (link M2): stretches shaped, handed out again, ms per NPC per tick. */
+    NpcMovementReport corridor(ScenarioNpcs npcs) {
+        return add("corridor", "shaped %d, shared %d, %.4f ms per NPC per tick", npcs.service().corridors().shaped(),
+            npcs.service().corridors().shared(), npcs.corridorMsPerNpcTick());
+    }
+
+    /**
+     * The singles' checks of plan 4c.4 item 2.3 (link M2, with {@code corridor-steering} on): all arrived, 0 stuck
+     * spells, nobody still longer than 3 s, no fall, corridor steering really shaped and within its cost. Null when
+     * they hold, else what failed.
+     */
+    String singlesFailures(ScenarioNpcs npcs, SingleTrips trips) {
+        List<String> failed = new ArrayList<>();
+        if (!trips.allEnded() || trips.arrived() != trips.movers().size()) {
+            failed.add("arrived " + trips.arrivals() + " (" + trips.others() + ")");
+        }
+        long spells = count(npcs, Event.STUCK_ENGINE) + count(npcs, Event.STUCK_NO_PROGRESS);
+        if (spells != 0) {
+            failed.add(spells + " stuck spells");
+        }
+        if (npcs.longestStillTicks() > MAX_STILL_TICKS) {
+            failed.add(String.format(Locale.ROOT, "still for %.1f s (%s)", npcs.longestStillTicks() / 20.0,
+                npcs.longestStillWho()));
+        }
+        if (count(npcs, Event.FELL) != 0) {
+            failed.add(count(npcs, Event.FELL) + " falls");
+        }
+        if (npcs.service().corridors().shaped() == 0) {
+            failed.add("corridor steering shaped no stretch");
+        }
+        if (!(npcs.corridorMsPerNpcTick() <= MAX_CORRIDOR_MS)) {
+            failed.add(String.format(Locale.ROOT, "corridor steering %.4f ms per NPC per tick (at most %.2f)",
+                npcs.corridorMsPerNpcTick(), MAX_CORRIDOR_MS));
+        }
+        return failed.isEmpty() ? null : String.join("; ", failed);
     }
 
     /** The scenario's name for a run. */

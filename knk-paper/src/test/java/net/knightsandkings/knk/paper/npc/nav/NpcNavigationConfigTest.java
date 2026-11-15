@@ -251,6 +251,54 @@ class NpcNavigationConfigTest {
     }
 
     @Test
+    void readsTheCorridorSteeringKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.CORRIDOR_STEERING, anywhere), "off by default");
+        assertEquals(4.0, defaults.value(NavigationSettings.CORRIDOR_HALF_WIDTH, anywhere));
+        assertEquals(0.8, defaults.value(NavigationSettings.WALL_CLEARANCE, anywhere));
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.CORRIDOR_STEERING, anywhere).layer());
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                corridor-steering: true
+                worlds:
+                  w:
+                    wall-clearance: 0.6
+                regions:
+                  stairhouse:
+                    corridor-steering: false
+                    corridor-half-width: 3
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        Scope inside = new Scope("w", List.of("town", "stairhouse"), null, null);
+        assertEquals(true, settings.value(NavigationSettings.CORRIDOR_STEERING, anywhere));
+        assertEquals(0.6, settings.value(NavigationSettings.WALL_CLEARANCE, anywhere));
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, inside);
+        assertEquals(false, resolved.corridorSteering(), "a region turns it off");
+        assertEquals(3.0, resolved.corridorHalfWidth());
+        assertEquals(0.6, resolved.wallClearance(), "from the world layer");
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                corridor-steering: maybe
+                corridor-half-width: 9
+                wall-clearance: 0.3
+            """);
+        assertEquals(3, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
     void readsTheGroupKeysInEveryConfigLayer() throws Exception {
         NpcNavigationConfig config = parse("""
             npc:

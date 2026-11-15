@@ -401,6 +401,14 @@ public final class ScenarioNpcs {
         return npcTicks == 0 ? Double.NaN : navNanos / 1e6 / npcTicks;
     }
 
+    /**
+     * Corridor steering's share of {@link #navMsPerNpcTick} (plan 4c.3 decision 1.5, link M2): the time spent shaping
+     * stretches per NPC per tick so far, in milliseconds. NaN before the first NPC tick.
+     */
+    public double corridorMsPerNpcTick() {
+        return npcTicks == 0 ? Double.NaN : service.corridors().nanos() / 1e6 / npcTicks;
+    }
+
     /** The server ticks the NPCs have been ticked so far. */
     public long ticks() {
         return tick;
