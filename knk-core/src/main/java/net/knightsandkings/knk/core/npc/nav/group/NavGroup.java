@@ -1161,9 +1161,23 @@ public final class NavGroup {
         Set<String> here = regionsAt(at);
         PathTargets.Target ahead = from > last ? null : PathTargets.ahead(ports.world(), path.floors(), place, from,
             last, at.blockY() - 1, reach, feet -> mayStand(f, here, feet));
+        if (ahead == null && from > place) {
+            // every point ahead failed from here: start over with them rather than aim at nothing
+            f.failedTarget = -1;
+            ahead = PathTargets.ahead(ports.world(), path.floors(), place, place, last, at.blockY() - 1, reach,
+                feet -> mayStand(f, here, feet));
+        }
         int target = ahead != null ? ahead.index() : Math.max(place, 0);
         if (target > leaderIdx) {
             target = Math.max(0, leaderIdx); // further than one leg: navigation plans what it takes
+        }
+        NavPoint aim = ahead != null ? ahead.floor() : path.get(target).floor;
+        if (at.horizontalDistance(aim) <= 1.5 && Math.abs(aim.y() + 1 - at.y()) <= 2) {
+            // nothing ahead to aim at but the point it stands on: an own leg there would "arrive" at once and hide
+            // that it is stuck (4b.2 item 11)
+            f.rejoinNode = target;
+            rejoinFailed(f, "no point ahead on its floor to aim at");
+            return;
         }
         if (f.mover.isMoving()) {
             f.mover.stop();
@@ -1180,7 +1194,6 @@ public final class NavGroup {
         ports.log().accept(String.format(Locale.ROOT, "%s (group %d) %s at %d %d %d: its own leg back to the group's path"
             + " at %s", f.mover.name(), id, why, at.blockX(), at.blockY(), at.blockZ(),
             NavGeometry.block(HopPlanner.feet(ahead != null ? ahead.floor() : path.get(target).floor))));
-        NavPoint aim = ahead != null ? ahead.floor() : path.get(target).floor;
         if (!ports.navigation().navigate(f.mover.id(), HopPlanner.feet(aim),
             result -> onRejoin(f, order, result))) {
             rejoinFailed(f, "it is not under navigation");

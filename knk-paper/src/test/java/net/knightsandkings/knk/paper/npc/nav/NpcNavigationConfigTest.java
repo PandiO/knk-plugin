@@ -191,6 +191,65 @@ class NpcNavigationConfigTest {
         assertEquals(10, NpcNavigationConfig.disabled().ruleChecksPerTick());
     }
 
+    /** Implementation plan 4b.2 config keys: the decided defaults ship, and every key resolves through the layers. */
+    @Test
+    void readsTheWallCornerKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(1.0, defaults.value(NavigationSettings.CORNER_CLEARANCE, anywhere));
+        assertEquals(0.5, defaults.value(NavigationSettings.WAYPOINT_MARGIN, anywhere));
+        assertEquals(20, defaults.value(NavigationSettings.RECOVERY_WAIT_TICKS, anywhere));
+        assertEquals(40, defaults.value(NavigationSettings.STATIONARY_TICKS, anywhere));
+        assertEquals(40, defaults.value(NavigationSettings.NO_PROGRESS_TICKS, anywhere));
+        assertEquals(3, defaults.value(NavigationSettings.MAX_RETRIES, anywhere));
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.CORNER_CLEARANCE, anywhere).layer(),
+            "config.yml sets it in the global layer");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                corner-clearance: 0.5
+                worlds:
+                  w:
+                    waypoint-margin: 0.75
+                regions:
+                  stairhouse:
+                    corner-clearance: 0
+                    recovery-wait-ticks: 10
+                    stationary-ticks: 30
+                    no-progress-ticks: 30
+                    max-retries: 1
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        Scope inside = new Scope("w", List.of("town", "stairhouse"), null, null);
+        assertEquals(0.5, settings.value(NavigationSettings.CORNER_CLEARANCE, anywhere));
+        assertEquals(0.75, settings.value(NavigationSettings.WAYPOINT_MARGIN, anywhere));
+        assertEquals(0.0, settings.value(NavigationSettings.CORNER_CLEARANCE, inside), "0 turns it off in a region");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, inside);
+        assertEquals(0.0, resolved.cornerClearance());
+        assertEquals(0.75, resolved.waypointMargin());
+        assertEquals(10, resolved.recoveryWaitTicks());
+        assertEquals(30, resolved.noProgressTicks());
+        assertEquals(1, resolved.maxRetries());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                corner-clearance: 3
+                waypoint-margin: 0.1
+                recovery-wait-ticks: 500
+            """);
+        assertEquals(3, bad.rejected().size(), bad.rejected().toString());
+    }
+
     @Test
     void readsTheGroupKeysInEveryConfigLayer() throws Exception {
         NpcNavigationConfig config = parse("""

@@ -61,15 +61,26 @@ public final class BukkitNavWorld implements NavWorld {
             return 0;
         }
         World w = Bukkit.getWorld(world);
-        double floorTop = floorY + (isSlab(w.getBlockAt(x, floorY, z).getBlockData(), Slab.Type.BOTTOM) ? 0.5 : 1.0);
-        for (int k = 1; k <= 4 && floorY + k < w.getMaxHeight(); k++) {
-            Block block = w.getBlockAt(x, floorY + k, z);
-            if (block.isPassable()) {
-                continue;
+        int top = w.getMaxHeight();
+        return freeHeight(w.getBlockAt(x, floorY, z), k -> floorY + k < top ? w.getBlockAt(x, floorY + k, z) : null);
+    }
+
+    /**
+     * The free height above {@code floor}, given the blocks above it ({@code above.apply(1)} is the one right above;
+     * null past the world's top).
+     */
+    static double freeHeight(Block floor, java.util.function.IntFunction<Block> above) {
+        double floorTop = isSlab(floor.getBlockData(), Slab.Type.BOTTOM) ? 0.5 : 1.0;
+        for (int k = 1; k <= 4; k++) {
+            Block block = above.apply(k);
+            if (block == null) {
+                break;
             }
-            return floorY + k + (isSlab(block.getBlockData(), Slab.Type.TOP) ? 0.5 : 0.0) - floorTop;
+            if (!block.isPassable()) {
+                return k + (isSlab(block.getBlockData(), Slab.Type.TOP) ? 0.5 : 0.0) - floorTop;
+            }
         }
-        return floorY + 5 - floorTop;
+        return 5 - floorTop;
     }
 
     /**
@@ -82,7 +93,10 @@ public final class BukkitNavWorld implements NavWorld {
         if (w == null || y < w.getMinHeight() || y >= w.getMaxHeight() || !w.isChunkLoaded(x >> 4, z >> 4)) {
             return false;
         }
-        Block block = w.getBlockAt(x, y, z);
+        return blocksBody(w.getBlockAt(x, y, z));
+    }
+
+    static boolean blocksBody(Block block) {
         if (block.isPassable()) {
             return false;
         }

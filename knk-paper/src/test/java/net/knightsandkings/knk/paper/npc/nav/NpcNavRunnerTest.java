@@ -354,7 +354,8 @@ class NpcNavRunnerTest {
         String line = runner.report(0, 0).stream().filter(l -> l.startsWith("groups ")).findFirst().orElseThrow();
         assertTrue(line.startsWith("groups 1 (5 NPCs, ranks): trips 0 | folds 0, reforms 0, folded now 0 | own legs back 0"),
             line);
-        assertTrue(line.endsWith("most plans at once 0"), "this test's planner answers at once: " + line);
+        assertTrue(line.endsWith("road plans per group event: max 0 | local legs at once: max 0"),
+            "this test's planner answers at once: " + line);
 
         walk(() -> roadGoals.size() >= 2, 1500);
 
