@@ -2366,6 +2366,7 @@ public class KnKPlugin extends JavaPlugin {
             registerWorldTaskSync(hooks);
             registerConfigSync(hooks);
             registerErasureSync(hooks);
+            registerModerationSync();
             if (metricsService != null) {
                 metricsService.register(realtimeStats);
             }
@@ -2409,6 +2410,29 @@ public class KnKPlugin extends JavaPlugin {
         if (playerNotificationPoller != null) {
             hooks.register("player notifications", playerNotificationPoller::drainNow);
         }
+    }
+
+    /**
+     * Kick and ban from the web app (PandiO/knk-workspace#574, DESIGN §6.10): {@code PlayerKick} kicks an online player,
+     * {@code PlayerBan} adds the profile to Paper's ban list (permanent) and kicks them if online; texts from
+     * {@code realtime.moderation.*}. No resync step: the API keeps no kick/ban state to re-read.
+     */
+    private void registerModerationSync() {
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        new net.knightsandkings.knk.paper.realtime.ModerationRealtimeSync(main, org.bukkit.Bukkit::getPlayer,
+            new net.knightsandkings.knk.paper.realtime.BukkitProfileBans(),
+            net.knightsandkings.knk.paper.realtime.ModerationSettings.fromConfig(getConfig()),
+            new net.knightsandkings.knk.core.realtime.RecentActionIds(), getLogger())
+            .register(realtimeService.dispatcher());
     }
 
     /**
