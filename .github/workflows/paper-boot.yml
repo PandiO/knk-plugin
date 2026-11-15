@@ -145,7 +145,7 @@ jobs:
         # drive NPCs through that running adapter; the #521 ones start a Citizens registry of their own).
         # --bot-tests (only with BOT_TESTS_ENABLED): the Mineflayer bot tests after the scenarios (#540).
         env:
-          MIN_SCENARIOS: 28
+          MIN_SCENARIOS: 29
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"

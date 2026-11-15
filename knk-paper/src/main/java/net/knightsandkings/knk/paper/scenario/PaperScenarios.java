@@ -24,6 +24,7 @@ import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcWalksRoadRouteScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.PlayerChatGroupColoursScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.PlayerCommandNeedsGrantScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.PlayerHealNeedsGrantScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.PlayerJoinLoadingHoldScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.PlayerMenuClickScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.PlayerRejoinInClosedGateScenario;
@@ -74,6 +75,8 @@ public final class PaperScenarios {
             .register(new PlayerJoinLoadingHoldScenario())
             .register(new PlayerMenuClickScenario())
             .register(new PlayerTpIntoClosedGateScenario())
-            .register(new PlayerRejoinInClosedGateScenario());
+            .register(new PlayerRejoinInClosedGateScenario())
+            // KnK takes the plain /heal over from WorldGuard (PandiO/knk-workspace#580)
+            .register(new PlayerHealNeedsGrantScenario());
     }
 }
