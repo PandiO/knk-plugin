@@ -70,6 +70,41 @@ class PrivacyErasuresApiImplTest {
         assertEquals(9, page.latestId());
     }
 
+    /**
+     * PandiO/knk-workspace#486: the body knk-web-api actually sends. {@code Program.cs} sets {@code PropertyNamingPolicy
+     * = null} and {@code PrivacyErasureFeedDto} has no {@code [JsonPropertyName]}, so the names are PascalCase. Read
+     * with camelCase-only names this parsed as an empty page with lastId 0: nothing applied, the cursor never moved,
+     * every connect asked {@code since=0}.
+     */
+    @Test
+    void since_readsTheApisPascalCaseBody() {
+        responseJson = """
+            {"Items":[{"ErasureId":1,"UserId":11,"FormerUuid":"00000000-0000-0000-0000-0000000000b2","ErasedAt":"2026-11-14T21:14:03.1234567"},
+                      {"ErasureId":6,"UserId":15,"FormerUuid":null,"ErasedAt":"2026-11-14T22:20:41.7654321"}],
+             "LastId":6,"HasMore":false,"LatestId":6}""";
+
+        ErasureFeedPage page = api.since(0, 100).join();
+
+        assertEquals(List.of(new ErasedAccount(1, 11, UUID.fromString("00000000-0000-0000-0000-0000000000b2")),
+            new ErasedAccount(6, 15, null)), page.items());
+        assertEquals(6, page.lastId());
+        assertFalse(page.hasMore());
+        assertEquals(6, page.latestId());
+    }
+
+    @Test
+    void since_readsAPascalCasePageWithMore() {
+        responseJson = "{\"Items\":[{\"ErasureId\":101,\"UserId\":7,\"FormerUuid\":null,\"ErasedAt\":\"2026-11-14T22:00:00\"}],"
+            + "\"LastId\":101,\"HasMore\":true,\"LatestId\":250}";
+
+        ErasureFeedPage page = api.since(100, 1).join();
+
+        assertEquals(List.of(new ErasedAccount(101, 7, null)), page.items());
+        assertEquals(101, page.lastId());
+        assertTrue(page.hasMore());
+        assertEquals(250, page.latestId());
+    }
+
     @Test
     void anEmptyFeed() {
         responseJson = "{\"items\":[],\"lastId\":0,\"hasMore\":false,\"latestId\":0}";

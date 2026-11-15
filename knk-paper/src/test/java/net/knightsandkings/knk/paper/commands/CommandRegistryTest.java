@@ -1,16 +1,15 @@
 package net.knightsandkings.knk.paper.commands;
 
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Tag;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@Tag("requires-bukkit")
 class CommandRegistryTest {
     private CommandRegistry registry;
     private SubcommandExecutor mockExecutor;
@@ -59,7 +58,9 @@ class CommandRegistryTest {
 
     @Test
     void testListAvailableFiltersPermissions() {
-        CommandSender sender = mock(CommandSender.class);
+        // Listings filter players only; the console and other non-player senders hold every node
+        // (CommandPermissions.has). PandiO/knk-workspace#499 changed the sender from a plain CommandSender.
+        Player sender = mock(Player.class);
         when(sender.hasPermission("knk.admin")).thenReturn(true);
         when(sender.hasPermission("knk.special")).thenReturn(false);
 

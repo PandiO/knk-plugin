@@ -4,17 +4,23 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.entity.Player;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
+import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.ServerMock;
+import org.mockito.ArgumentCaptor;
 
 import net.knightsandkings.knk.api.dto.*;
 import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
@@ -37,7 +43,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * Tests the full lifecycle from command execution to API calls.
  */
 @ExtendWith(MockitoExtension.class)
-@Tag("requires-bukkit")
 class AccountCommandIntegrationTest {
 
     private UserAccountApi mockApi;
@@ -55,9 +60,17 @@ class AccountCommandIntegrationTest {
     
     private Player mockPlayer;
     private UUID testUUID;
+    /** AccountLinkCommand answers through Bukkit.getScheduler() (PandiO/knk-workspace#499). */
+    private ServerMock server;
+
+    @AfterEach
+    void tearDown() {
+        MockBukkit.unmock();
+    }
 
     @BeforeEach
     void setUp() {
+        server = MockBukkit.mock();
         mockApi = mock(UserAccountApi.class);
         mockUsersQueryApi = mock(UsersQueryApi.class);
         mockPlugin = mock(KnKPlugin.class);
@@ -69,16 +82,22 @@ class AccountCommandIntegrationTest {
         mockPlayer = mock(Player.class);
         
         testUUID = UUID.randomUUID();
-        when(mockPlayer.getUniqueId()).thenReturn(testUUID);
-        when(mockPlayer.getName()).thenReturn("TestPlayer");
-        
+        // Shared fixture: not every test reaches every stub, so they are lenient (PandiO/knk-workspace#499).
+        lenient().when(mockPlayer.getUniqueId()).thenReturn(testUUID);
+        lenient().when(mockPlayer.getName()).thenReturn("TestPlayer");
+        lenient().when(mockPlugin.getLogger()).thenReturn(mockLogger);
+        lenient().when(mockPlugin.isEnabled()).thenReturn(true);
+
         // Configure mocks
-        when(mockConfig.account()).thenReturn(mockAccountConfig);
-        when(mockConfig.messages()).thenReturn(mockMessagesConfig);
-        when(mockMessagesConfig.prefix()).thenReturn("§8[§6KnK§8]§r ");
-        when(mockAccountConfig.chatCaptureTimeoutSeconds()).thenReturn(120);
-        when(mockAccountConfig.linkCodeExpiryMinutes()).thenReturn(20);
-        when(mockCooldownManager.canExecute(any(UUID.class), anyString(), anyInt())).thenReturn(true);
+        lenient().when(mockConfig.account()).thenReturn(mockAccountConfig);
+        lenient().when(mockConfig.messages()).thenReturn(mockMessagesConfig);
+        lenient().when(mockConfig.web()).thenReturn(KnkConfig.WebConfig.defaults());
+        lenient().when(mockMessagesConfig.prefix()).thenReturn("§8[§6KnK§8]§r ");
+        lenient().when(mockMessagesConfig.linkCodeGenerated()).thenReturn(LinkCodeMessage.DEFAULT_TEMPLATE);
+        lenient().when(mockAccountConfig.chatCaptureTimeoutSeconds()).thenReturn(120);
+        lenient().when(mockAccountConfig.linkCodeExpiryMinutes()).thenReturn(20);
+        lenient().when(mockAccountConfig.cooldowns()).thenReturn(new KnkConfig.AccountConfig.CooldownsConfig(0, 60, 0, 10));
+        lenient().when(mockCooldownManager.canExecute(any(UUID.class), anyString(), anyInt())).thenReturn(true);
         
         // Initialize components
         UserCache mockUserCache = mock(UserCache.class);
@@ -113,16 +132,17 @@ class AccountCommandIntegrationTest {
                 .thenReturn(CompletableFuture.completedFuture(linkCodeResponse));
 
             // Act
+            // AccountCommandRegistry hands over the arguments after "link": none means "generate a code".
             boolean result = accountLinkCommand.onCommand(
-                mockPlayer, null, "account", new String[]{"link"}
+                mockPlayer, null, "account", new String[0]
             );
 
-            // Assert
+            // Assert: the answer is sent on the main thread (the next server tick)
             assertTrue(result);
-            verify(mockApi, timeout(1000)).generateLinkCode(1);
-            
-            // Verify code displayed to player (use String sendMessage)
-            verify(mockPlayer, timeout(1000).atLeastOnce()).sendMessage(anyString());
+            verify(mockApi).generateLinkCode(1);
+            server.getScheduler().performOneTick();
+            assertTrue(sentText().stream().anyMatch(line -> line.contains("ABC-123-DEF-456")),
+                "the formatted code is shown: " + sentText());
         }
 
         @Test
@@ -135,9 +155,10 @@ class AccountCommandIntegrationTest {
 
             assertTrue(result);
             verify(mockApi, never()).validateLinkCode(anyString());
-            verify(mockPlayer).sendMessage(contains("Link codes are entered on the website, not in game."));
-            verify(mockPlayer).sendMessage(contains("Type /account link (without a code) to get yours."));
-            verify(mockPlayer).sendMessage(contains("https://app.example.test/auth/register"));
+            List<String> sent = sentText();
+            assertTrue(sent.stream().anyMatch(line -> line.contains("Link codes are entered on the website, not in game.")), sent.toString());
+            assertTrue(sent.stream().anyMatch(line -> line.contains("Type /account link (without a code) to get yours.")), sent.toString());
+            assertTrue(sent.stream().anyMatch(line -> line.contains("https://app.example.test/auth/register")), sent.toString());
         }
 
         @Test
@@ -150,8 +171,9 @@ class AccountCommandIntegrationTest {
 
             assertTrue(result);
             verify(mockApi, never()).validateLinkCode(anyString());
-            verify(mockPlayer, times(2)).sendMessage(anyString());
-            verify(mockPlayer, never()).sendMessage(contains("/auth/register"));
+            List<String> sent = sentText();
+            assertEquals(2, sent.size(), sent.toString());
+            assertTrue(sent.stream().noneMatch(line -> line.contains("/auth/register")), sent.toString());
         }
     }
 
@@ -213,5 +235,12 @@ class AccountCommandIntegrationTest {
             // Should not block indefinitely (test setup handles this)
             assertNotNull(future);
         }
+    }
+
+    /** The plain text of every Component message sent to the player (AccountLinkCommand sends Components). */
+    private List<String> sentText() {
+        ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
+        verify(mockPlayer, atLeast(0)).sendMessage(captor.capture());
+        return captor.getAllValues().stream().map(PlainTextComponentSerializer.plainText()::serialize).toList();
     }
 }

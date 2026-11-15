@@ -32,9 +32,17 @@ final class CitizensNpcMover implements NpcMover {
     /** Set by the runtime when the last despawn was a chunk unload, so the next spawn is a resume. */
     boolean despawnedByChunk;
 
+    /** The dry examiner of an NPC spawned {@code dry} (#490), or null. */
+    private final DryBlockExaminer dry;
+
     CitizensNpcMover(NPC npc, java.util.function.Consumer<CitizensNpcMover> onRemove) {
+        this(npc, onRemove, null);
+    }
+
+    CitizensNpcMover(NPC npc, java.util.function.Consumer<CitizensNpcMover> onRemove, DryBlockExaminer dry) {
         this.npc = npc;
         this.onRemove = onRemove;
+        this.dry = dry;
     }
 
     NPC npc() {
@@ -97,6 +105,11 @@ final class CitizensNpcMover implements NpcMover {
             return;
         }
         npc.getNavigator().setTarget(new Location(world, target.x(), target.y(), target.z()));
+        if (dry != null) {
+            // An examiner Citizens appends when the target is set (its MinecraftBlockExaminer) would answer PASSABLE
+            // for water before the dry veto is asked: only the dry one and the cost-only avoid-water one stay.
+            stripForeignExaminers(npc.getNavigator().getLocalParameters(), dry);
+        }
     }
 
     /**

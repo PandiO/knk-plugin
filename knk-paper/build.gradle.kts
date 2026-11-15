@@ -43,6 +43,14 @@ dependencies {
     // artifacts only: the bukkit ones bring an older spigot-api).
     testImplementation("com.sk89q.worldedit:worldedit-core:7.4.6")
     testImplementation("com.sk89q.worldguard:worldguard-core:7.0.20")
+    // PandiO/knk-workspace#499 (developer decision 2026-11-14: test-only): a mock Paper server for tests that need
+    // Bukkit statics (Registry, Material.isSolid, the scheduler). Its release line must match paperApiVersion
+    // (mockbukkit-v<minecraft version>). Its JUnit 6 dependency is left out: tests call MockBukkit.mock()/unmock()
+    // themselves and don't use its JUnit extension, so the JUnit 5 BOM above stays the only JUnit on the classpath.
+    testImplementation("org.mockbukkit.mockbukkit:mockbukkit-v26.3:${property("mockBukkitVersion")}") {
+        exclude(group = "org.junit.jupiter")
+        exclude(group = "org.junit.platform")
+    }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -70,24 +78,12 @@ tasks.processResources {
     }
 }
 
+// Every knk-paper test runs in `test` (and so in CI). The integration / requires-bukkit tags that used to be excluded
+// are gone since PandiO/knk-workspace#499: tests that need Bukkit statics start a MockBukkit server themselves. Don't
+// bring back a tag to hide a failing test; fix it, or mark a known failure (docs/guides/developer/ci.md § 2 in
+// knk-workspace).
 tasks.test {
-    useJUnitPlatform {
-        // Skip integration tests by default during build
-        excludeTags("integration", "requires-bukkit")
-    }
-}
-
-// The tests tagged integration / requires-bukkit, which `test` skips: `./gradlew :knk-paper:taggedTest`. Not part of
-// `check` or CI: most of them fail today (Bukkit statics without a server, stale stubs); PandiO/knk-workspace#499.
-// Findings and options: that issue and docs/guides/developer/ci.md in knk-workspace.
-tasks.register<Test>("taggedTest") {
-    description = "Runs the tests tagged integration or requires-bukkit (excluded from test)."
-    group = "verification"
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-    useJUnitPlatform {
-        includeTags("integration", "requires-bukkit")
-    }
+    useJUnitPlatform()
 }
 
 val devPluginsDir: File = try {

@@ -1258,3 +1258,19 @@ cache:
       # is reloaded in the background (never waiting for the API); while the API is DOWN only for this
       # many seconds more, then the offline cache answers. Running a command always waits for a fresh set.
       effective-set-stale-seconds: 90
+
+# In-plugin test scenarios (PandiO/knk-workspace#421; knk-workspace docs/guides/developer/plugin-scenarios.md).
+# TEST SERVERS ONLY: keep enabled false on every real server (dev worlds with builds, alpha, production).
+# enabled: true registers /knk scenario list|run <name|all> (node knk.admin.scenario), which builds small test
+# scenes, plays them out and logs one "KNK-SCENARIO PASS|FAIL <name>" line each plus a summary. CI's Paper boot test
+# turns it on. false (the default) registers nothing: the server behaves exactly as without this section.
+# Each scene is a 32 x 24 x 32 box that is cleared to air before and after its scenario; scene n sits 64 blocks
+# along x from the origin. Pick an origin far away from anything built. world: blank = the main world. Read at startup.
+testing:
+  scenarios:
+    enabled: false
+    world: ""
+    origin:
+      x: 30000
+      y: 100
+      z: 30000
