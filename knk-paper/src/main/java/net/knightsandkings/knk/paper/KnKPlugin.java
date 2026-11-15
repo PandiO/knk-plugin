@@ -150,6 +150,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.metrics.MetricsService metricsService;
     // NPC navigation (PandiO/knk-workspace#358): /knk npc, metrics, the Citizens adapter when present.
     private net.knightsandkings.knk.paper.npc.nav.NpcNavigationModule npcNavigation;
+    /** PandiO/knk-workspace#533: the realtime path's re-warm of the roads' region domains (null without roads). */
+    private net.knightsandkings.knk.paper.navigation.DomainCacheRewarm navigationDomainRewarm;
     private KnkConfig config;
     private CacheManager cacheManager;
     /** KNG-58: last-known account, freeze, mode and permission answers on disk, for when the API is down. */
@@ -1932,6 +1934,13 @@ public class KnKPlugin extends JavaPlugin {
                     () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList(),
                     world -> roadNetworkCache.snapshot(world).regionIds(), regionDomainResolver::warmCache, mainThread,
                     navigationService::onAvailabilityChanged, getLogger()));
+            // PandiO/knk-workspace#533, #593: a realtime domain change (EntityChanged, DomainAccessChanged) asks the
+            // roads' regions again in place and then tells navigation (registerConfigSync; only while NPC navigation runs)
+            this.navigationDomainRewarm = new net.knightsandkings.knk.paper.navigation.DomainCacheRewarm(
+                () -> npcNavigation != null && npcNavigation.navigating(),
+                () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList(),
+                world -> roadNetworkCache.snapshot(world).regionIds(), regionDomainResolver::refreshRegions, mainThread,
+                navigationService::onAvailabilityChanged, getLogger());
         }
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationListener(navigationService), this);
@@ -2606,8 +2615,12 @@ public class KnKPlugin extends JavaPlugin {
         }
 
         var cache = cacheManager;
+        var rewarm = navigationDomainRewarm;
+        var navigationDomains = rewarm == null ? null
+            : new net.knightsandkings.knk.paper.navigation.NavigationDomainChanges(coalescer, rewarm);
+        Runnable flagSync = domainAccessSync == null ? null : () -> domainAccessSync.syncNow().exceptionally(error -> null);
         var targets = new net.knightsandkings.knk.paper.realtime.ConfigRealtimeSync.Targets(
-            domainAccessSync == null ? null : () -> domainAccessSync.syncNow().exceptionally(error -> null),
+            navigationDomains == null ? flagSync : navigationDomains.withDomainAccess(flagSync),
             gameSettingsManager == null ? null : gameSettingsManager::refreshNow,
             siegeService == null ? null : siegeService::refreshFromApi,
             lootboxRuntime == null ? null : () -> lootboxRuntime.refresh().exceptionally(error -> null),
@@ -2624,7 +2637,11 @@ public class KnKPlugin extends JavaPlugin {
             },
             telemetryFlushTask == null ? null
                 : () -> getServer().getScheduler().runTaskAsynchronously(this, () -> telemetryFlushTask.pollConfig()));
-        new net.knightsandkings.knk.paper.realtime.ConfigRealtimeSync(coalescer, targets, entityChangeRouter(coalescer),
+        var router = entityChangeRouter(coalescer);
+        if (navigationDomains != null) {
+            navigationDomains.register(router); // after the map's clear: #533
+        }
+        new net.knightsandkings.knk.paper.realtime.ConfigRealtimeSync(coalescer, targets, router,
             gateRealtimeSync, getLogger()).register(service.dispatcher());
 
         if (gameSettingsManager != null) {

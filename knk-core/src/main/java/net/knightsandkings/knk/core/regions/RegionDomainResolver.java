@@ -296,6 +296,23 @@ public class RegionDomainResolver {
         return CompletableFuture.allOf(requests.toArray(new CompletableFuture[0]));
     }
 
+    /**
+     * PandiO/knk-workspace#533: asks the API about each of {@code regionIds} now, cached or not and expired or not,
+     * one request per region ({@link #askEach}). Unlike {@link #clearRegionCache} followed by {@link #warmCache}, a
+     * cached entry keeps being served until its answer is in, so a lookup meanwhile sees the last known rule instead
+     * of an unknown (open) region. Used after a realtime domain change, where the API does not say which regions
+     * changed.
+     *
+     * @param world the regions' world (null: world-blind)
+     * @return completes when every request has been answered or has failed; never exceptionally
+     */
+    public CompletableFuture<Void> refreshRegions(String world, Collection<String> regionIds) {
+        if (domainsQueryApi == null || regionIds == null || regionIds.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return askEach(world, regionIds, Level.WARNING);
+    }
+
     /** KNG-104: forgets every locally cached region (with {@code /knk cache refresh}); the next lookup asks the API. */
     public void clearRegionCache() {
         domainsByRegion.clear();

@@ -19,6 +19,7 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenar
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersLineScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupRealtimeEntryScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupGateFinishTripScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupNarrowsScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcLandingRanksScenario;
@@ -73,6 +74,8 @@ public final class PaperScenarios {
             .register(new NpcGroupNarrowsScenario())
             .register(new NpcGroupGateFinishTripScenario())
             .register(new NpcGroupAccessChangeScenario())
+            // entry removed through realtime under a gate region (PandiO/knk-workspace#593)
+            .register(new NpcGroupRealtimeEntryScenario())
             // the two spots of the developer's L3 retest in their real geometry (PandiO/knk-workspace#592)
             .register(new NpcLedgeCornerScenario())
             .register(new NpcLandingRanksScenario())

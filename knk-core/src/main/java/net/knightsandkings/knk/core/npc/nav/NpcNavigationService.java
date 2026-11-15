@@ -984,6 +984,11 @@ public final class NpcNavigationService {
                 if (nav.goal != null) {
                     nav.tolerated.clear();
                     nav.eventAvailability = true;
+                    // PandiO/knk-workspace#593: the trespass guard takes a fresh look now, so an entry made under the
+                    // old rules (before this event told of the change) is not judged by the new ones
+                    if (nav.regions != null) {
+                        nav.mover.position().ifPresent(feet -> nav.regions = regionsAtFeet(feet));
+                    }
                 }
             }
         });
@@ -1112,8 +1117,9 @@ public final class NpcNavigationService {
 
     /**
      * The trespass guard: a region the NPC stands in now and did not stand in at its last check was entered; the
-     * entry is judged by the current rules from the regions it came from. Independent of the planner and of the
-     * engine's block rules: it watches where NPCs really are. Must stay 0.
+     * entry is judged by the current rules from the regions it came from. An availability event takes a fresh look
+     * first ({@link #onAvailabilityChanged}), so entries made before the plugin knew of a change are not counted.
+     * Independent of the planner and of the engine's block rules: it watches where NPCs really are. Must stay 0.
      */
     private boolean trespassed(Nav nav, NavPoint at, Set<String> here) {
         Set<String> before = nav.regions;
