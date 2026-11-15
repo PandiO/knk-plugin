@@ -25,7 +25,7 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * a portcullis across the corner scene's east road closes behind the leader of a group of 6 and opens after the
  * group turned back. With {@code group-followers-finish-trip: true} the held followers walk on to their slots at the
  * goal first (the member listener once each), then follow the group; with {@code false} they follow the leader at once
- * and never walk on to the old goal. Nobody is moved by the door, nobody trespasses. Needs Citizens.
+ * and none finishes a trip of its own. Nobody is moved by the door, nobody trespasses. Needs Citizens.
  */
 public final class NpcGroupGateFinishTripScenario implements Scenario<ScenarioScene> {
 
@@ -34,7 +34,6 @@ public final class NpcGroupGateFinishTripScenario implements Scenario<ScenarioSc
     static final int DOOR_Z = 7;
     /** How long the door takes to close or open. */
     static final int DOOR_TICKS = 60;
-    static final boolean DEBUG_TRACE = true; // DEBUG-L4 (temporary)
 
     @Override
     public String name() {
@@ -51,7 +50,6 @@ public final class NpcGroupGateFinishTripScenario implements Scenario<ScenarioSc
         NavGroup group;
         final List<Integer> held = new ArrayList<>();
         final Map<Integer, Integer> arrivals = new HashMap<>();
-        final Map<Integer, Double> furthestZ = new HashMap<>();
         long finishedBefore;
     }
 
@@ -128,35 +126,9 @@ public final class NpcGroupGateFinishTripScenario implements Scenario<ScenarioSc
                 run.group = npcs.get().patrolGroup(members, npcs.get().groupSettings(members.get(0), Formation.Type.COLUMN)
                     .withFollowersFinishTrip(finish), goal, corners.start());
                 run.group.onMemberArrived((member, at) -> run.arrivals.merge(member.id(), 1, Integer::sum));
-                if (DEBUG_TRACE) {
-                    npcs.get().everyTick(new Runnable() { // DEBUG-L4 (temporary)
-                        long t;
-                        @Override
-                        public void run() {
-                            if (++t % 5 == 0 && t < 700) {
-                                ScenarioNpcRules dbg = new ScenarioNpcRules(scene.services().gates());
-                                StringBuilder b = new StringBuilder("trace t" + t + " doors "
-                                    + npcs.get().service().gateDoorsOf(run.group.leader().id()) + " box "
-                                    + dbg.doorBox(gate.get().doorId()) + " blocks "
-                                    + dbg.gateBlocks(null, gate.get().doorId()));
-                                for (NpcMover m : members) {
-                                    m.position().ifPresent(p -> b.append(String.format(java.util.Locale.ROOT, " | %s %.1f %.1f %s %s",
-                                        m.name().substring(m.name().length() - 1), p.x() - scene.worldX(0), p.z() - scene.worldZ(0),
-                                        run.group.followerState(m.id()), m.isMoving() ? "m" : "s")));
-                                }
-                                npcs.get().log().add(new ScenarioNpcs.LogLine(t, b.toString()));
-                            }
-                        }
-                    });
-                }
-                npcs.get().everyTick(() -> {
-                    for (NpcMover mover : members) {
-                        mover.position().ifPresent(p -> run.furthestZ.merge(mover.id(), p.z(), Math::max));
-                    }
-                });
             })
             .await(toggle + ": the leader is past the gate", TIMEOUT, () -> run.group.leader().position()
-                .map(p -> p.z() >= doorZ + 2.5).orElse(false))
+                .map(p -> p.z() >= doorZ + 4.5).orElse(false)) // well past it: the leader's own route is not replanned
             .act(toggle + ": the gate closes behind the leader", () -> {
                 gate.get().gates().closeGate(gate.get().doorId());
                 npcs.get().gateChanged(gate.get().doorId());
@@ -184,18 +156,8 @@ public final class NpcGroupGateFinishTripScenario implements Scenario<ScenarioSc
         if (finish) {
             awaitOrExplain(plan, "finish-trip: every held follower reached its slot at the goal", TIMEOUT,
                     () -> run.arrivals.keySet().containsAll(run.held),
-                    () -> {
-                        try { // DEBUG-L4 (temporary)
-                            StringBuilder b = new StringBuilder();
-                            for (var line : npcs.get().log()) {
-                                b.append(line.tick()).append(": ").append(line.text()).append('\n');
-                            }
-                            java.nio.file.Files.writeString(java.nio.file.Path.of("/tmp/l4-gate.log"), b.toString());
-                        } catch (Exception ignored) {
-                        }
-                        return "held " + run.held + ", arrived " + run.arrivals + ", finishing now " + run.group.finishing()
-                            + npcs.get().tail(40);
-                    });
+                    () -> "held " + run.held + ", arrived " + run.arrivals + ", finishing now " + run.group.finishing()
+                        + npcs.get().tail(40));
             plan.check("finish-trip: each reported once", () -> {
                     for (int id : run.held) {
                         if (run.arrivals.getOrDefault(id, 0) != 1) {
@@ -207,16 +169,16 @@ public final class NpcGroupGateFinishTripScenario implements Scenario<ScenarioSc
                 })
                 .await("finish-trip: then they follow the group", 200, () -> run.group.finishing() == 0);
         } else {
-            plan.waitTicks(300)
-                .check("follow-leader: the held followers never walked on to the old goal", () -> {
-                    double goalZ = goal.z();
-                    for (int id : run.held) {
-                        if (run.furthestZ.getOrDefault(id, 0.0) > goalZ - 3) {
-                            return "follower " + id + " went to z " + run.furthestZ.get(id) + " (goal z " + goalZ + ")";
-                        }
-                    }
-                    return run.arrivals.isEmpty() ? null : "member listener fired: " + run.arrivals;
-                });
+            int[] finishing = {0};
+            int[] watched = {0};
+            plan.await("follow-leader: 15 s after the gate opened", 305, () -> {
+                    finishing[0] = Math.max(finishing[0], run.group.finishing());
+                    return ++watched[0] >= 300;
+                })
+                .check("follow-leader: the held followers follow the leader, none finishes a trip", () ->
+                    finishing[0] == 0 && run.arrivals.isEmpty()
+                        && npcs.get().metrics().total(Event.GROUP_FINISH_TRIP) == run.finishedBefore ? null
+                        : "finishing at most " + finishing[0] + ", member listener " + run.arrivals + npcs.get().tail(20));
         }
         plan.act(toggle + ": dismiss the group", () -> npcs.get().dismiss(run.group));
     }
