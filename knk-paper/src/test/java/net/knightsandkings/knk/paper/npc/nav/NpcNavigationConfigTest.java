@@ -347,7 +347,8 @@ class NpcNavigationConfigTest {
     void theShippedConfigHasTheNarrowedFormationKeysWithTheirDefaults() throws Exception {
         String shipped;
         try (java.io.InputStream in = getClass().getClassLoader().getResourceAsStream("config.yml")) {
-            shipped = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            shipped = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                .replace("\r\n", "\n"); // a Windows checkout (core.autocrlf) has CRLF line ends
         }
         assertTrue(shipped.contains("    group-spacing: 1.5\n"), "group-spacing 1.5");
         assertTrue(shipped.contains("    group-lateral-spacing: 1.0\n"));
