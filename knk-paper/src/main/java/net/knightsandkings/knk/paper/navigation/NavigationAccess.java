@@ -17,6 +17,7 @@ import org.bukkit.entity.Player;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.gates.GateManager;
+import net.knightsandkings.knk.core.gates.target.GateBox;
 import net.knightsandkings.knk.core.npc.nav.AccessSubject;
 import net.knightsandkings.knk.core.npc.nav.SubjectRegionAvailability;
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
@@ -31,6 +32,7 @@ import net.knightsandkings.knk.core.roads.route.GateAvailability.GateView;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.StaticFlagsAvailability;
 import net.knightsandkings.knk.core.siege.SiegeGateStance;
+import net.knightsandkings.knk.paper.gates.GateDoorBounds;
 import net.knightsandkings.knk.paper.gates.GatePassThroughRules;
 import net.knightsandkings.knk.paper.regions.RegionIds;
 import net.knightsandkings.knk.paper.siege.SiegeGateController;
@@ -168,6 +170,17 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     @Override
     public boolean gateBlocks(AccessSubject subject, int doorId) {
         return gateAvailability(subject, java.util.List.of(doorId)).decide(doorId).isBlocked();
+    }
+
+    /**
+     * PandiO/knk-workspace#507: the door's box as the gate commands and the gate safety code know it
+     * ({@link GateDoorBounds}: its closed footprint and its captured closed and opened regions); empty for a door the
+     * gate cache does not know.
+     */
+    @Override
+    public Optional<GateBox> doorBox(int doorId) {
+        CachedGateDoor door = gateManager.getGate(doorId);
+        return door == null ? Optional.empty() : Optional.ofNullable(GateDoorBounds.of(door, gateManager));
     }
 
     /**

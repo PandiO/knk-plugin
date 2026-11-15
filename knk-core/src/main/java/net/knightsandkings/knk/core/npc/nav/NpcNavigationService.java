@@ -363,6 +363,22 @@ public final class NpcNavigationService {
     }
 
     /**
+     * The gate doors on the NPC's current route, passed or still ahead, in route order (PandiO/knk-workspace#507: a
+     * group's followers walk behind the leader through gates the leader has passed); empty without a route.
+     */
+    public List<Integer> gateDoorsOf(int moverId) {
+        Nav nav = npcs.get(moverId);
+        if (nav == null || nav.gates.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> doors = new java.util.ArrayList<>(nav.gates.size());
+        for (GateOnLine gate : nav.gates) {
+            doors.add(gate.doorId());
+        }
+        return doors;
+    }
+
+    /**
      * What blocks a mover's order now, while it walks the partial route to it and while it waits there; null when
      * nothing blocks.
      */

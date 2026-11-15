@@ -167,6 +167,11 @@ public final class NpcNavigationModule {
         factory = null;
     }
 
+    /** Whether NPC route following runs (built on first use of {@code /knk npc nav}; PandiO/knk-workspace#506). */
+    public boolean navigating() {
+        return service != null;
+    }
+
     private void publishSnapshot() {
         long start = System.nanoTime();
         metrics.publishStates(allStates());
