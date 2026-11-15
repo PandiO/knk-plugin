@@ -56,8 +56,8 @@ class PaperScenariosTest {
             "temp-region-sweep-keeps-lootbox-area-region", "lootbox-spawns-on-ground-in-range", "lootbox-spawns-under-roof",
             "lootbox-switched-off-spawns-nothing", "npc-corners-line", "npc-corners-walk", "npc-stuck-ladder",
             "npc-walks-road-route", "npc-keeps-to-road-around-obstacle", "npc-group-keeps-spacing",
-            "player-command-needs-grant", "player-chat-group-colours", "player-join-loading-hold", "player-menu-click",
-            "player-tp-into-closed-gate", "player-rejoin-in-closed-gate", "player-heal-needs-grant"), names);
+            "player-command-needs-grant", "player-heal-needs-grant", "player-chat-group-colours", "player-join-loading-hold", "player-menu-click",
+            "player-tp-into-closed-gate", "player-rejoin-in-closed-gate"), names);
     }
 
     @SuppressWarnings("unchecked")

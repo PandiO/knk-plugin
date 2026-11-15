@@ -71,12 +71,13 @@ public final class PaperScenarios {
             .register(new NpcGroupSpacingScenario())
             // Scripted players: commands, chat, joins, menus and teleports (PandiO/knk-workspace#540)
             .register(new PlayerCommandNeedsGrantScenario())
+            // KnK takes the plain /heal over from WorldGuard (PandiO/knk-workspace#580). Not last: the run's end would
+            // then land on the retry of player-tp-into-closed-gate's teleport audit (PandiO/knk-workspace#586).
+            .register(new PlayerHealNeedsGrantScenario())
             .register(new PlayerChatGroupColoursScenario())
             .register(new PlayerJoinLoadingHoldScenario())
             .register(new PlayerMenuClickScenario())
             .register(new PlayerTpIntoClosedGateScenario())
-            .register(new PlayerRejoinInClosedGateScenario())
-            // KnK takes the plain /heal over from WorldGuard (PandiO/knk-workspace#580)
-            .register(new PlayerHealNeedsGrantScenario());
+            .register(new PlayerRejoinInClosedGateScenario());
     }
 }
