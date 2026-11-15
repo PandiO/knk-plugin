@@ -40,6 +40,7 @@ public final class ScenarioScene {
     private final ScenarioServices services;
     private final List<Entity> spawned = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();
+    private final List<ScenarioPlayer> players = new ArrayList<>();
 
     public ScenarioScene(String scenarioName, int index, World world, int originX, int originY, int originZ,
                          ScenarioServices services) {
@@ -107,6 +108,49 @@ public final class ScenarioScene {
             }
         }, services.plugin(), false);
         listeners.add(listener);
+    }
+
+    /**
+     * A scripted player for this scene (PandiO/knk-workspace#540), not joined yet: configure it (fake account,
+     * in-house grants, op), then call {@link ScenarioPlayer#join()} in a step. It quits, and its fake data is taken
+     * back, when the scene closes. Names are 3 to 16 letters, digits or _; pick ones no real player has (the
+     * shipped scenarios start theirs with "Scn"). Creating it does no work, so it may be called in
+     * {@code define}.
+     */
+    public ScenarioPlayer player(String name) {
+        for (ScenarioPlayer existing : players) {
+            if (existing.name().equalsIgnoreCase(name)) {
+                return existing;
+            }
+        }
+        ScenarioPlayer player = new ScenarioPlayer(this, name);
+        players.add(player);
+        return player;
+    }
+
+    /** {@link #player(String)}, configured by {@code setup} (for example {@code p -> p.account(id).grant("knk.heal")}). */
+    public ScenarioPlayer player(String name, Consumer<ScenarioPlayer> setup) {
+        ScenarioPlayer player = player(name);
+        setup.accept(player);
+        return player;
+    }
+
+    /** Quits every scripted player and takes their fake data back (the host calls this first when closing). */
+    void closePlayers() {
+        RuntimeException first = null;
+        for (ScenarioPlayer player : players) {
+            try {
+                player.close();
+            } catch (RuntimeException e) {
+                if (first == null) {
+                    first = e;
+                }
+            }
+        }
+        players.clear();
+        if (first != null) {
+            throw first;
+        }
     }
 
     /** Unregisters the listeners added through {@link #onEvent}. */

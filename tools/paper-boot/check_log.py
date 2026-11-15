@@ -11,7 +11,10 @@ Passes when:
   6. with --expect-npc-navigation (PandiO/knk-workspace#543), Citizens was enabled and KnK's NPC navigation started on
      it ("[NPC] navigation: Citizens ..."), not "[NPC] navigation unavailable: <reason>".
 
-An entry is a timestamped line plus the untimestamped lines after it (a stack trace). It belongs to KnK, WorldGuard,
+An entry is a timestamped line plus the untimestamped lines after it (a stack trace). A trace printed with
+printStackTrace() arrives one timestamped line per frame ("[..] [thread/WARN]: \tat ..."); such a trace joins the
+latest WARN or ERROR of the same thread name and second that has no trace yet, also when other lines came in between (PandiO/knk-workspace#540: the plugin's join handling logs its "API
+unreachable" error that way, and the scenarios' fake players join). It belongs to KnK, WorldGuard,
 WorldEdit or Citizens when its text mentions them (logger name, plugin name or a stack frame). Prints GitHub
 annotations and a summary; exits 1 on failure.
 
@@ -23,7 +26,7 @@ import argparse
 import re
 import sys
 
-ENTRY_START = re.compile(r"^\[\d{2}:\d{2}:\d{2}\] \[(?P<thread>[^\]]*)/(?P<level>[A-Z]+)\]: ?(?P<message>.*)$")
+ENTRY_START = re.compile(r"^\[(?P<time>\d{2}:\d{2}:\d{2})\] \[(?P<thread>[^\]]*)/(?P<level>[A-Z]+)\]: ?(?P<message>.*)$")
 WATCHED = re.compile(r"knightsandkings|sk89q|worldguard|worldedit|citizens", re.IGNORECASE)
 STACK_LINE = re.compile(r"^\s+at |^\s*Caused by: |^\s*\.\.\. \d+ more|^[\w.$]+(Exception|Error|Throwable)\b")
 VERSION_STAMP = re.compile(r"\[KnightsAndKings\] KnightsAndKings (?P<version>\S+) \(commit (?P<commit>[^)]*)\)")
@@ -38,10 +41,14 @@ NPC_NAVIGATION_OFF = re.compile(r"\[KnightsAndKings\] \[NPC\] navigation unavail
 
 
 class Entry:
-    def __init__(self, line_no, level, first_line):
+    def __init__(self, line_no, level, first_line, thread=None, time=None):
         self.line_no = line_no
         self.level = level
+        self.thread = thread
+        self.time = time
         self.lines = [first_line]
+        self.inline_trace = False  # an untimestamped trace follows it (a logger's own exception)
+        self.printed_trace = False  # printStackTrace() frames joined it
 
     @property
     def text(self):
@@ -52,21 +59,56 @@ class Entry:
         return any(STACK_LINE.search(line) for line in self.lines[1:])
 
 
+TRACE_HEADER = re.compile(r"^[\w.$]+(Exception|Error|Throwable)\b")
+
+
 def parse_entries(lines):
     entries = []
     current = None
+    recent = {}  # thread name -> its entries of the current second
+    trace_target = {}  # thread name -> the entry its printStackTrace() frames are joining
     for number, raw in enumerate(lines, start=1):
         line = raw.rstrip("\n")
         match = ENTRY_START.match(line)
+        if match and is_trace_frame(match):
+            thread, message = match.group("thread"), match.group("message")
+            target = trace_target.get(thread)
+            if target is None or TRACE_HEADER.search(message):
+                target = trace_owner(recent.get(thread, []), match.group("time"))
+            if target is not None:
+                target.lines.append(message)
+                target.printed_trace = True
+                trace_target[thread] = target
+                continue
         if match:
-            current = Entry(number, match.group("level"), line)
+            current = Entry(number, match.group("level"), line, match.group("thread"), match.group("time"))
             entries.append(current)
+            same_second = [e for e in recent.get(current.thread, []) if e.time == current.time]
+            recent[current.thread] = same_second + [current]
         elif current is not None:
             current.lines.append(line)
+            if STACK_LINE.search(line):
+                current.inline_trace = True
         else:  # text before the first timestamped line: keep it as its own entry
             current = Entry(number, "INFO", line)
             entries.append(current)
     return entries
+
+
+def is_trace_frame(match):
+    """Whether a timestamped line is a printStackTrace() frame: a stack line on System.err (logged as WARN or ERROR)."""
+    return match.group("level") in ("WARN", "ERROR") and STACK_LINE.search(match.group("message")) is not None
+
+
+def trace_owner(candidates, time):
+    """The entry a new printStackTrace() trace belongs to: the thread's latest WARN or ERROR of the same second that has
+    no trace of its own yet. Several pool threads share one name, so a logger's own exception (with its untimestamped
+    trace) can come in between; it is skipped."""
+    for entry in reversed(candidates):
+        if entry.time == time and entry.level in ("WARN", "ERROR") and not entry.inline_trace \
+                and not entry.printed_trace:
+            return entry
+    return None
 
 
 def api_down_pattern(address):

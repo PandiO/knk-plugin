@@ -2800,7 +2800,10 @@ public class KnKPlugin extends JavaPlugin {
             () -> regionHttpServer != null ? regionHttpServer.getAddress() : null,
             () -> navigationService,
             () -> npcNavigation != null ? npcNavigation.moverFactory() : null,
-            () -> npcNavigation != null ? npcNavigation.unavailableReason() : "the NPC module did not start");
+            () -> npcNavigation != null ? npcNavigation.unavailableReason() : "the NPC module did not start",
+            // Scripted players (PandiO/knk-workspace#540)
+            () -> cacheManager != null ? cacheManager.getUserCache() : null,
+            () -> permissionsDataAccess, () -> menuService, () -> menuTemplatesDataAccess, this::getApiConnectivity);
         var scenarioCommand = new net.knightsandkings.knk.paper.scenario.ScenarioCommand(this,
             net.knightsandkings.knk.paper.scenario.PaperScenarios.registry(),
             new net.knightsandkings.knk.paper.scenario.PaperScenarioHost(settings, services));

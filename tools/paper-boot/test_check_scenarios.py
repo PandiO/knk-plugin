@@ -64,5 +64,25 @@ class CheckScenariosTest(unittest.TestCase):
         self.assertTrue(any("no KNK-SCENARIO SUMMARY" in error for error in errors))
 
 
+    def test_bot_test_lines_are_read_with_their_tag(self):
+        # PandiO/knk-workspace#540: tools/bot-tests prints the same contract with KNK-BOT and milliseconds
+        lines = [
+            "KNK-BOT START first-join\n",
+            "KNK-BOT PASS first-join (4210 ms)\n",
+            "KNK-BOT START rejoin\n",
+            "KNK-BOT FAIL rejoin: KnkBot1 was refused: You need an invitation\n",
+            "KNK-BOT SUMMARY passed=1 failed=1 total=2\n",
+        ]
+        errors, rows = check(lines, tag="KNK-BOT")
+        self.assertEqual([("first-join", "PASS", "4210 ms"),
+                          ("rejoin", "FAIL", "KnkBot1 was refused: You need an invitation")], rows)
+        self.assertEqual(["scenario rejoin failed: KnkBot1 was refused: You need an invitation"], errors)
+
+    def test_bot_lines_are_not_scenario_lines(self):
+        errors, rows = check(["KNK-BOT START first-join\n", "KNK-BOT SUMMARY passed=0 failed=0 total=0\n"])
+        self.assertEqual([], rows)
+        self.assertIn("no KNK-SCENARIO SUMMARY line: the scenario run did not finish (or never started)", errors)
+
+
 if __name__ == "__main__":
     unittest.main()
