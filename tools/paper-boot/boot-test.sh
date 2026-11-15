@@ -22,6 +22,10 @@
 # a pinned build), turns on npc.navigation.enabled in the KnK config and makes check_log.py require Citizens enabled
 # and KnK's "[NPC] navigation: Citizens ..." startup line. The NPC scenarios need it; without it they fail with the
 # reason NPC navigation is off.
+#
+# Headless bot tests (PandiO/knk-workspace#540): --bot-tests DIR runs `node DIR/run.mjs` (tools/bot-tests, Mineflayer,
+# its npm packages installed) against the server after the scenarios, while the server is still up, and checks its
+# KNK-BOT lines with check_scenarios.py --tag KNK-BOT. --bot-version sets the Minecraft version the bots speak.
 set -euo pipefail
 
 usage() {
@@ -38,6 +42,9 @@ Usage: boot-test.sh --server-dir DIR --plugin-jar JAR [options]
   --scenarios              enable the in-plugin scenarios, run them all and check their result lines
   --min-scenarios N        with --scenarios: fail when fewer than N scenarios ran (default 1)
   --npc-navigation         turn on npc.navigation.enabled (needs plugins/[Cc]itizens*.jar) and require it running
+  --bot-tests DIR          run the Mineflayer bot tests in DIR (tools/bot-tests, npm ci done) and check their lines
+  --bot-version VERSION    Minecraft version the bots speak (default 26.3)
+  --bot-timeout SECONDS    time allowed for the bot tests (default 300)
 EOF
 }
 
@@ -54,6 +61,9 @@ FAIL_LINES=()
 SCENARIOS=0
 MIN_SCENARIOS=1
 NPC_NAVIGATION=0
+BOT_TESTS_DIR=""
+BOT_VERSION="26.3"
+BOT_TIMEOUT=300
 # The address check_log.py treats as the unreachable API (the default api.base-url of config.yml).
 UNREACHABLE_API="localhost:5294"
 
@@ -72,6 +82,9 @@ while [[ $# -gt 0 ]]; do
     --scenarios) SCENARIOS=1; shift ;;
     --min-scenarios) MIN_SCENARIOS="$2"; shift 2 ;;
     --npc-navigation) NPC_NAVIGATION=1; shift ;;
+    --bot-tests) BOT_TESTS_DIR="$2"; shift 2 ;;
+    --bot-version) BOT_VERSION="$2"; shift 2 ;;
+    --bot-timeout) BOT_TIMEOUT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -85,6 +98,11 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_JAR="$(cd "$(dirname "$PLUGIN_JAR")" && pwd)/$(basename "$PLUGIN_JAR")"
+if [[ -n "$BOT_TESTS_DIR" ]]; then
+  BOT_TESTS_DIR="$(cd "$BOT_TESTS_DIR" && pwd)"
+  [[ -d "$BOT_TESTS_DIR/node_modules/mineflayer" ]] \
+    || { echo "::error::--bot-tests: run npm ci in $BOT_TESTS_DIR first"; exit 2; }
+fi
 cd "$SERVER_DIR"
 [[ -f paper.jar ]] || { echo "::error::$SERVER_DIR/paper.jar is missing"; exit 2; }
 ls plugins/worldguard-*.jar plugins/worldedit-*.jar >/dev/null || { echo "::error::WorldGuard/WorldEdit jars missing"; exit 2; }
@@ -138,7 +156,7 @@ if [[ $NPC_NAVIGATION -eq 1 ]]; then
     || { echo "::error::Could not set npc.navigation.enabled in config.yml (its layout changed)"; exit 2; }
 fi
 
-rm -f logs/latest.log console.in
+rm -f logs/latest.log console.in bot-tests.log
 mkdir -p logs
 mkfifo console.in
 # Keep the console pipe open for writing, so the server doesn't read end-of-input.
@@ -210,6 +228,13 @@ else
       FAILED=1
     done
   fi
+  if [[ -n "$BOT_TESTS_DIR" ]]; then
+    echo "Bot tests: node $BOT_TESTS_DIR/run.mjs (Minecraft $BOT_VERSION)"
+    # Their verdict comes from check_scenarios.py below; the exit code only says the same.
+    timeout "$BOT_TIMEOUT" node "$BOT_TESTS_DIR/run.mjs" --host 127.0.0.1 --port 25565 --version "$BOT_VERSION" \
+      > bot-tests.log 2>&1 || true
+    cat bot-tests.log
+  fi
 fi
 
 stop_server || FAILED=1
@@ -222,6 +247,10 @@ check_args=(logs/latest.log --unreachable-api "$UNREACHABLE_API")
 python3 -I "$SCRIPT_DIR/check_log.py" "${check_args[@]}" || FAILED=1
 if [[ $SCENARIOS -eq 1 ]]; then
   python3 -I "$SCRIPT_DIR/check_scenarios.py" logs/latest.log --min-scenarios "$MIN_SCENARIOS" || FAILED=1
+fi
+
+if [[ -n "$BOT_TESTS_DIR" && $started -eq 1 ]]; then
+  python3 -I "$SCRIPT_DIR/check_scenarios.py" bot-tests.log --tag KNK-BOT --title "Bot tests" || FAILED=1
 fi
 
 if [[ $FAILED -ne 0 ]]; then
