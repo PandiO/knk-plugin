@@ -44,6 +44,8 @@ public final class RouteFollower {
     private int lastSnapEnd = -1;
     private int bestIndex = -1;
     private List<NavPoint> lastSent = List.of();
+    /** The last waypoint the walk was given (a stretch's last, or a recovery target), the next stretch's anchor. */
+    private NavPoint lastWaypoint;
 
     /** @param roadLine the route as floor points (the road's polyline), at least one */
     public RouteFollower(List<NavPoint> roadLine) {
@@ -111,6 +113,7 @@ public final class RouteFollower {
         next = i;
         sentStart = sentEnd = i;
         lastSnapEnd = -1;
+        lastWaypoint = null;
     }
 
     /** The route as floor points every {@link #STEP} blocks, corners included. */
@@ -188,10 +191,17 @@ public final class RouteFollower {
         int lastX = Integer.MIN_VALUE;
         int lastY = Integer.MIN_VALUE;
         int lastZ = Integer.MIN_VALUE;
-        int refY = start == lastSnapEnd && lastSnapY != Integer.MIN_VALUE ? lastSnapY : npcFloorY;
+        boolean straightOn = start == lastSnapEnd && lastSnapY != Integer.MIN_VALUE;
+        int refY = straightOn ? lastSnapY : npcFloorY;
         for (int i = start; i < end; i++) {
             NavPoint p = line.get(i);
-            NavPoint floor = HopPlanner.snapNear(world, p, refY);
+            NavPoint floor = HopPlanner.surfaceNear(world, p, refY);
+            if (floor == null) {
+                if (i < end - 1 || !points.isEmpty()) {
+                    continue; // over a drop with no walk beside it (#592): the chain below joins its neighbours
+                }
+                floor = HopPlanner.snapNear(world, p, refY); // nothing else in this stretch: as before
+            }
             refY = (int) Math.round(floor.y());
             int bx = floor.blockX();
             int bz = floor.blockZ();
@@ -215,7 +225,9 @@ public final class RouteFollower {
         if (cornerClearance > 0) {
             points = corners.apply(world, points, indexes, cornerClearance);
         }
+        points = WaypointChain.bridged(world, straightOn ? lastWaypoint : null, points);
         lastSent = List.copyOf(points);
+        lastWaypoint = points.get(points.size() - 1);
         return new Stretch(Kind.WAYPOINTS, lastSent);
     }
 
@@ -277,6 +289,7 @@ public final class RouteFollower {
         sentStart = sentEnd = next;
         lastSnapY = target.floor().blockY();
         lastSnapEnd = next;
+        lastWaypoint = HopPlanner.feet(target.floor());
         bestIndex = Math.max(bestIndex, target.index());
         return target.floor();
     }

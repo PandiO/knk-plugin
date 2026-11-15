@@ -14,7 +14,8 @@ import java.util.Set;
  * <p>A turn is a line point where the heading changes by {@link #TURN_DEGREES} or more over the next
  * {@link #TURN_SPAN} points. For the turn point and the {@link #NEIGHBOURS} points either side of it, a waypoint
  * moves outwards (away from the inside of the turn), at most the clearance in whole blocks, to the block that keeps
- * the most distance from the walls on the inside up to the clearance; the block must be standable, keep floor
+ * the most distance from the walls on the inside up to the clearance (a drop on the inside, a ledge's edge, counts as
+ * a wall: PandiO/knk-workspace#592); the block must be standable, keep floor
  * continuity with the waypoint's floor, have the body's headroom, fit the low-headroom rule, lie in the same
  * WorldGuard regions and keep a straight walk ({@link NavGeometry#straightWalkable}) to the waypoints before and
  * after it. Where the road is too narrow, the waypoint goes as far out as the road allows, or stays. Straight stretches
@@ -108,12 +109,14 @@ public final class CornerClearance {
         int bz = feet.blockZ();
         int maxMove = (int) Math.floor(clearance + 1e-9);
         int reach = maxMove + (int) Math.ceil(clearance + 0.5) + 1;
-        // the walls on the inside of the turn around the waypoint, asked once (feet and head height of each cell's
-        // own floor are close enough: candidates keep floor continuity with the waypoint)
+        // the walls and drops on the inside of the turn around the waypoint, asked once (feet and head height of each
+        // cell's own floor are close enough: candidates keep floor continuity with the waypoint); a ledge on the
+        // inside of a turn is kept clear of like a wall (#592, the #491 stair corner)
         Set<Long> walls = new HashSet<>();
         for (int dx = -reach; dx <= reach; dx++) {
             for (int dz = -reach; dz <= reach; dz++) {
-                if ((dx != 0 || dz != 0) && NavGeometry.wallAt(world, w, bx + dx, feetY, bz + dz)) {
+                if ((dx != 0 || dz != 0) && (NavGeometry.wallAt(world, w, bx + dx, feetY, bz + dz)
+                    || drop(world, w, bx + dx, feetY - 1, bz + dz))) {
                     walls.add(key(bx + dx, bz + dz));
                 }
             }
@@ -174,6 +177,14 @@ public final class CornerClearance {
             best = Math.min(best, Math.hypot(ddx, ddz));
         }
         return best;
+    }
+
+    /**
+     * Whether a cell is a drop beside a waypoint on floor {@code floorY}: loaded, with no floor within
+     * {@link HopPlanner#CONTINUITY_RANGE} of it (air over a lower level, a stairwell).
+     */
+    private static boolean drop(NavWorld world, String w, int x, int floorY, int z) {
+        return world.isLoaded(w, x, z) && HopPlanner.floorNear(world, new NavPoint(w, x + 0.5, floorY, z + 0.5), floorY) == null;
     }
 
     private static long key(int x, int z) {

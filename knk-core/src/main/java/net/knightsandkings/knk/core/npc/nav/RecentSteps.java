@@ -23,6 +23,11 @@ public final class RecentSteps {
      * 3-block fall lasts about 15 ticks, so a look every 5 ticks sees at least this much; a stair step never does).
      */
     public static final double ENGINE_FALL_BLOCKS = 1.5;
+    /**
+     * A body falling at least this fast (blocks per tick, downwards) has fallen about two blocks in one go: a step down
+     * a staircase never gets faster than about 0.4 (PandiO/knk-workspace#592).
+     */
+    public static final double FALL_SPEED = 0.55;
     /** A step this far (horizontally) from the last one was no step: the body was pushed or teleported. */
     public static final double JUMP_BLOCKS = 2.5;
 
@@ -46,11 +51,26 @@ public final class RecentSteps {
      * walking down a flight between two looks (several stair steps, each a short hop) is no fall.
      */
     public double record(NavPoint feet, boolean onGround, double fallDistance) {
+        return record(feet, onGround, fallDistance, Double.NaN);
+    }
+
+    /**
+     * As {@link #record(NavPoint, boolean, double)}, with the body's vertical speed ({@link NpcMover#verticalSpeed()}):
+     * a look in the air while it falls at {@link #FALL_SPEED} or faster counts as the engine seeing it fall
+     * {@link #ENGINE_FALL_BLOCKS} in one go, for engines whose fall distance stays near 0 (PandiO/knk-workspace#592).
+     */
+    public double record(NavPoint feet, boolean onGround, double fallDistance, double verticalSpeed) {
         double fell = 0;
         if (!onGround) {
             airborne = true;
-            if (!Double.isNaN(fallDistance)) {
-                maxFall = Double.isNaN(maxFall) ? fallDistance : Math.max(maxFall, fallDistance);
+            double seen = fallDistance;
+            if (!Double.isNaN(verticalSpeed) && verticalSpeed <= -FALL_SPEED) {
+                seen = Double.isNaN(seen) ? ENGINE_FALL_BLOCKS : Math.max(seen, ENGINE_FALL_BLOCKS);
+            } else if (Double.isNaN(seen) && !Double.isNaN(verticalSpeed)) {
+                seen = 0;
+            }
+            if (!Double.isNaN(seen)) {
+                maxFall = Double.isNaN(maxFall) ? seen : Math.max(maxFall, seen);
             }
         } else {
             if (airborne && !Double.isNaN(groundY) && groundY - feet.y() >= FALL_BLOCKS

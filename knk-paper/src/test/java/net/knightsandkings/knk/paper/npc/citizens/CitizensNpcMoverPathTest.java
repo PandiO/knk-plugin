@@ -96,4 +96,18 @@ class CitizensNpcMoverPathTest {
         org.mockito.Mockito.when(strategy.getPath()).thenReturn(List.of(new Vector(0, 64, 0)));
         assertEquals(net.knightsandkings.knk.core.npc.nav.NpcMover.StuckKind.STATIONARY, mover.stuckKind());
     }
+
+    @Test
+    void theVerticalSpeedIsTheBodysVelocityAndUnknownWithoutABody() {
+        // PandiO/knk-workspace#592: a Citizens player NPC's fall distance stays near 0; its velocity tells a fall
+        net.citizensnpcs.api.npc.NPC npc = org.mockito.Mockito.mock(net.citizensnpcs.api.npc.NPC.class);
+        org.bukkit.entity.Entity body = org.mockito.Mockito.mock(org.bukkit.entity.Entity.class);
+        CitizensNpcMover mover = new CitizensNpcMover(npc, removed -> { });
+
+        assertTrue(Double.isNaN(mover.verticalSpeed()), "no body: unknown");
+
+        org.mockito.Mockito.when(npc.getEntity()).thenReturn(body);
+        org.mockito.Mockito.when(body.getVelocity()).thenReturn(new Vector(0.1, -0.62, 0));
+        assertEquals(-0.62, mover.verticalSpeed(), 1e-9);
+    }
 }

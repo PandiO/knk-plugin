@@ -292,6 +292,8 @@ class NpcNavRunnerTest {
             Path trace = files.filter(file -> file.getFileName().toString().contains("_trace_")).findFirst().orElseThrow();
             List<String> lines = Files.readAllLines(trace);
             assertTrue(lines.size() > 15 && lines.get(lines.size() - 1).equals("# trace ended"), lines.toString());
+            assertTrue(lines.stream().anyMatch(line -> line.matches("# waypoints: -?\\d+ -?\\d+ -?\\d+(; -?\\d+ -?\\d+ -?\\d+)*")),
+                "the trace lists the stretch's waypoints: " + lines);
         }
         assertEquals("No test NPC nobody", runner.startTrace(FROM, "nobody", 1));
     }

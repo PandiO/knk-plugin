@@ -21,6 +21,8 @@ import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupGateFinishTripScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupNarrowsScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcLandingRanksScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcLedgeCornerScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStuckLadderScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupSpacingScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
@@ -71,6 +73,9 @@ public final class PaperScenarios {
             .register(new NpcGroupNarrowsScenario())
             .register(new NpcGroupGateFinishTripScenario())
             .register(new NpcGroupAccessChangeScenario())
+            // the two spots of the developer's L3 retest in their real geometry (PandiO/knk-workspace#592)
+            .register(new NpcLedgeCornerScenario())
+            .register(new NpcLandingRanksScenario())
             // NPC navigation on Citizens, on a fake road network (PandiO/knk-workspace#543)
             .register(new NpcWalksRoadRouteScenario())
             .register(new NpcKeepsToRoadScenario())

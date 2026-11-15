@@ -89,6 +89,12 @@ final class CitizensNpcMover implements NpcMover {
         return entity == null ? Double.NaN : entity.getFallDistance();
     }
 
+    @Override
+    public double verticalSpeed() {
+        Entity entity = npc.getEntity();
+        return entity == null ? Double.NaN : entity.getVelocity().getY();
+    }
+
     /** Puts the body somewhere else at once, through Citizens (a scenario pushing an NPC into a corner). */
     void teleport(NavPoint feet) {
         World world = Bukkit.getWorld(feet.world());
