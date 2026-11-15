@@ -2785,7 +2785,8 @@ public class KnKPlugin extends JavaPlugin {
             return;
         }
         var services = new net.knightsandkings.knk.paper.scenario.ScenarioServices(
-            this, () -> gateManager, () -> gateLoaderAdapter, () -> gateDisplayManager);
+            this, () -> gateManager, () -> gateLoaderAdapter, () -> gateDisplayManager,
+            () -> regionHttpServer != null ? regionHttpServer.getAddress() : null);
         var scenarioCommand = new net.knightsandkings.knk.paper.scenario.ScenarioCommand(this,
             net.knightsandkings.knk.paper.scenario.PaperScenarios.registry(),
             new net.knightsandkings.knk.paper.scenario.PaperScenarioHost(settings, services));

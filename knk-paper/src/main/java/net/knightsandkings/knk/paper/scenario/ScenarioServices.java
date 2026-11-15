@@ -6,6 +6,7 @@ import net.knightsandkings.knk.paper.gates.GateLoaderAdapter;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.Plugin;
 
+import java.net.InetSocketAddress;
 import java.util.function.Supplier;
 
 /**
@@ -19,7 +20,8 @@ public record ScenarioServices(
     Plugin plugin,
     Supplier<GateManager> gateManager,
     Supplier<GateLoaderAdapter> gateLoader,
-    Supplier<GateDisplayManager> gateDisplays
+    Supplier<GateDisplayManager> gateDisplays,
+    Supplier<InetSocketAddress> regionHttpAddress
 ) {
 
     public FileConfiguration config() {
@@ -39,6 +41,14 @@ public record ScenarioServices(
     /** The gate hover displays; may be null. */
     public GateDisplayManager gateDisplayManager() {
         return gateDisplays.get();
+    }
+
+    /**
+     * Where the plugin's region callback server listens (the one knk-web-api calls for {@code POST /Regions/rename});
+     * fails the step when it did not start.
+     */
+    public InetSocketAddress regionHttp() {
+        return required(regionHttpAddress.get(), "the region HTTP server");
     }
 
     private static <T> T required(T service, String what) {

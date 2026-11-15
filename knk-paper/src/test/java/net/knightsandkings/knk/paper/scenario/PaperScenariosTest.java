@@ -49,7 +49,12 @@ class PaperScenariosTest {
     @Test
     void theRegistryHoldsTheShippedScenarios() {
         List<String> names = PaperScenarios.registry().all().stream().map(Scenario::name).toList();
-        assertEquals(List.of("gate-open-close", "gate-closing-moves-entity-out", "global-region-explosion"), names);
+        assertEquals(List.of("gate-open-close", "gate-closing-moves-entity-out", "global-region-explosion",
+            "gate-closing-keeps-mobs-on-their-side", "gate-deep-door-moves-mob-out", "gate-closing-moves-item-out",
+            "gate-closing-moves-vehicle-with-rider", "gate-side-by-side-doors", "gate-opening-leaves-neighbours",
+            "gate-blocks-never-suffocate", "lootbox-area-rename-keeps-drawn-bounds", "lootbox-area-rerun-replaces-in-place",
+            "temp-region-sweep-keeps-lootbox-area-region", "lootbox-spawns-on-ground-in-range", "lootbox-spawns-under-roof",
+            "lootbox-switched-off-spawns-nothing"), names);
     }
 
     @SuppressWarnings("unchecked")
@@ -66,8 +71,8 @@ class PaperScenariosTest {
 
         assertEquals(List.of("list", "run"), command.complete(sender, new String[] {""}));
         assertEquals(List.of("run"), command.complete(sender, new String[] {"r"}));
-        assertEquals(List.of("gate-open-close", "gate-closing-moves-entity-out"),
-            command.complete(sender, new String[] {"run", "gate"}));
+        assertEquals(List.of("lootbox-area-rename-keeps-drawn-bounds", "lootbox-area-rerun-replaces-in-place"),
+            command.complete(sender, new String[] {"run", "lootbox-area"}));
         assertTrue(command.complete(sender, new String[] {"run", ""}).contains(ScenarioRegistry.ALL));
     }
 
@@ -86,7 +91,7 @@ class PaperScenariosTest {
         CommandSender sender = mock(CommandSender.class);
 
         command.execute(sender, new String[] {"list"});
-        verify(sender).sendMessage(contains("Scenarios (3)"));
+        verify(sender).sendMessage(contains("Scenarios (16)"));
         verify(sender).sendMessage(contains("global-region-explosion"));
     }
 }
