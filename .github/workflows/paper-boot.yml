@@ -111,7 +111,7 @@ jobs:
         # --npc-navigation: turn on npc.navigation.enabled and require it running on Citizens (#543: its NPC scenarios
         # drive NPCs through that running adapter; the #521 ones start a Citizens registry of their own).
         env:
-          MIN_SCENARIOS: 22
+          MIN_SCENARIOS: 28
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
