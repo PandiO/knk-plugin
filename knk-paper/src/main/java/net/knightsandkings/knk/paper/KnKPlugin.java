@@ -1082,6 +1082,7 @@ public class KnKPlugin extends JavaPlugin {
 
             // Register commands
             registerCommands();
+            takeOverCommandLabels();
 
             // Register region listeners (WorldGuard)
             // Dedicated executor for region lookup (API prefetch); daemon threads to avoid blocking shutdown.
@@ -4234,6 +4235,18 @@ public class KnKPlugin extends JavaPlugin {
             net.knightsandkings.knk.paper.gates.GateTargeting.Settings.parseNearest(getConfig().getString("gates.here.ambiguity", "prompt")),
             getConfig().getBoolean("gates.lookat.enabled", defaults.lookAtEnabled()),
             reach > 0 ? Math.min(reach, 64) : defaults.lookAtMaxDistance());
+    }
+
+    /**
+     * PandiO/knk-workspace#580: WorldGuard (a depend, so enabled before KnK) holds the plain /heal label, which
+     * leaves KnK's /heal as /knightsandkings:heal only. Take the label over now, and again once every plugin is
+     * enabled in case one enabling after KnK took it; warn about any other label another plugin holds.
+     */
+    private void takeOverCommandLabels() {
+        net.knightsandkings.knk.paper.commands.support.CommandLabelTakeover.apply(getServer().getCommandMap(), this,
+            net.knightsandkings.knk.paper.commands.support.CommandLabelTakeover.labelsOf(getDescription().getCommands()), getLogger());
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.commands.support.CommandLabelTakeover.OnServerLoad(this), this);
     }
 
     private void registerTabCommand(String name, org.bukkit.command.TabExecutor executor) {
