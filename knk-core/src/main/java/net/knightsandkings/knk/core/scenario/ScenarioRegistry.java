@@ -43,10 +43,17 @@ public final class ScenarioRegistry<S> {
         return name == null ? Optional.empty() : Optional.ofNullable(scenarios.get(name.toLowerCase(Locale.ROOT)));
     }
 
-    /** {@value #ALL} gives every scenario, a name gives that one; empty when the name is unknown. */
+    /**
+     * {@value #ALL} gives every scenario, a name gives that one, a prefix ending in {@code *} every scenario whose name
+     * starts with it, in registration order ({@code player-*}, PandiO/knk-workspace#540); empty when nothing matches.
+     */
     public List<Scenario<S>> select(String argument) {
         if (argument != null && ALL.equalsIgnoreCase(argument)) {
             return all();
+        }
+        if (argument != null && argument.endsWith("*") && argument.length() > 1) {
+            String prefix = argument.substring(0, argument.length() - 1).toLowerCase(Locale.ROOT);
+            return scenarios.values().stream().filter(scenario -> scenario.name().startsWith(prefix)).toList();
         }
         return find(argument).map(List::of).orElse(List.of());
     }

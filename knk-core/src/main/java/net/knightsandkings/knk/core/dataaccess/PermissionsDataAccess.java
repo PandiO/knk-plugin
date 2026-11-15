@@ -11,6 +11,7 @@ import java.util.function.LongSupplier;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.cache.BaseCache;
+import net.knightsandkings.knk.core.domain.permissions.EffectivePermission;
 import net.knightsandkings.knk.core.domain.permissions.EffectivePermissionResolver;
 import net.knightsandkings.knk.core.domain.permissions.EffectivePermissionSet;
 import net.knightsandkings.knk.core.domain.permissions.PermissionCheckResult;
@@ -186,6 +187,28 @@ public class PermissionsDataAccess {
         }
         LoadedSet last = loadedSets.get(userId);
         return last != null && (effectiveCache.get(userId).isPresent() || mayServeExpired(last));
+    }
+
+    /**
+     * Puts {@code set} into the cache as if knk-web-api had just sent it, for the user it names (PandiO/knk-workspace#540:
+     * the scenarios' fake players get their in-house grants this way, without an API). Checks then answer from it
+     * until its TTL ends, like a loaded set: every node from the set when checks resolve from effective sets, else
+     * each node the set lists as a cached single-node answer (other nodes are asked as usual). {@link #forget}
+     * drops it again.
+     */
+    public void prime(EffectivePermissionSet set) {
+        Objects.requireNonNull(set, "set must not be null");
+        int userId = Objects.requireNonNull(set.userId(), "set.userId must not be null");
+        effectiveCache.put(userId, set);
+        LoadedSet loaded = loaded(userId, set);
+        if (!resolveFromEffectiveSets && set.permissions() != null) {
+            for (EffectivePermission entry : set.permissions()) {
+                if (entry.node() != null) {
+                    loaded.resolver().resolve(entry.node())
+                        .ifPresent(result -> checkCache.put(new PermissionCheckKey(userId, entry.node()), result));
+                }
+            }
+        }
     }
 
     /** Drops the user's set (they left); their next check loads it again. */
