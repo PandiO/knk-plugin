@@ -62,7 +62,11 @@ public final class PaperScenarioHost implements ScenarioHost<ScenarioScene> {
     @Override
     public void close(ScenarioScene scene) {
         try {
-            scene.unregisterListeners();
+            try {
+                scene.closePlayers();
+            } finally {
+                scene.unregisterListeners();
+            }
             for (Entity entity : scene.spawned()) {
                 if (entity.isValid()) {
                     entity.remove();

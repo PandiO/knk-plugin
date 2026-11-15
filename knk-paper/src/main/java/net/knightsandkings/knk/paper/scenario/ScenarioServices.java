@@ -1,10 +1,15 @@
 package net.knightsandkings.knk.paper.scenario;
 
+import net.knightsandkings.knk.core.cache.UserCache;
+import net.knightsandkings.knk.core.connectivity.ApiConnectivity;
+import net.knightsandkings.knk.core.dataaccess.MenuTemplatesDataAccess;
+import net.knightsandkings.knk.core.dataaccess.PermissionsDataAccess;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.npc.nav.NpcMoverFactory;
 import net.knightsandkings.knk.paper.navigation.NavigationService;
 import net.knightsandkings.knk.paper.gates.GateDisplayManager;
 import net.knightsandkings.knk.paper.gates.GateLoaderAdapter;
+import net.knightsandkings.knk.paper.menu.MenuService;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.Plugin;
 
@@ -26,7 +31,14 @@ public record ScenarioServices(
     Supplier<InetSocketAddress> regionHttpAddress,
     Supplier<NavigationService> roadNavigationService,
     Supplier<NpcMoverFactory> npcMoverFactory,
-    Supplier<String> npcUnavailableReason
+    Supplier<String> npcUnavailableReason,
+    // Scripted players (PandiO/knk-workspace#540): the caches a fake player's fake account and grants go into, the
+    // menu runtime a menu scenario opens, and the API state (no fake player joins while the API is reachable).
+    Supplier<UserCache> userCache,
+    Supplier<PermissionsDataAccess> permissionsDataAccess,
+    Supplier<MenuService> menuService,
+    Supplier<MenuTemplatesDataAccess> menuTemplatesDataAccess,
+    Supplier<ApiConnectivity> apiConnectivity
 ) {
 
     public FileConfiguration config() {
@@ -76,6 +88,26 @@ public record ScenarioServices(
                 + (reason == null ? "it did not start" : reason));
         }
         return factory;
+    }
+
+    /** The live user cache (UUID to account summary); a fake player's fake account goes in here. */
+    public UserCache users() {
+        return required(userCache.get(), "the user cache");
+    }
+
+    /** The live in-house permission cache; a fake player's grants are primed in here. */
+    public PermissionsDataAccess permissions() {
+        return required(permissionsDataAccess.get(), "the permission cache");
+    }
+
+    /** The live InventoryMenu runtime (opens menus, handles their clicks). */
+    public MenuService menus() {
+        return required(menuService.get(), "the menu service");
+    }
+
+    /** The live menu template cache; a scenario's fake menu templates are primed in here. */
+    public MenuTemplatesDataAccess menuTemplates() {
+        return required(menuTemplatesDataAccess.get(), "the menu template cache");
     }
 
     private static <T> T required(T service, String what) {

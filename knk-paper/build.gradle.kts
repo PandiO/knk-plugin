@@ -26,6 +26,10 @@ dependencies {
     // NPC navigation (PandiO/knk-workspace#358): compile-only, never shaded (Citizens is OSL-3.0; the server provides the
     // jar). Non-transitive: Paper is already on the classpath. Only paper/npc/citizens/ may use Citizens types.
     compileOnly("net.citizensnpcs:citizensapi:${property("citizensApiVersion")}") { isTransitive = false }
+    // Scripted players for plugin scenarios (PandiO/knk-workspace#540): the fake connection's in-memory channel. Compile-only,
+    // never shaded: the server provides Netty. Keep it at the server's version (libraries/io/netty/netty-transport/ of a
+    // Paper server); only paper/scenario/NmsFakePlayer may use it.
+    compileOnly("io.netty:netty-transport:${property("nettyVersion")}")
     
     testImplementation("io.papermc.paper:paper-api:${property("paperApiVersion")}")
     testImplementation("net.citizensnpcs:citizensapi:${property("citizensApiVersion")}") { isTransitive = false }

@@ -30,7 +30,8 @@ class ScenarioRoadNpcsTest {
     private ScenarioScene scene() {
         when(world.getName()).thenReturn("world");
         return new ScenarioScene("npc-test", 2, world, 30128, 100, 30000,
-            new ScenarioServices(null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null));
+            new ScenarioServices(null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null,
+                () -> null, () -> null, () -> null, () -> null, () -> null));
     }
 
     @Test
