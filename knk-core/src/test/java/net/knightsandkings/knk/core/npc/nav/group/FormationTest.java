@@ -147,7 +147,7 @@ class FormationTest {
         assertEquals(24.0, defaults.regroupBlocks());
         assertEquals(1.3, defaults.catchUpSpeed());
         assertEquals(16.0, defaults.hopBlocks());
-        assertEquals(60, defaults.noProgressTicks());
+        assertEquals(40, defaults.noProgressTicks());
 
         NavigationSettings settings = NavigationSettings.builder()
             .global(Overrides.of(NavigationSettings.GROUP_SPACING, 1.5).with(NavigationSettings.GROUP_RANKS_WIDTH, 4))

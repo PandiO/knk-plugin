@@ -95,6 +95,33 @@ final class CitizensNpcMover implements NpcMover {
         npc.getNavigator().setTarget(points);
     }
 
+    /**
+     * The waypoints with {@code margin} as Citizens' distance margin for this list only (implementation plan 4b.2
+     * item 2): set on the navigator's local parameters right after the target, so the default parameters, and with
+     * them every local leg, keep Citizens' own margin.
+     */
+    @Override
+    public void follow(List<NavPoint> waypoints, double margin) {
+        if (!npc.isSpawned() || waypoints.isEmpty()) {
+            return;
+        }
+        follow(waypoints);
+        if (npc.getNavigator().isNavigating()) {
+            npc.getNavigator().getLocalParameters().distanceMargin(margin);
+        }
+    }
+
+    /**
+     * Why Citizens gave up the running order (implementation plan 4b.2 item 7.3), read in its cancel event while the
+     * strategy is still set: {@code NO_PATH} when its path search has no path (an unreachable target), otherwise
+     * {@code STATIONARY} (its stationary check; a waypoint list always has its path).
+     */
+    StuckKind stuckKind() {
+        net.citizensnpcs.api.ai.PathStrategy strategy = npc.getNavigator().getPathStrategy();
+        Iterable<Vector> path = strategy == null ? null : strategy.getPath();
+        return path == null || !path.iterator().hasNext() ? StuckKind.NO_PATH : StuckKind.STATIONARY;
+    }
+
     @Override
     public void walkTo(NavPoint target) {
         if (!npc.isSpawned()) {

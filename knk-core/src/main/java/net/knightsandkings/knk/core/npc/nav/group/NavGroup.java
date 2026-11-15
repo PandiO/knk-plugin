@@ -20,7 +20,12 @@ import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcNavState;
+import net.knightsandkings.knk.core.npc.nav.NavGeometry;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
+import net.knightsandkings.knk.core.npc.nav.PathTargets;
+import net.knightsandkings.knk.core.npc.nav.RecentSteps;
+import net.knightsandkings.knk.core.npc.nav.RecoveryLadder;
+import net.knightsandkings.knk.core.npc.nav.RecoveryMoves;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower;
 
 /**
@@ -87,6 +92,10 @@ public final class NavGroup {
     static final double DOOR_MARGIN = 1.0;
     /** With the recheck off ({@code recheck-ticks: 0}) the followers' trespass guard still looks this often. */
     static final int GUARD_TICKS = 40;
+    /** A left-behind follower's tries are spaced out up to this (60 s; developer decision 2026-11-15, 4b.4 question 11). */
+    static final int MAX_LOST_RETRY_TICKS = 1200;
+    /** A left-behind follower waits on a free cell at most this far beside its lane. */
+    static final int ASIDE_BLOCKS = 2;
 
     public enum FollowerState {
         /** Walks the group's path in its slot. */
@@ -126,6 +135,20 @@ public final class NavGroup {
         /** How far behind its slot (negative: ahead), from the last look. */
         double lag;
         boolean settled = true;
+        // ---- stuck spells and the recovery ladder (implementation plan 4b.2 items 9 to 11) ----
+        final RecoveryLadder ladder = new RecoveryLadder();
+        final RecentSteps steps = new RecentSteps();
+        /** A back-off or side-step of the ladder is being walked: its lane is not handed out meanwhile. */
+        boolean recoveryMove;
+        /** Where along the path it was when the running try started. */
+        double tryMark;
+        /** The engine reported it stuck since the last look (null: not). */
+        NpcMover.StuckKind engineStuck;
+        /** The wait before a left-behind follower's next try: doubles up to {@link #MAX_LOST_RETRY_TICKS}. */
+        int lostRetryTicks;
+        /** The path index an own leg back failed to reach, and from where (never aimed at again from there). */
+        int failedTarget = -1;
+        NavPoint failedFrom;
 
         Follower(NpcMover mover) {
             this.mover = mover;
@@ -306,6 +329,8 @@ public final class NavGroup {
             f.settled = true;
             f.progressTick = now;
             f.regions = null;
+            f.lostRetryTicks = 0;
+            f.failedTarget = -1;
         }
         orderLeader();
         return true;
@@ -378,6 +403,8 @@ public final class NavGroup {
                 });
             }
             f.recheck = true;
+            f.lostRetryTicks = 0; // a gate or access event: a left-behind follower's tries start again from the shortest
+            f.failedTarget = -1;
             if (f.state == FollowerState.RETRY_WAIT) {
                 f.retryAt = now;
             }
@@ -438,6 +465,11 @@ public final class NavGroup {
         } else if (f.mover.isSpawned() && f.mover.isMoving()) {
             f.mover.stop();
         }
+        if (f.ladder.isOpen()) {
+            spellNotFreed(f, "the group's order ended");
+        }
+        f.recoveryMove = false;
+        f.engineStuck = null;
         f.state = FollowerState.FOLLOWING;
         f.pathIdx = -1;
         f.sentEndArc = Double.NaN;
@@ -588,6 +620,14 @@ public final class NavGroup {
             f.progressTick = now;
             return;
         }
+        f.mover.position().ifPresent(feet -> {
+            double fell = f.steps.record(feet, f.mover.onGround());
+            if (fell > 0) {
+                ports.metrics().count(Event.FELL);
+                ports.log().accept(String.format(Locale.ROOT, "%s (group %d) fell %.1f blocks to %s", f.mover.name(), id,
+                    fell, NavGeometry.block(feet)));
+            }
+        });
         if (f.state == FollowerState.REJOINING) {
             f.regions = null; // on a leg of its own the navigation service's trespass guard watches it
         } else if (now - f.guardTick >= (settings.recheckTicks() > 0 ? settings.recheckTicks() : GUARD_TICKS)) {
@@ -637,6 +677,17 @@ public final class NavGroup {
         double a = path.arcOf(at, f.pathIdx);
         f.lag = slotArc - a;
         speed(f);
+        if (f.ladder.isOpen() && recoveryTick(f, slot, slotArc, at, a)) {
+            return; // on a step of its ladder, or waiting before the next
+        }
+        if (f.engineStuck != null && f.state == FollowerState.FOLLOWING && targetArc - a > 1) {
+            NpcMover.StuckKind kind = f.engineStuck;
+            f.engineStuck = null;
+            stuck(f, slot, slotArc, at, a, kind == NpcMover.StuckKind.NO_PATH ? RecoveryLadder.Reporter.NO_PATH
+                : RecoveryLadder.Reporter.STATIONARY);
+            return;
+        }
+        f.engineStuck = null;
         if (f.leavingDoor) {
             if (f.mover.isMoving()) {
                 f.settled = false;
@@ -680,11 +731,204 @@ public final class NavGroup {
             f.joining = false;
             f.failures = 0;
             f.lost = false;
+            f.lostRetryTicks = 0;
         } else if (f.heldByRule) {
             f.progressTick = now;
         } else if (targetArc - a > 1 && now - f.progressTick >= settings.noProgressTicks()) {
-            ports.metrics().count(Event.STUCK_NO_PROGRESS);
-            rejoin(f, slotArc, "made no progress for " + settings.noProgressTicks() + " ticks");
+            stuck(f, slot, slotArc, at, a, RecoveryLadder.Reporter.NO_PROGRESS);
+        }
+    }
+
+    // ==================== a stuck follower's ladder (implementation plan 4b.2 items 9 to 11) ====================
+
+    /** The engine reported a follower of this group stuck on its waypoints; false when it is not one of them. */
+    boolean engineStuck(int moverId, NpcMover.StuckKind kind) {
+        for (Follower f : followers) {
+            if (f.mover.id() == moverId) {
+                if (goal != null && f.state == FollowerState.FOLLOWING) {
+                    if (kind == NpcMover.StuckKind.NO_PATH) {
+                        ports.metrics().count(Event.RECOVERY_NO_PATH);
+                    }
+                    f.engineStuck = kind;
+                    rulesPending = true; // looked at in the next tick
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The direction along the path at a follower's place. */
+    private double[] pathDirection(Follower f) {
+        return path.heading(Math.max(0, Math.min(f.pathIdx, path.size() - 1)));
+    }
+
+    /** A stuck report for a follower: opens a spell (first step at once) or ends its running try. */
+    private void stuck(Follower f, Formation.Slot slot, double slotArc, NavPoint at, double a, RecoveryLadder.Reporter by) {
+        double[] dir = pathDirection(f);
+        boolean wall = RecoveryMoves.nearWall(ports.world(), at, dir[0], dir[1]);
+        f.progressTick = now;
+        switch (f.ladder.report(now, at, by, wall, settings.recoveryWaitTicks())) {
+            case STARTED -> {
+                ports.metrics().spellStarted(by != RecoveryLadder.Reporter.NO_PROGRESS, wall);
+                nextTry(f, slot, slotArc, at, a);
+            }
+            case TRY_FAILED -> {
+                f.recoveryMove = false;
+                if (f.mover.isMoving()) {
+                    f.mover.stop();
+                }
+            }
+            case JOINED -> { }
+        }
+    }
+
+    /**
+     * A follower with an open spell: watches its running try (freed when it came {@link RecoveryLadder#FREED_BLOCKS}
+     * further along the path, failed after {@code no-progress-ticks}) and takes the next step when its wait is over.
+     * Returns true while the ladder holds the follower (its lane is not handed out).
+     */
+    private boolean recoveryTick(Follower f, Formation.Slot slot, double slotArc, NavPoint at, double a) {
+        if (f.ladder.tryRunning()) {
+            if (a >= f.tryMark + RecoveryLadder.FREED_BLOCKS) {
+                spellFreed(f, at);
+                f.recoveryMove = false;
+                return false;
+            }
+            if (now - f.ladder.tryStartTick() >= settings.noProgressTicks()) {
+                f.ladder.tryFailed(now, settings.recoveryWaitTicks());
+                f.recoveryMove = false;
+                if (f.mover.isMoving()) {
+                    f.mover.stop();
+                }
+                return true;
+            }
+            if (f.recoveryMove && f.mover.isMoving()) {
+                return true; // walking its back-off or side-step
+            }
+            f.recoveryMove = false;
+            return false; // the step is walked: its lane again, the try still watched
+        }
+        if (now >= f.ladder.nextTryTick()) {
+            nextTry(f, slot, slotArc, at, a);
+        }
+        return true;
+    }
+
+    /** Takes a follower's next step: back-off, side-step (away from the path's centre), its own leg ahead, again. */
+    private void nextTry(Follower f, Formation.Slot slot, double slotArc, NavPoint at, double a) {
+        double[] dir = pathDirection(f);
+        RecoveryMoves.Wall wall = RecoveryMoves.blockingFace(ports.world(), at, dir[0], dir[1]);
+        // away from the path's centre: the side of its lane, or the side it stands on
+        double side = slot.side() != 0 ? Math.signum(slot.side())
+            : Math.signum((at.x() - path.get(f.pathIdx).floor.x()) * -dir[1] + (at.z() - path.get(f.pathIdx).floor.z()) * dir[0]);
+        double[] away = side == 0 ? null : new double[] {-dir[1] * side, dir[0] * side};
+        List<NavPoint> move = new ArrayList<>();
+        Set<String> here = regionsAt(at);
+        RecoveryLadder.Step step = f.ladder.nextStep(now, settings.maxRetries(), candidate -> switch (candidate) {
+            case BACK_OFF -> {
+                move.clear();
+                move.addAll(f.steps.wayBack(at, 2));
+                yield !move.isEmpty();
+            }
+            case SIDE_STEP -> {
+                move.clear();
+                NavPoint p = RecoveryMoves.sideStep(ports.world(), at, wall, away, feet -> mayStand(f, here, feet));
+                if (p != null) {
+                    move.add(p);
+                }
+                yield p != null;
+            }
+            case LOCAL_LEG, REPLAN -> true;
+        });
+        String detail = move.isEmpty() || step == RecoveryLadder.Step.LOCAL_LEG || step == RecoveryLadder.Step.REPLAN
+            ? null : "to " + NavGeometry.block(move.get(move.size() - 1));
+        ports.log().accept(f.ladder.stepLine(f.mover.name() + " (group " + id + ")", RecoveryLadder.what(
+            f.ladder.reporter(), settings.noProgressTicks()), at, wall, settings.maxRetries(), detail));
+        f.tryMark = a;
+        f.progressTick = now;
+        switch (step) {
+            case BACK_OFF, SIDE_STEP -> {
+                f.recoveryMove = true;
+                f.sentEndArc = Double.NaN;
+                f.mover.follow(move, settings.waypointMargin());
+            }
+            case LOCAL_LEG, REPLAN -> rejoin(f, slotArc, step == RecoveryLadder.Step.LOCAL_LEG ? "is stuck"
+                : "is still stuck (steps used up)");
+        }
+    }
+
+    /** Whether the current rules let a follower standing in {@code here} stand at a feet position. */
+    private boolean mayStand(Follower f, Set<String> here, NavPoint feet) {
+        Set<String> there = regionsAt(feet);
+        for (String region : there) {
+            if (!here.contains(region) && !verdicts.computeIfAbsent(new Verdict(here, region), v -> ports.rules()
+                .mayEnter(new NpcAccessSubject(f.mover.name(), profile, feet.world(), here)).test(region))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void spellFreed(Follower f, NavPoint at) {
+        if (!f.ladder.isOpen()) {
+            return;
+        }
+        RecoveryLadder.Step by = f.ladder.current();
+        int taken = f.ladder.taken();
+        long ticks = now - f.ladder.startTick();
+        boolean wall = f.ladder.nearWall();
+        Event event = f.ladder.freed(now, at);
+        ports.metrics().spellEnded(wall, event, taken, ticks, at);
+        ports.log().accept(RecoveryLadder.freedLine(f.mover.name() + " (group " + id + ")", at, by, taken, ticks));
+    }
+
+    private void spellNotFreed(Follower f, String why) {
+        if (!f.ladder.isOpen()) {
+            return;
+        }
+        NavPoint at = f.mover.position().orElse(f.ladder.spot());
+        int taken = f.ladder.taken();
+        long ticks = now - f.ladder.startTick();
+        boolean wall = f.ladder.nearWall();
+        f.ladder.notFreed(now, at);
+        ports.metrics().spellEnded(wall, Event.NOT_FREED, taken, ticks, at);
+        ports.log().accept(RecoveryLadder.notFreedLine(f.mover.name() + " (group " + id + ")", at, why));
+    }
+
+    /**
+     * A follower the group goes on without waits beside its lane, not on it (implementation plan 4b.2 item 10): on a
+     * free standable cell at most {@link #ASIDE_BLOCKS} to the side of the path, away from its centre first.
+     */
+    private void stepAside(Follower f) {
+        NavPoint at = f.mover.position().orElse(null);
+        if (at == null || path.isEmpty()) {
+            return;
+        }
+        int i = path.nearest(at, 0, path.size());
+        NavPoint centre = path.get(i).floor;
+        double[] h = path.heading(i);
+        double side = Math.signum((at.x() - centre.x()) * -h[1] + (at.z() - centre.z()) * h[0]);
+        Set<String> here = regionsAt(at);
+        NavPoint floorHere = HopPlanner.floor(at);
+        for (int d = ASIDE_BLOCKS; d >= 1; d--) {
+            for (double s : side >= 0 ? new double[] {1, -1} : new double[] {-1, 1}) {
+                NavPoint probe = new NavPoint(at.world(), Math.floor(centre.x() - h[1] * s * d) + 0.5, floorHere.blockY(),
+                    Math.floor(centre.z() + h[0] * s * d) + 0.5);
+                NavPoint floor = HopPlanner.floorNear(ports.world(), probe, floorHere.blockY());
+                if (floor == null || probe.horizontalDistance(centre) < 1.5 || !NavGeometry.hasHeadroom(ports.world(), floor)) {
+                    continue;
+                }
+                NavPoint feet = HopPlanner.feet(floor);
+                if (NavGeometry.wallAt(ports.world(), at.world(), feet.blockX(), feet.blockY(), feet.blockZ())
+                    || !mayStand(f, here, feet)) {
+                    continue;
+                }
+                if (feet.blockX() != at.blockX() || feet.blockZ() != at.blockZ()) {
+                    f.mover.follow(List.of(feet), settings.waypointMargin());
+                }
+                return;
+            }
         }
     }
 
@@ -905,17 +1149,21 @@ public final class NavGroup {
         if (at == null || path.isEmpty()) {
             return;
         }
+        // the group path's nearest reachable point ahead of it, on its own floor, never past its slot (4b.2 items 5, 9)
         double reach = Math.max(2, settings.hopBlocks() - 2);
-        int target = -1;
-        for (int k = Math.min(path.indexAtArc(Math.max(0, slotArc)), leaderIdx); k >= 0; k--) {
-            NavPoint p = path.get(k).floor;
-            if (at.horizontalDistance(p) <= reach && Math.abs(p.y() + 1 - at.y()) <= 6) {
-                target = k;
-                break;
-            }
+        int place = path.nearest(at, 0, leaderIdx + 1);
+        int last = Math.min(path.indexAtArc(Math.max(0, slotArc)), leaderIdx);
+        int from = place;
+        if (f.failedTarget >= 0 && f.failedFrom != null && f.failedFrom.horizontalDistance(at) <= 1
+            && Math.abs(f.failedFrom.y() - at.y()) < 1) {
+            from = Math.max(from, f.failedTarget + 1); // never the target that failed from this spot again
         }
-        if (target < 0) {
-            target = path.nearest(at, 0, leaderIdx + 1); // further than one leg: navigation plans what it takes
+        Set<String> here = regionsAt(at);
+        PathTargets.Target ahead = from > last ? null : PathTargets.ahead(ports.world(), path.floors(), place, from,
+            last, at.blockY() - 1, reach, feet -> mayStand(f, here, feet));
+        int target = ahead != null ? ahead.index() : Math.max(place, 0);
+        if (target > leaderIdx) {
+            target = Math.max(0, leaderIdx); // further than one leg: navigation plans what it takes
         }
         if (f.mover.isMoving()) {
             f.mover.stop();
@@ -928,9 +1176,12 @@ public final class NavGroup {
         f.settled = false;
         int order = ++f.rejoinSeq;
         ports.metrics().count(Event.GROUP_REJOIN);
-        ports.log().accept(String.format(Locale.ROOT, "%s (group %d) %s at %d %d %d: its own leg back to the group's path",
-            f.mover.name(), id, why, at.blockX(), at.blockY(), at.blockZ()));
-        if (!ports.navigation().navigate(f.mover.id(), HopPlanner.feet(path.get(target).floor),
+        f.failedFrom = at;
+        ports.log().accept(String.format(Locale.ROOT, "%s (group %d) %s at %d %d %d: its own leg back to the group's path"
+            + " at %s", f.mover.name(), id, why, at.blockX(), at.blockY(), at.blockZ(),
+            NavGeometry.block(HopPlanner.feet(ahead != null ? ahead.floor() : path.get(target).floor))));
+        NavPoint aim = ahead != null ? ahead.floor() : path.get(target).floor;
+        if (!ports.navigation().navigate(f.mover.id(), HopPlanner.feet(aim),
             result -> onRejoin(f, order, result))) {
             rejoinFailed(f, "it is not under navigation");
         }
@@ -947,6 +1198,9 @@ public final class NavGroup {
                 f.joining = true;
                 f.failures = 0;
                 f.lost = false;
+                f.lostRetryTicks = 0;
+                f.failedTarget = -1;
+                f.mover.position().ifPresent(feet -> spellFreed(f, feet));
                 f.sentEndArc = Double.NaN;
                 f.progressArc = -1;
                 f.progressTick = now;
@@ -961,6 +1215,17 @@ public final class NavGroup {
         f.state = FollowerState.RETRY_WAIT;
         f.pathIdx = -1;
         f.sentEndArc = Double.NaN;
+        f.failedTarget = f.rejoinNode;
+        if (f.ladder.isOpen()) {
+            if (f.ladder.current() == RecoveryLadder.Step.REPLAN) {
+                spellNotFreed(f, "its own leg back failed (" + reason + ")");
+            } else {
+                // the local leg of its ladder failed: the next step, a replan of that leg, after the wait
+                f.ladder.tryFailed(now, settings.recoveryWaitTicks());
+                f.retryAt = now + settings.recoveryWaitTicks();
+                return;
+            }
+        }
         if (++f.failures >= MAX_REJOINS) {
             if (!f.lost) {
                 f.lost = true;
@@ -968,7 +1233,12 @@ public final class NavGroup {
                 ports.log().accept(f.mover.name() + " (group " + id + ") could not get back to the group's path ("
                     + reason + "): the group goes on without it, it keeps trying");
             }
-            f.retryAt = now + settings.noRouteWaitTicks();
+            // tries spaced out: doubling from no-route-wait-ticks up to 60 s, back to the start after any progress or
+            // a gate or access event (developer decision 2026-11-15)
+            f.lostRetryTicks = f.lostRetryTicks <= 0 ? settings.noRouteWaitTicks()
+                : Math.min(MAX_LOST_RETRY_TICKS, f.lostRetryTicks * 2);
+            f.retryAt = now + f.lostRetryTicks;
+            stepAside(f);
         } else {
             f.retryAt = now + REJOIN_RETRY_TICKS;
         }

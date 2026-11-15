@@ -37,6 +37,21 @@ final class GroupPath {
         return nodes.size();
     }
 
+    /** The path's floor points, as a live read-only view (for {@link net.knightsandkings.knk.core.npc.nav.PathTargets}). */
+    List<NavPoint> floors() {
+        return new java.util.AbstractList<>() {
+            @Override
+            public NavPoint get(int index) {
+                return nodes.get(index).floor;
+            }
+
+            @Override
+            public int size() {
+                return nodes.size();
+            }
+        };
+    }
+
     boolean isEmpty() {
         return nodes.isEmpty();
     }

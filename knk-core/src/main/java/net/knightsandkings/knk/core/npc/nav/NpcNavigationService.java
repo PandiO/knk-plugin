@@ -96,15 +96,30 @@ public final class NpcNavigationService {
         }
     }
 
-    /** One NPC's resolved settings (see {@link NavigationSettings}). */
+    /**
+     * One NPC's resolved settings (see {@link NavigationSettings}).
+     *
+     * @param cornerClearance   blocks kept from walls on the inside of a turn (4b.2 item 1); 0 = off
+     * @param waypointMargin    how close the NPC comes to a route waypoint before heading for the next (item 2)
+     * @param recoveryWaitTicks ticks between two recovery steps (item 7.1)
+     */
     public record Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
-                           int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass) {
+                           int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                           double cornerClearance, double waypointMargin, int recoveryWaitTicks) {
 
         /** With the code defaults for the Phase 3 settings ({@code recheck-ticks}, {@code stop-on-trespass}). */
         public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
                         int noRouteWaitTicks, double walkOnlyBlocks) {
             this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks,
                 NavigationSettings.RECHECK_TICKS.defaultValue(), NavigationSettings.STOP_ON_TRESPASS.defaultValue());
+        }
+
+        /** With the code defaults for the 4b.2 settings (corner clearance, waypoint margin, recovery wait). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, NavigationSettings.CORNER_CLEARANCE.defaultValue(),
+                NavigationSettings.WAYPOINT_MARGIN.defaultValue(), NavigationSettings.RECOVERY_WAIT_TICKS.defaultValue());
         }
 
         public static Settings of(NavigationSettings settings, NavigationSettings.Scope scope) {
@@ -115,7 +130,10 @@ public final class NpcNavigationService {
                 settings.value(NavigationSettings.NO_ROUTE_WAIT_TICKS, scope),
                 settings.value(NavigationSettings.WALK_ONLY_BLOCKS, scope),
                 settings.value(NavigationSettings.RECHECK_TICKS, scope),
-                settings.value(NavigationSettings.STOP_ON_TRESPASS, scope));
+                settings.value(NavigationSettings.STOP_ON_TRESPASS, scope),
+                settings.value(NavigationSettings.CORNER_CLEARANCE, scope),
+                settings.value(NavigationSettings.WAYPOINT_MARGIN, scope),
+                settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope));
         }
 
         public static Settings defaults() {
@@ -148,6 +166,18 @@ public final class NpcNavigationService {
         boolean onTrail;
         boolean recovering;
         long lastProgressTick;
+        // ---- stuck spells and the recovery ladder (4b.2 items 6 and 7) ----
+        final RecoveryLadder ladder = new RecoveryLadder();
+        final RecentSteps steps = new RecentSteps();
+        /** The next try of the open spell waits for {@link #waitUntil} (state WAITING). */
+        boolean ladderPending;
+        /** A back-off or side-step move without the line (a local-leg NPC): its hop is tried again after it. */
+        boolean moveOnly;
+        /** The progress mark of the running try, measured when the NPC first moves on it. */
+        double tryMark = Double.NaN;
+        /** What {@link #tryMark} was measured against: the follower, or the hop target. */
+        Object tryMarkRef;
+        long lastStepTick;
         // ---- rules stay binding (Phase 3) ----
         /** What blocks the order now: set while the NPC walks the partial route to it and while it waits there. */
         BlockingElement blockedBy;
@@ -168,6 +198,8 @@ public final class NpcNavigationService {
         boolean eventAvailability;
         /** What the recheck saw ahead when it asked for the plan in flight; null for any other plan. */
         String replanFor;
+        /** A road plan for this NPC is in flight. */
+        boolean roadPlanning;
         /** Elements the recheck saw ahead that the router then still routed through: not asked about again. */
         final Set<String> tolerated = new HashSet<>();
 
@@ -182,6 +214,12 @@ public final class NpcNavigationService {
         public void arrived(NpcMover m) {
             timed(() -> {
                 if (state == NpcNavState.MOVING) {
+                    if (moveOnly) {
+                        // a back-off or side-step of an NPC on a local leg: its hop again from here
+                        moveOnly = false;
+                        enqueue(this);
+                        return;
+                    }
                     legDone(this);
                 }
             });
@@ -189,10 +227,17 @@ public final class NpcNavigationService {
 
         @Override
         public void stuck(NpcMover m) {
+            stuck(m, NpcMover.StuckKind.STATIONARY);
+        }
+
+        @Override
+        public void stuck(NpcMover m, NpcMover.StuckKind kind) {
             timed(() -> {
                 if (state == NpcNavState.MOVING) {
-                    ports.metrics().count(Event.STUCK_ENGINE);
-                    onStuck(this, "stuck");
+                    onStuck(this, kind == NpcMover.StuckKind.NO_PATH ? RecoveryLadder.Reporter.NO_PATH
+                        : RecoveryLadder.Reporter.STATIONARY);
+                } else if (goal == null && idleStuck != null) {
+                    idleStuck.accept(mover.id(), kind); // a group's follower on waypoints of its group
                 }
             });
         }
@@ -205,6 +250,9 @@ public final class NpcNavigationService {
                 }
                 if (chunkUnload) {
                     ports.metrics().count(Event.PAUSED);
+                    spellNotFreed(this, "its chunk unloaded");
+                    ladderPending = false;
+                    moveOnly = false;
                     generation++;
                     queue.remove(this);
                     state = NpcNavState.PAUSED;
@@ -222,6 +270,7 @@ public final class NpcNavigationService {
                     ports.metrics().count(Event.RESUMED);
                     // the entity is new and may stand somewhere else: plan again from where it is
                     dropRoute(this);
+                    steps.clear();
                     regions = null;
                     waitTicks(this, 1);
                 }
@@ -239,12 +288,15 @@ public final class NpcNavigationService {
     }
 
     private final Ports ports;
+    /** Stuck reports for NPCs without an order of their own here (a group's followers on their group's waypoints). */
+    private java.util.function.BiConsumer<Integer, NpcMover.StuckKind> idleStuck;
     private final int maxPlansInFlight;
     private final int ruleChecksPerTick;
     private int ruleCursor;
     private final Map<Integer, Nav> npcs = new LinkedHashMap<>();
     private final Deque<Nav> queue = new ArrayDeque<>();
     private int inFlight;
+    private int localInFlight;
     private long tick;
     private long busyNanos;
     private long lastTickNanos;
@@ -342,6 +394,31 @@ public final class NpcNavigationService {
         return npcs.size();
     }
 
+    /**
+     * Who hears the engine's stuck reports for registered NPCs that have no order here (a group's followers walk
+     * their group's waypoints without one, implementation plan 4b.2 item 9). Null: nobody.
+     */
+    public void setIdleStuckListener(java.util.function.BiConsumer<Integer, NpcMover.StuckKind> listener) {
+        this.idleStuck = listener;
+    }
+
+    /** Whether a mover waits for or runs a road plan now (the stats' road plans per group, 4b.2 item 14). */
+    public boolean planningRoad(int moverId) {
+        Nav nav = npcs.get(moverId);
+        return nav != null && nav.roadPlanning;
+    }
+
+    /** Local legs being prepared now, server-wide. */
+    public int localLegsInFlight() {
+        return localInFlight;
+    }
+
+    /** Whether a mover has an open stuck spell (diagnostics). */
+    public boolean stuckSpellOpen(int moverId) {
+        Nav nav = npcs.get(moverId);
+        return nav != null && nav.ladder.isOpen();
+    }
+
     public int queued() {
         return queue.size();
     }
@@ -414,10 +491,20 @@ public final class NpcNavigationService {
                 switch (nav.state) {
                     case WAITING -> {
                         if (tick >= nav.waitUntil) {
-                            enqueue(nav);
+                            if (nav.ladderPending) {
+                                nav.ladderPending = false;
+                                nextTry(nav);
+                            } else {
+                                enqueue(nav);
+                            }
                         }
                     }
-                    case MOVING -> watch(nav);
+                    case MOVING -> {
+                        watch(nav);
+                        if (nav.state == NpcNavState.MOVING) {
+                            supervise(nav);
+                        }
+                    }
                     default -> { }
                 }
             }
@@ -458,6 +545,9 @@ public final class NpcNavigationService {
     }
 
     private void watch(Nav nav) {
+        if (nav.mover.isSpawned() && (tick + nav.mover.id()) % HANDOVER_TICKS == 0) {
+            footstep(nav);
+        }
         if (!nav.onTrail || nav.follower == null || !nav.mover.isSpawned()) {
             return;
         }
@@ -475,8 +565,8 @@ public final class NpcNavigationService {
             if (nav.follower.progressed(at)) {
                 nav.lastProgressTick = tick;
             } else if (tick - nav.lastProgressTick >= nav.settings.noProgressTicks()) {
-                ports.metrics().count(Event.STUCK_NO_PROGRESS);
-                onStuck(nav, "no progress for " + nav.settings.noProgressTicks() + " ticks");
+                nav.lastProgressTick = tick;
+                onStuck(nav, RecoveryLadder.Reporter.NO_PROGRESS);
                 return;
             }
         }
@@ -561,8 +651,8 @@ public final class NpcNavigationService {
         NavPoint from = HopPlanner.floor(at);
         NavPoint to = HopPlanner.floor(nav.goal);
         double direct = from.horizontalDistance(to);
-        if (direct <= nav.settings.hopBlocks()) {
-            // a short trip: one local leg, no road
+        if (PathTargets.shortTrip(from, to, nav.settings.hopBlocks())) {
+            // a short trip: one local leg, no road (near and on about the same floor, 4b.2 item 5.4)
             nav.replanFor = null;
             nav.blockedBy = null;
             nav.stillBlocked = null;
@@ -572,6 +662,7 @@ public final class NpcNavigationService {
         }
         long start = ports.nanoTime().getAsLong();
         inFlight++;
+        nav.roadPlanning = true;
         CompletableFuture<RoadPlanner.RoadPlan> planning;
         try {
             planning = ports.roads().plan(subject(nav, at), from, to);
@@ -580,6 +671,7 @@ public final class NpcNavigationService {
         }
         planning.whenComplete((plan, error) -> timed(() -> {
             inFlight = Math.max(0, inFlight - 1);
+            nav.roadPlanning = false;
             ports.metrics().observePlan("road", (ports.nanoTime().getAsLong() - start) / 1e9);
             if (current(nav, generation)) {
                 onRoad(nav, generation, error != null || plan == null
@@ -747,6 +839,7 @@ public final class NpcNavigationService {
         NavPoint target = nav.hops.peekFirst();
         long start = ports.nanoTime().getAsLong();
         inFlight++;
+        localInFlight++;
         CompletableFuture<LocalLegPreparer.Prepared> preparing;
         try {
             preparing = ports.legs().prepare(subject(nav, at), at, target);
@@ -755,6 +848,7 @@ public final class NpcNavigationService {
         }
         preparing.whenComplete((prepared, error) -> timed(() -> {
             inFlight = Math.max(0, inFlight - 1);
+            localInFlight = Math.max(0, localInFlight - 1);
             ports.metrics().observePlan("local", (ports.nanoTime().getAsLong() - start) / 1e9);
             if (!current(nav, generation)) {
                 return;
@@ -797,7 +891,7 @@ public final class NpcNavigationService {
             return;
         }
         RouteFollower.Stretch stretch = nav.follower.next(ports.world(), nav.settings.stretchBlocks(),
-            at.blockY() - 1);
+            at.blockY() - 1, nav.settings.cornerClearance());
         switch (stretch.kind()) {
             case UNLOADED -> {
                 if (required) {
@@ -820,7 +914,7 @@ public final class NpcNavigationService {
                 nav.onTrail = true;
                 nav.state = NpcNavState.MOVING;
                 ports.metrics().count(Event.STRETCH);
-                nav.mover.follow(stretch.waypoints());
+                nav.mover.follow(stretch.waypoints(), nav.settings.waypointMargin());
             }
             default -> { }
         }
@@ -831,11 +925,11 @@ public final class NpcNavigationService {
         nav.retries = 0;
         if (!nav.onTrail && !nav.hops.isEmpty()) {
             nav.hops.pollFirst();
+            if (nav.ladder.isOpen()) {
+                spellFreed(nav); // the local leg of the spell, or the hop it was stuck on, was walked
+            }
         }
-        if (nav.recovering) {
-            nav.recovering = false;
-            ports.metrics().count(Event.RECOVERED);
-        }
+        nav.recovering = false;
         if (!nav.hops.isEmpty()) {
             enqueue(nav);
         } else if (nav.follower != null && nav.follower.hasMore()) {
@@ -1106,6 +1200,8 @@ public final class NpcNavigationService {
     /** Drops the route and plans again from where the NPC stands, through the planning queue (the rules changed). */
     private void replan(Nav nav) {
         nav.generation++;
+        nav.ladderPending = false;
+        nav.moveOnly = false;
         dropRoute(nav);
         nav.retries = 0;
         queue.remove(nav);
@@ -1128,39 +1224,257 @@ public final class NpcNavigationService {
         return new NpcAccessSubject(nav.mover.name(), nav.profile, world, regions);
     }
 
-    // ==================== stuck ====================
+    // ==================== stuck: spells and the recovery ladder (4b.2 items 6 and 7) ====================
 
-    private void onStuck(Nav nav, String what) {
+    /** One footstep and the fall check, every few ticks while the NPC moves. */
+    private void footstep(Nav nav) {
         NavPoint at = nav.mover.position().orElse(null);
-        NavPoint aim = nav.onTrail && nav.follower != null ? nav.follower.sentEndPoint() : nav.hops.peekFirst();
-        ports.log().accept(String.format(Locale.ROOT, "%s %s at %s -> %s floor %s (retry %d of %d)", nav.mover.name(),
-            what, at == null ? "-" : at.blockX() + " " + at.blockY() + " " + at.blockZ(),
-            nav.onTrail ? "stretch end" : "hop",
-            aim == null ? "-" : aim.blockX() + " " + aim.blockY() + " " + aim.blockZ(), nav.retries + 1,
-            nav.settings.maxRetries()));
-        if (at != null && ++nav.retries <= nav.settings.maxRetries()) {
-            if (nav.onTrail && nav.follower != null) {
-                // one local leg to a point a few blocks further along, then back on the line
-                NavPoint target = nav.follower.recoveryTarget(ports.world(), at);
-                nav.hops.clear();
-                nav.hops.add(target);
-                nav.onTrail = false;
-                nav.recovering = true;
-            }
-            enqueue(nav); // a local leg keeps its hop: try it again from here
-            nav.mover.stop();
+        if (at == null) {
             return;
         }
-        ports.metrics().count(Event.RETRIES_EXHAUSTED);
-        nav.retries = 0;
-        dropRoute(nav);
-        if (++nav.replans <= MAX_REPLANS) {
-            waitTicks(nav, nav.settings.noRouteWaitTicks());
-            nav.mover.stop();
-        } else {
-            end(nav, failed("stuck" + (at == null ? "" : " at " + at.blockX() + " " + at.blockY() + " " + at.blockZ())
-                + ": retries and replans used up"));
+        double fell = nav.steps.record(at, nav.mover.onGround());
+        if (fell > 0) {
+            ports.metrics().count(Event.FELL);
+            ports.log().accept(String.format(Locale.ROOT, "%s fell %.1f blocks to %s (%s)", nav.mover.name(), fell,
+                NavGeometry.block(at), nav.onTrail ? "on the road line" : "on a local leg"));
         }
+    }
+
+    /** Where the NPC walks to from here: the next waypoint ahead on the line, or the hop it walks to. */
+    private double[] walkingDirection(Nav nav, NavPoint at) {
+        NavPoint aim = null;
+        if (nav.onTrail && nav.follower != null) {
+            List<NavPoint> line = nav.follower.line();
+            int i = Math.min(line.size() - 1, nav.follower.nearestIndex(at) + 1);
+            aim = line.get(i);
+        } else if (!nav.hops.isEmpty()) {
+            aim = nav.hops.peekFirst();
+        }
+        return aim == null ? new double[] {0, 0} : new double[] {aim.x() - at.x(), aim.z() - at.z()};
+    }
+
+    /** Whether the current rules let the NPC stand at a feet position: every region there it is not in may be entered. */
+    private boolean mayStand(Nav nav, NavPoint here, NavPoint feet) {
+        Set<String> now = regionsAtFeet(here);
+        Set<String> there = regionsAtFeet(feet);
+        if (now.containsAll(there)) {
+            return true;
+        }
+        Predicate<String> mayEnter = ports.rules().mayEnter(subject(nav, here.world(), now));
+        for (String region : there) {
+            if (!now.contains(region) && !mayEnter.test(region)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A stuck report while the NPC moves (4b.2 item 6): the first one opens a spell and takes the first step at once;
+     * one during a running try ends that try (the next step after {@code recovery-wait-ticks}); a failed engine path
+     * search ends a try without a new spell ({@link Event#RECOVERY_NO_PATH}).
+     */
+    private void onStuck(Nav nav, RecoveryLadder.Reporter by) {
+        NavPoint at = nav.mover.position().orElse(null);
+        if (by == RecoveryLadder.Reporter.NO_PATH) {
+            ports.metrics().count(Event.RECOVERY_NO_PATH);
+        }
+        double[] dir = at == null ? new double[] {0, 0} : walkingDirection(nav, at);
+        boolean wall = at != null && RecoveryMoves.nearWall(ports.world(), at, dir[0], dir[1]);
+        switch (nav.ladder.report(tick, at, by, wall, nav.settings.recoveryWaitTicks())) {
+            case STARTED -> {
+                ports.metrics().spellStarted(by != RecoveryLadder.Reporter.NO_PROGRESS, wall);
+                nav.mover.stop();
+                nextTry(nav);
+            }
+            case TRY_FAILED -> {
+                if (by == RecoveryLadder.Reporter.NO_PATH) {
+                    ports.log().accept(nav.mover.name() + " " + (nav.ladder.current() == null ? "recovery"
+                        : nav.ladder.current().label()) + " found no path at " + NavGeometry.block(at));
+                }
+                waitForNextTry(nav);
+            }
+            case JOINED -> { }
+        }
+    }
+
+    /** The NPC waits {@code recovery-wait-ticks} before the next try (state WAITING). */
+    private void waitForNextTry(Nav nav) {
+        nav.moveOnly = false;
+        nav.recovering = false;
+        if (nav.mover.isSpawned()) {
+            nav.state = NpcNavState.WAITING; // before the stop, so its cancel is not taken for a stuck NPC
+            nav.mover.stop();
+        }
+        nav.ladderPending = true;
+        waitTicks(nav, Math.max(0, nav.ladder.nextTryTick() - tick));
+        if (nav.waitUntil <= tick) {
+            nav.ladderPending = false;
+            nextTry(nav);
+        }
+    }
+
+    /** Takes the next step of the open spell's ladder: back-off, side-step, local leg ahead, or the replan. */
+    private void nextTry(Nav nav) {
+        NavPoint at = nav.mover.position().orElse(null);
+        if (at == null) {
+            nav.state = NpcNavState.PAUSED;
+            return;
+        }
+        double[] dir = walkingDirection(nav, at);
+        RecoveryMoves.Wall wall = RecoveryMoves.blockingFace(ports.world(), at, dir[0], dir[1]);
+        java.util.concurrent.atomic.AtomicReference<List<NavPoint>> move = new java.util.concurrent.atomic.AtomicReference<>();
+        NavPoint[] legTarget = new NavPoint[1];
+        boolean onLine = nav.follower != null && (nav.onTrail || nav.recovering || nav.hops.isEmpty());
+        double markBefore = onLine ? nav.follower.alongAt(at) : Double.NaN;
+        RecoveryLadder.Step step = nav.ladder.nextStep(tick, nav.settings.maxRetries(), candidate -> switch (candidate) {
+            case BACK_OFF -> {
+                List<NavPoint> back = nav.steps.wayBack(at, 2);
+                move.set(back);
+                yield !back.isEmpty();
+            }
+            case SIDE_STEP -> {
+                NavPoint side = RecoveryMoves.sideStep(ports.world(), at, wall, null, feet -> mayStand(nav, at, feet));
+                move.set(side == null ? List.of() : List.of(side));
+                yield side != null;
+            }
+            case LOCAL_LEG -> {
+                if (!onLine) {
+                    yield !nav.hops.isEmpty(); // a local leg's own hop is the point ahead
+                }
+                legTarget[0] = nav.follower.recoveryTarget(ports.world(), at, nav.settings.hopBlocks(),
+                    feet -> mayStand(nav, at, feet));
+                yield legTarget[0] != null;
+            }
+            case REPLAN -> true;
+        });
+        String detail = switch (step) {
+            case BACK_OFF, SIDE_STEP -> "to " + NavGeometry.block(move.get().get(move.get().size() - 1));
+            case LOCAL_LEG -> "to " + NavGeometry.block(legTarget[0] != null ? HopPlanner.feet(legTarget[0])
+                : HopPlanner.feet(nav.hops.peekFirst()));
+            case REPLAN -> null;
+        };
+        ports.log().accept(nav.ladder.stepLine(nav.mover.name(), RecoveryLadder.what(nav.ladder.reporter(),
+            nav.settings.noProgressTicks()), at, wall, nav.settings.maxRetries(), detail));
+        nav.tryMark = Double.NaN;
+        nav.tryMarkRef = null;
+        nav.lastProgressTick = tick;
+        nav.lastStepTick = tick;
+        switch (step) {
+            case BACK_OFF, SIDE_STEP -> {
+                List<NavPoint> waypoints = new java.util.ArrayList<>(move.get());
+                if (onLine && nav.follower != null) {
+                    // then the rest of the stretch again from there, corner clearance applied
+                    NavPoint end = waypoints.get(waypoints.size() - 1);
+                    nav.follower.restartAtNpc(end);
+                    RouteFollower.Stretch rest = nav.follower.next(ports.world(), nav.settings.stretchBlocks(),
+                        end.blockY() - 1, nav.settings.cornerClearance());
+                    if (rest.kind() == RouteFollower.Kind.WAYPOINTS) {
+                        waypoints.addAll(rest.waypoints());
+                    }
+                    nav.hops.clear();
+                    nav.recovering = false;
+                    nav.onTrail = true;
+                    nav.moveOnly = false;
+                    nav.tryMarkRef = nav.follower;
+                    nav.tryMark = markBefore; // measured where it got stuck, before it walks back
+                } else {
+                    nav.onTrail = false;
+                    nav.moveOnly = true;
+                }
+                nav.state = NpcNavState.MOVING;
+                nav.mover.follow(waypoints, nav.settings.waypointMargin());
+            }
+            case LOCAL_LEG -> {
+                if (legTarget[0] != null) {
+                    nav.hops.clear();
+                    nav.hops.add(legTarget[0]);
+                    nav.onTrail = false;
+                    nav.recovering = true;
+                }
+                nav.moveOnly = false;
+                nav.state = NpcNavState.WAITING;
+                enqueue(nav); // through the planning queue: capture and access first
+            }
+            case REPLAN -> {
+                ports.metrics().count(Event.RETRIES_EXHAUSTED);
+                nav.retries = 0;
+                dropRoute(nav);
+                if (++nav.replans <= MAX_REPLANS) {
+                    nav.state = NpcNavState.WAITING;
+                    enqueue(nav);
+                } else {
+                    spellNotFreed(nav, "retries and replans used up");
+                    end(nav, failed("stuck at " + NavGeometry.block(at) + ": retries and replans used up"));
+                }
+            }
+        }
+    }
+
+    /**
+     * Watches the running try of an open spell (every {@link #HANDOVER_TICKS}): freed when the NPC came at least
+     * {@link RecoveryLadder#FREED_BLOCKS} further along its path, failed when {@code no-progress-ticks} passed without.
+     */
+    private void supervise(Nav nav) {
+        if (!nav.ladder.isOpen() || !nav.ladder.tryRunning() || (tick + nav.mover.id()) % HANDOVER_TICKS != 0) {
+            return;
+        }
+        NavPoint at = nav.mover.position().orElse(null);
+        if (at == null) {
+            return;
+        }
+        Object ref = nav.onTrail && nav.follower != null ? nav.follower
+            : nav.moveOnly || nav.hops.isEmpty() ? null : nav.hops.peekFirst();
+        if (ref == null) {
+            nav.ladder.holdTryClock(tick); // a back-off of a local-leg NPC: measured on its hop after it
+            return;
+        }
+        double mark = ref instanceof RouteFollower follower ? follower.alongAt(at)
+            : -Math.sqrt(sq(((NavPoint) ref).x() - at.x()) + sq(((NavPoint) ref).y() + 1 - at.y())
+                + sq(((NavPoint) ref).z() - at.z()));
+        if (ref != nav.tryMarkRef || Double.isNaN(nav.tryMark)) {
+            nav.tryMarkRef = ref;
+            nav.tryMark = mark;
+            nav.ladder.holdTryClock(tick);
+            return;
+        }
+        if (mark >= nav.tryMark + RecoveryLadder.FREED_BLOCKS) {
+            spellFreed(nav);
+        } else if (tick - nav.ladder.tryStartTick() >= nav.settings.noProgressTicks()) {
+            nav.ladder.tryFailed(tick, nav.settings.recoveryWaitTicks());
+            waitForNextTry(nav);
+        }
+    }
+
+    private void spellFreed(Nav nav) {
+        if (!nav.ladder.isOpen()) {
+            return;
+        }
+        NavPoint at = nav.mover.position().orElse(nav.ladder.spot());
+        RecoveryLadder.Step by = nav.ladder.current();
+        int steps = nav.ladder.taken();
+        long ticks = tick - nav.ladder.startTick();
+        boolean wall = nav.ladder.nearWall();
+        Event event = nav.ladder.freed(tick, at);
+        ports.metrics().spellEnded(wall, event, steps, ticks, at);
+        ports.log().accept(RecoveryLadder.freedLine(nav.mover.name(), at, by, steps, ticks));
+    }
+
+    private void spellNotFreed(Nav nav, String why) {
+        if (!nav.ladder.isOpen()) {
+            return;
+        }
+        NavPoint at = nav.mover.position().orElse(nav.ladder.spot());
+        int steps = nav.ladder.taken();
+        long ticks = tick - nav.ladder.startTick();
+        boolean wall = nav.ladder.nearWall();
+        nav.ladder.notFreed(tick, at);
+        ports.metrics().spellEnded(wall, Event.NOT_FREED, steps, ticks, at);
+        ports.log().accept(RecoveryLadder.notFreedLine(nav.mover.name(), at, why));
+    }
+
+    private static double sq(double v) {
+        return v * v;
     }
 
     private void dropRoute(Nav nav) {
@@ -1173,6 +1487,14 @@ public final class NpcNavigationService {
     }
 
     // ==================== results ====================
+
+    private static String describe(NavigationResult result) {
+        return switch (result) {
+            case NavigationResult.Failed f -> "failed: " + f.reason();
+            case NavigationResult.Cancelled c -> "cancelled: " + c.reason();
+            default -> result.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+        };
+    }
 
     private static NavigationResult failed(String reason) {
         return new NavigationResult.Failed(reason);
@@ -1187,6 +1509,13 @@ public final class NpcNavigationService {
     /** Ends the order: the NPC is IDLE and stopped before the caller hears the result (it may order again). */
     private void end(Nav nav, NavigationResult result) {
         Consumer<NavigationResult> onResult = nav.onResult;
+        if (result instanceof NavigationResult.Arrived) {
+            spellFreed(nav);
+        } else {
+            spellNotFreed(nav, "the order ended (" + describe(result) + ")");
+        }
+        nav.ladderPending = false;
+        nav.moveOnly = false;
         nav.generation++;
         queue.remove(nav);
         dropRoute(nav);

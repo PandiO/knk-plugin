@@ -43,6 +43,17 @@ public final class CitizensBootstrap {
     }
 
     /**
+     * A mover factory on Citizens with its own NPC registry, beside the navigation module's (the NPC scenarios of
+     * implementation plan 4b.2 item 18); stop it with {@link #stop}.
+     */
+    public static Optional<NpcMoverFactory> start(Plugin plugin, String registryName) {
+        if (unavailableReason().isPresent()) {
+            return Optional.empty();
+        }
+        return Optional.of(new CitizensNpcRuntime(plugin, registryName));
+    }
+
+    /**
      * How often the K&K block examiner was asked about a cell and how often it blocked one, since the server
      * started: {@code {asked, blocked}}. Zeros without Citizens.
      */

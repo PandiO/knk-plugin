@@ -7,6 +7,10 @@ import org.bukkit.Material;
 import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Bisected;
+import org.bukkit.block.data.type.Slab;
+import org.bukkit.block.data.type.Stairs;
 
 import net.knightsandkings.knk.core.npc.nav.NavWorld;
 import net.knightsandkings.knk.paper.regions.RegionIds;
@@ -44,5 +48,52 @@ public final class BukkitNavWorld implements NavWorld {
     public Set<String> regionsAt(String world, int x, int feetY, int z) {
         World w = Bukkit.getWorld(world);
         return regionIds == null || w == null ? Set.of() : regionIds.at(w, x, feetY, z);
+    }
+
+    /**
+     * The free height above a floor (implementation plan 4b.2 item 4): from the floor's top (a bottom slab's at half a
+     * block) to the bottom of the first block above it a body cannot pass (a top slab's at half a block), at most
+     * four blocks up. 0 for a floor an NPC cannot stand on or in an unloaded chunk.
+     */
+    @Override
+    public double freeHeight(String world, int x, int floorY, int z) {
+        if (!isStandableFloor(world, x, floorY, z)) {
+            return 0;
+        }
+        World w = Bukkit.getWorld(world);
+        double floorTop = floorY + (isSlab(w.getBlockAt(x, floorY, z).getBlockData(), Slab.Type.BOTTOM) ? 0.5 : 1.0);
+        for (int k = 1; k <= 4 && floorY + k < w.getMaxHeight(); k++) {
+            Block block = w.getBlockAt(x, floorY + k, z);
+            if (block.isPassable()) {
+                continue;
+            }
+            return floorY + k + (isSlab(block.getBlockData(), Slab.Type.TOP) ? 0.5 : 0.0) - floorTop;
+        }
+        return floorY + 5 - floorTop;
+    }
+
+    /**
+     * Whether a block stops a walking body (implementation plan 4b.2 items 1 and 13): anything not passable, except a
+     * step the body walks up (a bottom slab, a stair that is not upside down). False in an unloaded chunk.
+     */
+    @Override
+    public boolean blocksBody(String world, int x, int y, int z) {
+        World w = Bukkit.getWorld(world);
+        if (w == null || y < w.getMinHeight() || y >= w.getMaxHeight() || !w.isChunkLoaded(x >> 4, z >> 4)) {
+            return false;
+        }
+        Block block = w.getBlockAt(x, y, z);
+        if (block.isPassable()) {
+            return false;
+        }
+        BlockData data = block.getBlockData();
+        if (isSlab(data, Slab.Type.BOTTOM)) {
+            return false;
+        }
+        return !(data instanceof Stairs stairs && stairs.getHalf() == Bisected.Half.BOTTOM);
+    }
+
+    private static boolean isSlab(BlockData data, Slab.Type type) {
+        return data instanceof Slab slab && slab.getType() == type;
     }
 }

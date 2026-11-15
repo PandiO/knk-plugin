@@ -46,6 +46,15 @@ public final class NavGroupService {
 
     public NavGroupService(Ports ports) {
         this.ports = Objects.requireNonNull(ports, "ports");
+        // a follower walks its group's waypoints without an order of its own: the engine's stuck reports for it come
+        // here (implementation plan 4b.2 item 9)
+        ports.navigation().setIdleStuckListener((moverId, kind) -> {
+            for (NavGroup group : groups.values()) {
+                if (group.engineStuck(moverId, kind)) {
+                    return;
+                }
+            }
+        });
     }
 
     /**

@@ -400,7 +400,7 @@ class NpcNavigationServiceTest {
     // ==================== stuck: watchdog and bounded retries ====================
 
     @Test
-    void theWatchdogSendsAnNpcWithoutProgressOnARecoveryLeg() {
+    void theWatchdogStartsASpellAndTheLocalLegAimsAheadOnTheNpcsFloor() {
         goFar();
         lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
         mover.position = new NavPoint(WORLD, 5.5, 65, 0.5);
@@ -411,20 +411,27 @@ class NpcNavigationServiceTest {
             service.tick();
         }
 
-        assertEquals(1, metrics.total(Event.STUCK_NO_PROGRESS));
-        assertEquals(1, legAsks.size(), "one local leg to recover");
-        assertTrue(lastLegAsk().target().x() > 8 && lastLegAsk().target().x() < 14, "a few blocks further along the line");
+        assertEquals(1, metrics.total(Event.STUCK_NO_PROGRESS), "one spell");
+        assertEquals(1, legAsks.size(), "no footsteps to walk back on and no wall to step from: the local leg");
+        assertTrue(lastLegAsk().target().x() >= 8 && lastLegAsk().target().x() < 14,
+            "at least 3 blocks further along the line, was " + lastLegAsk().target().x());
+        assertEquals(64, lastLegAsk().target().y(), 1e-9, "on the NPC's own floor");
         assertTrue(mover.stops >= 1);
-        assertTrue(log.get(0).contains("no progress") && log.get(0).contains("5 65 0"), "logged with the position: " + log);
+        assertTrue(log.get(0).contains("no progress 40 ticks") && log.get(0).contains("5 65 0")
+            && log.get(0).contains("step 1 of 3 local leg"), "logged with the position and the step: " + log);
 
         lastLegAsk().answer().complete(Prepared.ready(LEG));
         assertEquals(NpcNavState.MOVING, service.state(mover.id()));
         mover.arrive();
 
         assertEquals(1, metrics.total(Event.RECOVERED));
+        assertEquals(1, metrics.total(Event.FREED_LOCAL_LEG));
+        assertTrue(log.stream().anyMatch(line -> line.contains("freed at") && line.contains("by local leg (1 step")),
+            log.toString());
         assertEquals(2, mover.follows.size(), "back on the line");
         assertTrue(mover.follows.get(1).get(0).x() >= mover.walks.get(0).x() - 1, "from the recovery target on");
         assertEquals(0, metrics.total(Event.RETRIES_EXHAUSTED));
+        assertFalse(service.stuckSpellOpen(mover.id()));
     }
 
     @Test
@@ -442,61 +449,176 @@ class NpcNavigationServiceTest {
     }
 
     @Test
-    void aLocalLegIsRetriedThenTheRouteIsPlannedAgainThenTheOrderFails() {
+    void aStuckLocalLegTakesItsStepsWithWaitsThenReplansThenTheOrderFails() {
         service.unregister(mover.id());
         mover = register(2, START, settings(1));
         service.navigate(mover.id(), new NavPoint(WORLD, 10.5, 65, 0.5), results::add);
         service.tick();
         lastLegAsk().answer().complete(Prepared.ready(LEG));
+        int wait = Settings.defaults().recoveryWaitTicks();
 
-        mover.listener.stuck(mover); // retry 1 of 1: the same hop again
+        mover.listener.stuck(mover); // a spell: no footsteps, no wall, so its one step is the local leg (its hop) again
+        assertEquals(1, metrics.total(Event.STUCK_ENGINE));
         assertEquals(NpcNavState.QUEUED, service.state(mover.id()));
         service.tick();
         assertEquals(2, legAsks.size());
         assertEquals(legAsks.get(0).target(), legAsks.get(1).target());
         lastLegAsk().answer().complete(Prepared.ready(LEG));
 
-        mover.listener.stuck(mover); // retries used up: wait, then plan the route again (replan 1)
+        mover.listener.stuck(mover); // that try failed: the replan, but only after recovery-wait-ticks
+        assertEquals(1, metrics.total(Event.STUCK_ENGINE), "the same spell, not a new one");
         assertEquals(NpcNavState.WAITING, service.state(mover.id()));
-        assertEquals(1, metrics.total(Event.RETRIES_EXHAUSTED));
-        assertTrue(results.isEmpty());
+        ticks(wait - 1);
+        assertEquals(0, metrics.total(Event.RETRIES_EXHAUSTED), "no try within recovery-wait-ticks of the last");
+        assertEquals(2, legAsks.size());
 
-        for (int replan = 2; replan <= NpcNavigationService.MAX_REPLANS + 1; replan++) {
-            ticks(Settings.defaults().noRouteWaitTicks() + 1);
+        for (int replan = 1; replan <= NpcNavigationService.MAX_REPLANS; replan++) {
+            ticks(2); // the replan, through the planning queue: a short trip again
+            assertEquals(replan, metrics.total(Event.RETRIES_EXHAUSTED));
             lastLegAsk().answer().complete(Prepared.ready(LEG));
             mover.listener.stuck(mover);
-            service.tick();
-            lastLegAsk().answer().complete(Prepared.ready(LEG));
-            mover.listener.stuck(mover);
+            ticks(wait - 1);
         }
+        ticks(2);
 
         NavigationResult.Failed failed = assertInstanceOf(NavigationResult.Failed.class, lastResult());
         assertTrue(failed.reason().contains("retries and replans used up"), failed.reason());
-        assertEquals(NpcNavigationService.MAX_REPLANS + 1, metrics.total(Event.RETRIES_EXHAUSTED));
-        assertEquals(2L * (NpcNavigationService.MAX_REPLANS + 1), metrics.total(Event.STUCK_ENGINE));
+        assertEquals(1, metrics.total(Event.STUCK_ENGINE), "one spell from start to end");
+        assertEquals(1, metrics.total(Event.NOT_FREED));
+        assertEquals(0, metrics.total(Event.RECOVERED));
         assertEquals(NpcNavState.IDLE, service.state(mover.id()));
         assertEquals(1, results.size());
+        assertTrue(log.stream().noneMatch(line -> line.contains("step 2 of 1")), "the count never passes the cap: " + log);
+        assertTrue(log.stream().anyMatch(line -> line.contains("step 1 of 1 local leg")), log.toString());
+        assertTrue(log.stream().anyMatch(line -> line.contains("not freed at") && line.contains("replanning (steps used up)")),
+            log.toString());
     }
 
     @Test
-    void aWalkedLegGivesTheRetriesBack() {
+    void aWalkedHopEndsItsSpellFreed() {
         service.unregister(mover.id());
         mover = register(2, START, settings(1));
-        service.navigate(mover.id(), new NavPoint(WORLD, 40.5, 65, 0.5), results::add);
+        service.navigate(mover.id(), new NavPoint(WORLD, 10.5, 65, 0.5), results::add);
         service.tick();
-        lastRoadAsk().answer().complete(RoadPlan.none(RoadPlanner.Status.OFF_ROAD, "off road"));
+        lastLegAsk().answer().complete(Prepared.ready(LEG));
 
-        for (int hop = 0; hop < 3; hop++) {
-            lastLegAsk().answer().complete(Prepared.ready(LEG));
-            mover.listener.stuck(mover); // one retry per hop is within the budget
-            service.tick();
-            lastLegAsk().answer().complete(Prepared.ready(LEG));
-            mover.arrive();
-            service.tick();
-        }
+        mover.listener.stuck(mover);
+        service.tick();
+        lastLegAsk().answer().complete(Prepared.ready(LEG));
+        mover.arrive();
 
         assertInstanceOf(NavigationResult.Arrived.class, lastResult());
+        assertEquals(1, metrics.total(Event.FREED_LOCAL_LEG));
+        assertEquals(1, metrics.total(Event.RECOVERED));
         assertEquals(0, metrics.total(Event.RETRIES_EXHAUSTED));
+    }
+
+    @Test
+    void aFailedEnginePathSearchEndsTheTryNotANewSpell() {
+        goFar();
+        lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
+        mover.position = new NavPoint(WORLD, 5.5, 65, 0.5);
+        mover.listener.stuck(mover, NpcMover.StuckKind.STATIONARY); // spell: the local leg ahead
+        service.tick();
+        lastLegAsk().answer().complete(Prepared.ready(LEG));
+
+        mover.listener.stuck(mover, NpcMover.StuckKind.NO_PATH); // Citizens found no path for that leg
+
+        assertEquals(1, metrics.total(Event.STUCK_ENGINE), "still one spell");
+        assertEquals(1, metrics.total(Event.RECOVERY_NO_PATH));
+        assertEquals(NpcNavState.WAITING, service.state(mover.id()), "the next step after recovery-wait-ticks");
+        assertTrue(service.stuckSpellOpen(mover.id()));
+    }
+
+    @Test
+    void theBackOffWalksBackAlongItsFootstepsThenTheStretchAgain() {
+        goFar();
+        lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
+        for (int i = 0; i < 40; i++) { // walks the line a few blocks: footsteps
+            mover.position = new NavPoint(WORLD, 0.5 + i * 0.15, 65, 0.5);
+            service.tick();
+        }
+        int follows = mover.follows.size();
+
+        mover.listener.stuck(mover, NpcMover.StuckKind.STATIONARY);
+
+        assertEquals(follows + 1, mover.follows.size(), "a waypoint list, no local leg");
+        List<NavPoint> back = mover.follows.get(mover.follows.size() - 1);
+        assertTrue(back.get(0).x() < mover.position.x(), "first back along its footsteps: " + back);
+        assertTrue(back.get(back.size() - 1).x() > mover.position.x() + 3, "then the stretch again: " + back);
+        assertTrue(log.get(log.size() - 1).contains("step 1 of 3 back-off"), log.toString());
+        assertTrue(legAsks.isEmpty());
+
+        for (int i = 0; i < 20; i++) { // and it gets past the spot
+            mover.position = new NavPoint(WORLD, mover.position.x() + 0.3, 65, 0.5);
+            service.tick();
+        }
+        assertEquals(1, metrics.total(Event.FREED_BACK_OFF));
+        assertFalse(service.stuckSpellOpen(mover.id()));
+    }
+
+    @Test
+    void theSideStepGoesOneBlockAwayFromTheWall() {
+        goFar();
+        lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
+        mover.position = new NavPoint(WORLD, 5.5, 65, 0.5);
+        world.addWall(6, 64, 0); // a wall right ahead
+        service.tick();
+
+        mover.listener.stuck(mover, NpcMover.StuckKind.STATIONARY);
+
+        List<NavPoint> step = mover.follows.get(mover.follows.size() - 1);
+        assertEquals(4, step.get(0).blockX(), "straight away from the wall: " + step);
+        assertEquals(0, step.get(0).blockZ());
+        assertTrue(log.get(log.size() - 1).contains("wall at 6 65 0 (east)")
+            && log.get(log.size() - 1).contains("step 1 of 3 side-step"), log.toString());
+    }
+
+    @Test
+    void aNewStuckAtTheSameSpotContinuesTheLadder() {
+        goFar();
+        lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
+        mover.position = new NavPoint(WORLD, 5.5, 65, 0.5);
+        world.addWall(6, 64, 1); // beside the line ahead
+        service.tick();
+        mover.listener.stuck(mover, NpcMover.StuckKind.STATIONARY); // side-step
+        for (int i = 0; i < 10; i++) { // freed: it got past
+            mover.position = new NavPoint(WORLD, 5.5 + i * 0.3, 65, 0.5);
+            service.tick();
+        }
+        assertEquals(1, metrics.total(Event.FREED_SIDE_STEP));
+        mover.position = new NavPoint(WORLD, 6.5, 65, 0.5);
+
+        mover.listener.stuck(mover, NpcMover.StuckKind.STATIONARY); // again within 2 blocks and 30 s
+
+        assertTrue(log.get(log.size() - 1).contains("step 2 of 3 local leg"), "where it stopped: " + log);
+        assertEquals(2, metrics.total(Event.STUCK_ENGINE), "a spell of its own all the same");
+    }
+
+    @Test
+    void theCountersAddUpOverAScriptedRun() {
+        goFar();
+        lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
+        for (int round = 0; round < 3; round++) {
+            mover.position = new NavPoint(WORLD, 5.5 + round * 20, 65, 0.5);
+            mover.listener.stuck(mover, NpcMover.StuckKind.STATIONARY);
+            service.tick();
+            if (!legAsks.isEmpty() && !lastLegAsk().answer().isDone()) {
+                lastLegAsk().answer().complete(Prepared.ready(LEG));
+            }
+            long open = metrics.spells().open();
+            assertEquals(metrics.total(Event.STUCK_ENGINE) + metrics.total(Event.STUCK_NO_PROGRESS),
+                metrics.total(Event.RECOVERED) + metrics.total(Event.NOT_FREED) + open, "the invariant of 4b.2 item 12");
+            if (mover.moving) {
+                mover.arrive();
+            }
+        }
+        service.cancel(mover.id(), "test");
+        assertEquals(0, metrics.spells().open());
+        assertEquals(metrics.total(Event.STUCK_ENGINE) + metrics.total(Event.STUCK_NO_PROGRESS),
+            metrics.total(Event.RECOVERED) + metrics.total(Event.NOT_FREED));
+        assertEquals(metrics.total(Event.RECOVERED), metrics.total(Event.FREED_BACK_OFF)
+            + metrics.total(Event.FREED_SIDE_STEP) + metrics.total(Event.FREED_LOCAL_LEG) + metrics.total(Event.FREED_REPLAN));
     }
 
     // ==================== local leg preparation ====================

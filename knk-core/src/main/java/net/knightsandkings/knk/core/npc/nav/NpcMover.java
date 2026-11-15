@@ -29,6 +29,15 @@ public interface NpcMover {
      */
     void follow(List<NavPoint> waypoints);
 
+    /**
+     * As {@link #follow(List)}, moving on to the next waypoint only within {@code margin} blocks of the current one
+     * (implementation plan 4b.2 item 2: turns are walked through the corner point, not cut). The margin applies to
+     * this list only; local legs keep the engine's own. An engine without such a margin ignores it.
+     */
+    default void follow(List<NavPoint> waypoints, double margin) {
+        follow(waypoints);
+    }
+
     /** Walk to {@code target} with the engine's own local path search and its own block rules only (test NPCs). */
     void walkTo(NavPoint target);
 
@@ -67,6 +76,14 @@ public interface NpcMover {
 
     void setListener(MoverListener listener);
 
+    /** Why the engine gave up moving. */
+    enum StuckKind {
+        /** The body stood in one block for the engine's stationary ticks. */
+        STATIONARY,
+        /** The engine's path search ended without a path (an unreachable target), before the body moved. */
+        NO_PATH
+    }
+
     /** What the engine reports about a mover. Main thread. */
     interface MoverListener {
 
@@ -76,6 +93,14 @@ public interface NpcMover {
 
         /** The engine gave up moving (its stuck detection). Waypoint lists may not report this: see NAV-17. */
         default void stuck(NpcMover mover) {
+        }
+
+        /**
+         * As {@link #stuck(NpcMover)}, saying what made the engine give up (implementation plan 4b.2 item 7.3). The
+         * default hands it to {@link #stuck(NpcMover)}, so a listener that does not care keeps working.
+         */
+        default void stuck(NpcMover mover, StuckKind kind) {
+            stuck(mover);
         }
 
         /** The entity left the world: {@code chunkUnload} when its chunk unloaded (NAV-11). */

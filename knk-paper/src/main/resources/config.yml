@@ -540,12 +540,22 @@ npc:
     # or a closed gate ahead plans the route again (0 = off; gate and access events still reach the NPCs, and the
     # trespass guard still looks every 40 ticks).
     recheck-ticks: 40
-    # Ticks without movement before Citizens reports stuck.
-    stationary-ticks: 60
+    # Ticks in one block before Citizens reports stuck; the first recovery step starts then.
+    stationary-ticks: 40
     # Ticks without progress along the route before K&K's watchdog steps in.
-    no-progress-ticks: 60
-    # Recovery attempts per hop or stretch before the route is dropped and planned again (then the order fails).
+    no-progress-ticks: 40
+    # Recovery steps of a stuck NPC before its route is planned again: 1 back-off (walk back along its last
+    # footsteps), 2 side-step (one block away from the wall), 3 local leg ahead (one Citizens search to a point ahead
+    # on its own floor). After the route was planned again twice without getting it free, the order fails.
     max-retries: 3
+    # Ticks between two recovery steps of a stuck NPC (back-off, side-step, local leg, replan).
+    recovery-wait-ticks: 20
+    # Blocks an NPC keeps between itself and a wall on the inside of a turn of its route, as far as the road allows;
+    # straight stretches may run along a wall (0 = off).
+    corner-clearance: 1.0
+    # How close an NPC comes to a route waypoint before it heads for the next one; smaller walks turns through the
+    # corner point (Citizens' own default is 1).
+    waypoint-margin: 0.5
     # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded. An NPC
     # waiting at a closed gate or a district edge is woken by the gate or access change itself; this is the fallback.
     no-route-wait-ticks: 100
@@ -571,8 +581,9 @@ npc:
     group-spacing: 2.0
     # NPCs per row in the ranks formation.
     group-ranks-width: 2
-    # A follower further than this from its lane (pushed away, fallen off), or without progress for
-    # no-progress-ticks, plans its own leg back to the group's path: one local leg, never the whole route.
+    # A follower further than this from its lane (pushed away, fallen off) plans its own leg back to the group's path:
+    # one local leg, never the whole route. A follower without progress for no-progress-ticks takes the recovery
+    # steps first (back-off, side-step), then its own leg back to a point ahead of it on its own floor.
     group-rejoin-blocks: 4.0
     # The leader waits when a follower is this many blocks behind its slot, until the group has closed up to half
     # of it (at most 30 seconds). 0 = the leader never waits.

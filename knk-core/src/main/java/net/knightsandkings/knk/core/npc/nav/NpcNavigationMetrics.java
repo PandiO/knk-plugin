@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.core.npc.nav;
 
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.LongAdder;
@@ -20,13 +21,30 @@ public final class NpcNavigationMetrics implements MetricsCollector {
     /** Things that happen to NPCs; the metric label is the lower-case name. */
     public enum Event {
         SPAWNED, REMOVED, ARRIVED,
-        /** The engine's own stuck detection fired. */
+        /**
+         * A stuck spell started that the engine reported first: its stationary check, or a path search that found
+         * nothing (implementation plan 4b.2 item 12). One per spell, not one per report.
+         */
         STUCK_ENGINE,
-        /** K&K's progress watchdog fired (NAV-17). */
+        /** A stuck spell started that K&K's progress watchdog reported first (NAV-17). One per spell. */
         STUCK_NO_PROGRESS,
-        /** A recovery leg brought the NPC back on its route. */
+        /** A stuck spell ended freed: the sum of the {@code FREED_*} events (kept for dashboards). */
         RECOVERED,
-        /** Bounded retries used up (DESIGN §6). */
+        /** A stuck spell ended freed by walking back along the NPC's own last footsteps. */
+        FREED_BACK_OFF,
+        /** A stuck spell ended freed by a step away from the blocking face. */
+        FREED_SIDE_STEP,
+        /** A stuck spell ended freed by one local leg to a point ahead on the NPC's own floor. */
+        FREED_LOCAL_LEG,
+        /** A stuck spell ended freed by planning the route again. */
+        FREED_REPLAN,
+        /** A stuck spell ended without the NPC getting free (its order failed, ended or was replaced). */
+        NOT_FREED,
+        /** The engine's path search for a recovery step found no path: that step failed (not a new spell). */
+        RECOVERY_NO_PATH,
+        /** A navigating NPC's feet dropped 3 or more blocks between two looks while it was off the ground. */
+        FELL,
+        /** Recovery steps used up (DESIGN §6): the route is planned again. */
         RETRIES_EXHAUSTED,
         /** An NPC entered a region the current rules deny it (must stay 0). */
         TRESPASS,
@@ -75,6 +93,7 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         "Time an NPC waited for a planning slot.");
     private final LabeledHistogram mainThreadSeconds = new LabeledHistogram("knk_npc_nav_main_thread_seconds",
         "Main-thread time spent on NPC navigation per tick.", TICK_BOUNDS);
+    private final SpellStats spells = new SpellStats();
     private volatile Map<String, Map<NpcNavState, Integer>> states = Map.of();
     private volatile int chunksHeld;
     private volatile boolean enabled;
@@ -110,6 +129,39 @@ public final class NpcNavigationMetrics implements MetricsCollector {
     /** Running total (also while disabled: 0). */
     public long total(Event event) {
         return events.get(event).sum();
+    }
+
+    /** The stuck spells' numbers for {@code /knk npc nav stats} (main thread). */
+    public SpellStats spells() {
+        return spells;
+    }
+
+    /**
+     * A stuck spell started (implementation plan 4b.2 items 12 to 14): counts {@code STUCK_ENGINE} or
+     * {@code STUCK_NO_PROGRESS} and one open spell. Main thread.
+     */
+    public void spellStarted(boolean engine, boolean nearWall) {
+        count(engine ? Event.STUCK_ENGINE : Event.STUCK_NO_PROGRESS);
+        if (enabled) {
+            spells.opened(nearWall);
+        }
+    }
+
+    /**
+     * A stuck spell ended: {@code freedBy} is the {@code FREED_*} event of the step that worked, or
+     * {@link Event#NOT_FREED}. Counts it (and {@code RECOVERED} for a freed one). Main thread.
+     *
+     * @param steps       recovery steps taken in the spell
+     * @param stillTicks  ticks from the spell's start to its end
+     */
+    public void spellEnded(boolean nearWall, Event freedBy, int steps, long stillTicks, NavPoint at) {
+        count(freedBy);
+        if (freedBy != Event.NOT_FREED) {
+            count(Event.RECOVERED);
+        }
+        if (enabled) {
+            spells.ended(nearWall, freedBy, steps, stillTicks, at);
+        }
     }
 
     /** {@code kind}: {@code road} or {@code local}. */
@@ -150,6 +202,8 @@ public final class NpcNavigationMetrics implements MetricsCollector {
             }
         }
         out.gauge("knk_npc_nav_chunks_held", "Chunks held loaded for travelling NPCs (travel bubble).", chunksHeld);
+        out.gauge("knk_npc_nav_stuck_spells_open", "Stuck spells under way (an NPC stuck and not freed yet).",
+            spells.open());
         for (Map.Entry<Event, LongAdder> event : events.entrySet()) {
             out.counter("knk_npc_nav_events_total", "NPC navigation events by kind.", event.getValue().sum(),
                 "event", event.getKey().name().toLowerCase(Locale.ROOT));
@@ -157,5 +211,110 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         planSeconds.collect(out);
         queueWaitSeconds.collect(out);
         mainThreadSeconds.collect(out);
+    }
+
+    /**
+     * Stuck spells split by where they happened ("near a wall": a cell that stops a body touches the NPC's cell or
+     * the next one in its walking direction, implementation plan 4b.2 item 13), how each ended, the steps they took
+     * and the longest one. Main thread; {@link #reset} with the stats.
+     */
+    public static final class SpellStats {
+
+        /** Outcomes in report order: back-off, side-step, local leg, replan, not freed. */
+        public static final List<Event> OUTCOMES = List.of(Event.FREED_BACK_OFF, Event.FREED_SIDE_STEP,
+            Event.FREED_LOCAL_LEG, Event.FREED_REPLAN, Event.NOT_FREED);
+
+        private final long[] started = new long[2];
+        private final long[][] ended = new long[2][OUTCOMES.size()];
+        private long open;
+        private long endedTotal;
+        private long stepsSum;
+        private int stepsMax;
+        private long longestStillTicks;
+        private NavPoint longestAt;
+
+        void opened(boolean nearWall) {
+            started[nearWall ? 1 : 0]++;
+            open++;
+        }
+
+        void ended(boolean nearWall, Event outcome, int steps, long stillTicks, NavPoint at) {
+            int i = OUTCOMES.indexOf(outcome);
+            if (i >= 0) {
+                ended[nearWall ? 1 : 0][i]++;
+            }
+            open = Math.max(0, open - 1);
+            endedTotal++;
+            stepsSum += steps;
+            stepsMax = Math.max(stepsMax, steps);
+            if (stillTicks > longestStillTicks) {
+                longestStillTicks = stillTicks;
+                longestAt = at;
+            }
+        }
+
+        public void reset() {
+            java.util.Arrays.fill(started, 0);
+            for (long[] row : ended) {
+                java.util.Arrays.fill(row, 0);
+            }
+            endedTotal = 0;
+            stepsSum = 0;
+            stepsMax = 0;
+            longestStillTicks = 0;
+            longestAt = null;
+        }
+
+        /** Spells started near a wall ({@code true}) or elsewhere since the last reset. */
+        public long started(boolean nearWall) {
+            return started[nearWall ? 1 : 0];
+        }
+
+        /** Spells near a wall or elsewhere that ended with {@code outcome}. */
+        public long ended(boolean nearWall, Event outcome) {
+            int i = OUTCOMES.indexOf(outcome);
+            return i < 0 ? 0 : ended[nearWall ? 1 : 0][i];
+        }
+
+        /** Spells still open (not reset with the stats: they are under way). */
+        public long open() {
+            return open;
+        }
+
+        public double meanSteps() {
+            return endedTotal == 0 ? 0 : (double) stepsSum / endedTotal;
+        }
+
+        public int maxSteps() {
+            return stepsMax;
+        }
+
+        public long longestStillTicks() {
+            return longestStillTicks;
+        }
+
+        /** Where the longest spell was, or null. */
+        public NavPoint longestAt() {
+            return longestAt;
+        }
+
+        /**
+         * The stats line's stuck part (implementation plan 4b.2 item 14), without the falls and engine searches,
+         * which come from the event counters.
+         */
+        public String describe(long engineNoPath, long falls) {
+            return String.format(Locale.ROOT, "stuck near a wall: %d, freed by: %s | stuck elsewhere: %d (%s) | steps "
+                    + "per stuck: mean %.1f, max %d | engine found no path %d | longest still %.1f s%s | falls %d",
+                started(true), split(true), started(false), split(false), meanSteps(), maxSteps(), engineNoPath,
+                longestStillTicks / 20.0, longestAt == null ? "" : String.format(Locale.ROOT, " at %d %d %d",
+                    longestAt.blockX(), longestAt.blockY(), longestAt.blockZ()), falls);
+        }
+
+        private String split(boolean nearWall) {
+            return String.format(Locale.ROOT, "back-off %d / side-step %d / local leg %d / replan %d, not freed %d",
+                ended(nearWall, Event.FREED_BACK_OFF), ended(nearWall, Event.FREED_SIDE_STEP),
+                ended(nearWall, Event.FREED_LOCAL_LEG), ended(nearWall, Event.FREED_REPLAN),
+                ended(nearWall, Event.NOT_FREED));
+        }
     }
 }
