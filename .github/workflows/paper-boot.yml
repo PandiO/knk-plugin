@@ -8,6 +8,10 @@ name: Paper boot test
 # After the boot check the same server runs every in-plugin scenario (PandiO/knk-workspace#421, DESIGN § 6.3.2):
 # `knk scenario run all` with testing.scenarios.enabled on; the job fails on any KNK-SCENARIO FAIL line, a scenario
 # without a result, a missing summary line or fewer than MIN_SCENARIOS scenarios.
+# Headless bot tests (PandiO/knk-workspace#540): Mineflayer bots in tools/bot-tests join the same server through the
+# real protocol after the scenarios. OFF until the pinned Mineflayer lists Minecraft 26.3: they run only when the
+# repository variable BOT_TESTS_ENABLED is 'true' (Settings > Secrets and variables > Actions > Variables). While off,
+# only their harness unit tests and a support report run (seconds). How to switch them on: ci.md § 7.3.
 # Script and log check: tools/paper-boot/. Docs: docs/guides/developer/ci.md in knk-workspace.
 on:
   push:
@@ -20,6 +24,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # The Minecraft version the bot tests speak (tools/bot-tests; the server's version).
+  BOT_MC_VERSION: '26.3'
   # Every download is pinned to an exact build and checked against its SHA-256 (no "latest").
   # Paper: keep in step with paperApiVersion in gradle.properties (26.3.build.205-stable -> 26.3 build 205).
   # Hash from https://fill.papermc.io/v3/projects/paper/versions/26.3/builds/205 (downloads.server:default).
@@ -60,6 +66,33 @@ jobs:
 
       - name: Test the log check
         run: python3 -m unittest discover -s tools/paper-boot -p 'test_*.py' -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test the bot harness (no Minecraft client needed)
+        run: node --test tools/bot-tests/test/*.test.mjs
+
+      - name: Report whether Mineflayer supports the server's Minecraft version
+        # Informational, never fails the job: says whether the pinned and the newest Mineflayer/minecraft-protocol list
+        # BOT_MC_VERSION, so the developer knows when to bump the pins and set BOT_TESTS_ENABLED (ci.md § 7.3).
+        continue-on-error: true
+        run: |
+          node tools/bot-tests/check-support.mjs --latest | tee bot-support.txt
+          {
+            echo "### Bot tests: ${{ vars.BOT_TESTS_ENABLED == 'true' && 'on' || 'off (BOT_TESTS_ENABLED is not true)' }}"
+            echo
+            sed 's/^/1. /' bot-support.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the bot client (bot tests on)
+        if: vars.BOT_TESTS_ENABLED == 'true'
+        working-directory: tools/bot-tests
+        run: |
+          npm ci --no-audit --no-fund
+          # Fails here, with the reason, when the pinned client doesn't speak the server's version yet.
+          node check-support.mjs --require
 
       - name: Build the shaded plugin jar
         id: build
@@ -110,8 +143,9 @@ jobs:
         # when a scenario is added, so a scenario that silently stops registering fails the job.
         # --npc-navigation: turn on npc.navigation.enabled and require it running on Citizens (#543: its NPC scenarios
         # drive NPCs through that running adapter; the #521 ones start a Citizens registry of their own).
+        # --bot-tests (only with BOT_TESTS_ENABLED): the Mineflayer bot tests after the scenarios (#540).
         env:
-          MIN_SCENARIOS: 25
+          MIN_SCENARIOS: 31
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
@@ -122,6 +156,7 @@ jobs:
           --min-scenarios "$MIN_SCENARIOS"
           --npc-navigation
           --expect-timeout 600
+          ${{ vars.BOT_TESTS_ENABLED == 'true' && '--bot-tests tools/bot-tests --bot-version "$BOT_MC_VERSION"' || '' }}
 
       - name: Upload the server log
         if: always()
@@ -131,5 +166,6 @@ jobs:
           path: |
             ${{ runner.temp }}/paper-server/logs/latest.log
             ${{ runner.temp }}/paper-server/server-stdout.log
+            ${{ runner.temp }}/paper-server/bot-tests.log
           if-no-files-found: ignore
           retention-days: 14

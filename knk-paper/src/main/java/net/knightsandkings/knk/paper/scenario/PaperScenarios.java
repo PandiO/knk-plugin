@@ -25,6 +25,12 @@ import net.knightsandkings.knk.paper.scenario.scenarios.NpcStuckLadderScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupSpacingScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcWalksRoadRouteScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.PlayerChatGroupColoursScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.PlayerCommandNeedsGrantScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.PlayerJoinLoadingHoldScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.PlayerMenuClickScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.PlayerRejoinInClosedGateScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.PlayerTpIntoClosedGateScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.TempRegionSweepScenario;
 
 /**
@@ -67,6 +73,13 @@ public final class PaperScenarios {
             // NPC navigation on Citizens, on a fake road network (PandiO/knk-workspace#543)
             .register(new NpcWalksRoadRouteScenario())
             .register(new NpcKeepsToRoadScenario())
-            .register(new NpcGroupSpacingScenario());
+            .register(new NpcGroupSpacingScenario())
+            // Scripted players: commands, chat, joins, menus and teleports (PandiO/knk-workspace#540)
+            .register(new PlayerCommandNeedsGrantScenario())
+            .register(new PlayerChatGroupColoursScenario())
+            .register(new PlayerJoinLoadingHoldScenario())
+            .register(new PlayerMenuClickScenario())
+            .register(new PlayerTpIntoClosedGateScenario())
+            .register(new PlayerRejoinInClosedGateScenario());
     }
 }
