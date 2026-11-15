@@ -30,6 +30,21 @@ class GroupPathTest {
     }
 
     @Test
+    void aLinePointOverADropMovesOntoTheWalkBesideItOrRepeatsThePointBefore() {
+        world.noFloor = (x, z) -> z != 0; // a 1-wide walk along z = 0, a drop either side (#592)
+        GroupPath path = new GroupPath();
+        path.addSnapped(world, new NavPoint(GroupSim.WORLD, 1.5, 64, 0.5), 64);
+
+        path.addSnapped(world, new NavPoint(GroupSim.WORLD, 2.5, 64, 1.4), 64);
+        assertEquals(2.5, path.get(1).floor.x(), 1e-9);
+        assertEquals(0.5, path.get(1).floor.z(), 1e-9, "onto the walk beside it");
+
+        int index = path.addSnapped(world, new NavPoint(GroupSim.WORLD, 3.5, 64, 3.5), 64);
+        assertEquals(2, index, "one path point per line point");
+        assertEquals(path.get(1).floor, path.get(2).floor, "no walk within a block: the point before again");
+    }
+
+    @Test
     void distancesAlongThePathAreHorizontal() {
         GroupPath path = east(5);
 

@@ -167,6 +167,51 @@ public final class HopPlanner {
         return best == Integer.MIN_VALUE ? snapToFloor(world, p) : new NavPoint(p.world(), p.x(), best, p.z());
     }
 
+    /**
+     * The floor a route waypoint stands on, never off the walk (PandiO/knk-workspace#592, the #491 stair corner): the
+     * point's own column within {@link #CONTINUITY_RANGE} of {@code refY} (the previous waypoint's floor), else within
+     * that range of the point's own height, else the nearest neighbouring column (within a block) that has a floor
+     * within that range of {@code refY}. A road line that cuts a turn at a ledge puts points over the drop, and
+     * {@link #snapNear}'s fallback would put the waypoint on the ground below. Null when there is none: the point lies
+     * over a drop with no walk beside it. A neighbouring column's point is its block centre.
+     */
+    public static NavPoint surfaceNear(NavWorld world, NavPoint p, int refY) {
+        NavPoint own = floorNear(world, p, refY);
+        if (own != null) {
+            return own;
+        }
+        int lineY = (int) Math.round(p.y());
+        if (Math.abs(lineY - refY) > CONTINUITY_RANGE) {
+            own = floorNear(world, p, lineY);
+            if (own != null) {
+                return own;
+            }
+        }
+        int bx = p.blockX();
+        int bz = p.blockZ();
+        NavPoint best = null;
+        double bestD = Double.MAX_VALUE;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                double ddx = Math.max(Math.max(bx + dx - p.x(), 0), p.x() - (bx + dx + 1));
+                double ddz = Math.max(Math.max(bz + dz - p.z(), 0), p.z() - (bz + dz + 1));
+                double d = ddx * ddx + ddz * ddz;
+                if (d >= bestD) {
+                    continue;
+                }
+                NavPoint floor = floorNear(world, new NavPoint(p.world(), bx + dx + 0.5, refY, bz + dz + 0.5), refY);
+                if (floor != null) {
+                    best = floor;
+                    bestD = d;
+                }
+            }
+        }
+        return best;
+    }
+
     private static boolean samePlace(NavPoint a, NavPoint b) {
         return Math.abs(a.x() - b.x()) < 1e-6 && Math.abs(a.y() - b.y()) < 1e-6 && Math.abs(a.z() - b.z()) < 1e-6;
     }

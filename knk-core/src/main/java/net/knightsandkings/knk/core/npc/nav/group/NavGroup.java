@@ -27,6 +27,7 @@ import net.knightsandkings.knk.core.npc.nav.RecentSteps;
 import net.knightsandkings.knk.core.npc.nav.RecoveryLadder;
 import net.knightsandkings.knk.core.npc.nav.RecoveryMoves;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower;
+import net.knightsandkings.knk.core.npc.nav.WaypointChain;
 
 /**
  * A group of NPCs that plans once (implementation plan Phase 4; BEHAVIOR_MODEL NAV-05). Only the leader has an order
@@ -1249,7 +1250,9 @@ public final class NavGroup {
             f.sentEndArc = a;
             return;
         }
-        f.mover.follow(waypoints);
+        // every step a straight walk on floor: a lane point across a wall corner or a ledge from the one before it gets
+        // the cells between (#592, lanes running into a landing's corner)
+        f.mover.follow(WaypointChain.bridged(ports.world(), at, waypoints));
         f.sentEndArc = endArc;
     }
 
@@ -1818,7 +1821,8 @@ public final class NavGroup {
             f.progressTick = now; // waiting at a door or an edge is not being stuck
             return;
         }
-        f.mover.follow(waypoints, settings.waypointMargin());
+        f.mover.follow(WaypointChain.bridged(ports.world(), f.mover.position().orElse(null), waypoints),
+            settings.waypointMargin());
     }
 
     private void tripDone(Follower f, NavPoint at) {

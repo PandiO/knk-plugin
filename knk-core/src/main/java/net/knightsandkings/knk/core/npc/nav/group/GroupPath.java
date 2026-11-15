@@ -98,11 +98,18 @@ final class GroupPath {
 
     /**
      * Appends a point of a route line, moved onto a floor within reach of the previous point's (floor continuity, as
-     * the leader's own waypoints: no jump to the flight above on a staircase); returns its index.
+     * the leader's own waypoints: no jump to the flight above on a staircase); returns its index. A line point over
+     * a drop moves onto the walk beside it ({@link HopPlanner#surfaceNear}); with no walk beside it the previous
+     * point is repeated, so the path keeps one point per line point and never drops to the ground below a ledge
+     * (PandiO/knk-workspace#592).
      */
     int addSnapped(NavWorld world, NavPoint linePoint, int fallbackFloorY) {
         int refY = nodes.isEmpty() ? fallbackFloorY : (int) Math.round(nodes.get(nodes.size() - 1).floor.y());
-        return add(HopPlanner.snapNear(world, linePoint, refY));
+        NavPoint floor = HopPlanner.surfaceNear(world, linePoint, refY);
+        if (floor == null) {
+            floor = nodes.isEmpty() ? HopPlanner.snapNear(world, linePoint, refY) : nodes.get(nodes.size() - 1).floor;
+        }
+        return add(floor);
     }
 
     /** The index of the point nearest a feet position among {@code [from, to)} (height counts fully). */
