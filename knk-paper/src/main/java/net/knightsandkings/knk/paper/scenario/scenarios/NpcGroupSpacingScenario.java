@@ -25,7 +25,8 @@ public final class NpcGroupSpacingScenario implements Scenario<ScenarioScene> {
     static final double MIN_GAP = SPACING / 2;
     /** Twice the spacing: further is a follower left behind. */
     static final double MAX_GAP = SPACING * 2;
-    static final double END_TOLERANCE = 0.75;
+    /** At the goal a gap may differ from the spacing by half the spacing (measured: 0 to 0.5). */
+    static final double END_TOLERANCE = SPACING / 2;
     static final int TIMEOUT_TICKS = 20 * 45;
 
     @Override

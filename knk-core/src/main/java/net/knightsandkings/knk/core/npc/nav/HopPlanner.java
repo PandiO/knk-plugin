@@ -82,15 +82,45 @@ public final class HopPlanner {
     }
 
     /**
-     * The hops along {@code line}: {@link #resample} at {@code spacing}, each point snapped to a floor
-     * ({@link #snapToFloor}). The last hop is the line's end, snapped.
+     * The hops along {@code line}: {@link #resample} at {@code spacing}, each point's floor chained from the previous
+     * one with {@link #snapNear}, starting at the line's first point (the NPC's floor), so the hops stay on the NPC's
+     * floor where there is one (implementation plan 4b.2 item 5.5). The last hop is the line's end, snapped.
      */
     public static List<NavPoint> hops(NavWorld world, List<NavPoint> line, double spacing) {
         List<NavPoint> out = new ArrayList<>();
+        if (line.isEmpty()) {
+            return out;
+        }
+        int refY = (int) Math.round(line.get(0).y());
         for (NavPoint hop : resample(line, spacing)) {
-            out.add(snapToFloor(world, hop));
+            NavPoint floor = snapNear(world, hop, refY);
+            refY = (int) Math.round(floor.y());
+            out.add(floor);
         }
         return out;
+    }
+
+    /**
+     * The floor for a point within {@link #CONTINUITY_RANGE} blocks of {@code refY}, the one nearest {@code refY}
+     * (the same height first); null when there is none or the chunk is not loaded. Unlike {@link #snapNear} it never
+     * falls back to a floor further away, so a chain of points built with it stays on one floor
+     * (implementation plan 4b.2 item 5.2).
+     */
+    public static NavPoint floorNear(NavWorld world, NavPoint p, int refY) {
+        int x = p.blockX();
+        int z = p.blockZ();
+        if (!world.isLoaded(p.world(), x, z)) {
+            return null;
+        }
+        for (int d = 0; d <= CONTINUITY_RANGE; d++) {
+            if (world.isStandableFloor(p.world(), x, refY + d, z)) {
+                return new NavPoint(p.world(), p.x(), refY + d, p.z());
+            }
+            if (d > 0 && world.isStandableFloor(p.world(), x, refY - d, z)) {
+                return new NavPoint(p.world(), p.x(), refY - d, p.z());
+            }
+        }
+        return null;
     }
 
     /**

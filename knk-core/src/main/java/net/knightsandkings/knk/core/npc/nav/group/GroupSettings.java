@@ -16,12 +16,24 @@ import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
  * @param noProgressTicks  ticks without progress along the path before a follower counts as stuck
  * @param noRouteWaitTicks ticks between the tries of a follower whose own legs back keep failing
  * @param recheckTicks     ticks a rule verdict for the followers' lanes is kept (rule changes clear it at once)
+ * @param maxRetries       a stuck follower's recovery steps before its own leg back is planned again (4b.2 item 9)
+ * @param recoveryWaitTicks ticks between two recovery steps of a stuck follower
+ * @param waypointMargin   how close a follower comes to a waypoint before heading for the next (4b.2 item 2)
  */
 public record GroupSettings(Formation formation, double rejoinBlocks, double regroupBlocks, double catchUpSpeed,
-                            double hopBlocks, int noProgressTicks, int noRouteWaitTicks, int recheckTicks) {
+                            double hopBlocks, int noProgressTicks, int noRouteWaitTicks, int recheckTicks,
+                            int maxRetries, int recoveryWaitTicks, double waypointMargin) {
 
     public GroupSettings {
         Objects.requireNonNull(formation, "formation");
+    }
+
+    /** With the code defaults for the 4b.2 settings (recovery steps, their wait, the waypoint margin). */
+    public GroupSettings(Formation formation, double rejoinBlocks, double regroupBlocks, double catchUpSpeed,
+                         double hopBlocks, int noProgressTicks, int noRouteWaitTicks, int recheckTicks) {
+        this(formation, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks, noRouteWaitTicks,
+            recheckTicks, NavigationSettings.MAX_RETRIES.defaultValue(),
+            NavigationSettings.RECOVERY_WAIT_TICKS.defaultValue(), NavigationSettings.WAYPOINT_MARGIN.defaultValue());
     }
 
     public static GroupSettings of(NavigationSettings settings, NavigationSettings.Scope scope) {
@@ -35,7 +47,10 @@ public record GroupSettings(Formation formation, double rejoinBlocks, double reg
             settings.value(NavigationSettings.HOP_BLOCKS, scope),
             settings.value(NavigationSettings.NO_PROGRESS_TICKS, scope),
             settings.value(NavigationSettings.NO_ROUTE_WAIT_TICKS, scope),
-            settings.value(NavigationSettings.RECHECK_TICKS, scope));
+            settings.value(NavigationSettings.RECHECK_TICKS, scope),
+            settings.value(NavigationSettings.MAX_RETRIES, scope),
+            settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope),
+            settings.value(NavigationSettings.WAYPOINT_MARGIN, scope));
     }
 
     public static GroupSettings defaults() {
@@ -44,6 +59,6 @@ public record GroupSettings(Formation formation, double rejoinBlocks, double reg
 
     public GroupSettings withFormation(Formation other) {
         return new GroupSettings(other, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks,
-            noRouteWaitTicks, recheckTicks);
+            noRouteWaitTicks, recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin);
     }
 }

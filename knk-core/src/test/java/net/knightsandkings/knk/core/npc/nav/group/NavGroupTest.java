@@ -277,6 +277,81 @@ class NavGroupTest {
     }
 
     @Test
+    void aStuckFollowerTakesTheLadderWhileTheOnesBehindWalkOn() {
+        NavGroup group = sim.group(4, noWaiting(COLUMN));
+        group.navigate(feet(300.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> leader().position.x() > 30, 1000));
+        SimMover stuck = follower(0);
+        SimMover behind = follower(1);
+
+        stuck.frozen = true;
+        assertTrue(sim.runUntil(() -> sim.metrics.total(Event.STUCK_NO_PROGRESS) > 0, 400), "noticed as stuck");
+        double behindAt = behind.position.x();
+        assertTrue(sim.log.stream().anyMatch(line -> line.contains(stuck.name() + " (group 1) stuck (no progress 40 ticks)")
+            && line.contains("step 1 of 3 back-off")), "the first step is the back-off: " + sim.log);
+        sim.run(30);
+        assertTrue(behind.position.x() >= behindAt - 0.5, "the follower behind keeps its slot and is not held up");
+
+        stuck.frozen = false;
+        assertTrue(sim.runUntil(results::ended, 4000));
+        assertArrived();
+        assertEquals(1, sim.metrics.total(Event.STUCK_NO_PROGRESS), "one spell");
+        assertEquals(1, sim.metrics.total(Event.RECOVERED), "freed");
+        assertEquals(0, sim.metrics.spells().open());
+        assertEquals(1, sim.roadPlans, "no road plan for a follower");
+    }
+
+    @Test
+    void aLeftBehindFollowersTriesAreSpacedOutAndItsOwnLegsStayFew() {
+        NavGroup group = sim.group(3, noWaiting(COLUMN));
+        group.navigate(feet(6000.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> leader().position.x() > 20, 1000));
+        SimMover lostOne = follower(0);
+        sim.failingLegs.add(lostOne.name());
+        lostOne.frozen = true;
+
+        List<Long> rejoinTicks = new java.util.ArrayList<>();
+        long rejoins = 0;
+        for (int i = 0; i < 24_000; i++) { // 20 minutes
+            sim.tick();
+            long now = sim.metrics.total(Event.GROUP_REJOIN);
+            if (now > rejoins) {
+                rejoinTicks.add(sim.tick);
+                rejoins = now;
+            }
+        }
+
+        assertEquals(1, group.lost());
+        assertTrue(rejoins <= 40, "own legs back stay few, not hundreds: " + rejoins + " " + rejoinTicks);
+        // a try is its own leg back and one replan of that leg; between two tries it waits, doubling up to 60 s
+        long maxGap = 0;
+        for (int i = rejoinTicks.size() / 2; i + 1 < rejoinTicks.size(); i++) {
+            maxGap = Math.max(maxGap, rejoinTicks.get(i + 1) - rejoinTicks.get(i));
+        }
+        assertTrue(maxGap >= NavGroup.MAX_LOST_RETRY_TICKS, "spaced out up to 60 s: " + rejoinTicks);
+        assertTrue(sim.log.stream().noneMatch(line -> line.matches(".*step [4-9] of 3.*")), "the count never passes the cap");
+        assertEquals(1, sim.roadPlans, "never the whole route for a follower");
+    }
+
+    @Test
+    void anOwnLegBackAimsAheadOnTheFollowersFloorNeverPastItsSlot() {
+        NavGroup group = sim.group(3, noWaiting(COLUMN));
+        group.navigate(feet(300.5, 0.5), results);
+        assertTrue(sim.runUntil(() -> leader().position.x() > 40, 1500));
+        SimMover stuck = follower(1);
+        stuck.frozen = true;
+
+        assertTrue(sim.runUntil(() -> group.followerState(stuck.id()) == FollowerState.REJOINING, 600),
+            "after back-off and side-step: its own leg");
+        String line = sim.log.stream().filter(l -> l.contains(stuck.name() + " (group 1) is stuck")).findFirst().orElseThrow();
+        String[] aim = line.substring(line.lastIndexOf(" at ") + 4).split(" ");
+        double aimX = Double.parseDouble(aim[0]);
+        assertTrue(aimX >= stuck.position.x() + 2, "ahead of it: " + line);
+        assertTrue(aimX <= leader().position.x() - 4 + 1, "never past its slot: " + line);
+        assertEquals("65", aim[1], "on its own floor");
+    }
+
+    @Test
     void theLeaderWaitsForAFollowerThatFellBehindAndWalksOnWhenItClosedUp() {
         NavGroup group = sim.group(4, waitingAt(10));
         group.navigate(feet(200.5, 0.5), results);

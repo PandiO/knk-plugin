@@ -17,8 +17,34 @@ final class FakeNavWorld implements NavWorld {
     /** Regions per block column; null: {@link #regions} everywhere. */
     java.util.function.BiFunction<Integer, Integer, Set<String>> regionsByColumn;
 
+    /** Blocks that stop a body (walls), as "x,y,z". */
+    final Set<String> walls = new HashSet<>();
+    /** Free height above a floor, as "x,y,z" of the floor; others have 3. */
+    final java.util.Map<String, Double> headroom = new java.util.HashMap<>();
+    /** Floors that are not standable although {@link #floor} says so (air columns, a drop). */
+    final Set<String> holes = new HashSet<>();
+
     void addFloor(int x, int y, int z) {
         extraFloors.add(x + "," + y + "," + z);
+    }
+
+    /** A wall two blocks high (feet and head) standing on the floor at {@code floorY}. */
+    void addWall(int x, int floorY, int z) {
+        walls.add(x + "," + (floorY + 1) + "," + z);
+        walls.add(x + "," + (floorY + 2) + "," + z);
+    }
+
+    @Override
+    public boolean blocksBody(String world, int x, int y, int z) {
+        return walls.contains(x + "," + y + "," + z);
+    }
+
+    @Override
+    public double freeHeight(String world, int x, int floorY, int z) {
+        if (!isStandableFloor(world, x, floorY, z)) {
+            return 0;
+        }
+        return headroom.getOrDefault(x + "," + floorY + "," + z, 3.0);
     }
 
     @Override
@@ -28,7 +54,10 @@ final class FakeNavWorld implements NavWorld {
 
     @Override
     public boolean isStandableFloor(String world, int x, int floorY, int z) {
-        return loaded.test(x, z) && (floor.applyAsInt(x, z) == floorY || extraFloors.contains(x + "," + floorY + "," + z));
+        String key = x + "," + floorY + "," + z;
+        return loaded.test(x, z) && !holes.contains(key)
+            && (floor.applyAsInt(x, z) == floorY || extraFloors.contains(key))
+            && !walls.contains(x + "," + (floorY + 1) + "," + z) && !walls.contains(x + "," + (floorY + 2) + "," + z);
     }
 
     @Override

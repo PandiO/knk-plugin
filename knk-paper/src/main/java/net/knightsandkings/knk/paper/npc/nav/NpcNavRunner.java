@@ -114,7 +114,10 @@ public final class NpcNavRunner {
     private double tripSecondsSum;
     private long blockedReports;
     private long groupTrips;
-    private int mostPlansAtOnce;
+    /** The most road plans one group's members had waiting or running at once (a group event's plans). */
+    private int mostGroupRoadPlans;
+    /** The most local legs prepared at once, server-wide. */
+    private int mostLocalLegs;
     private long straySamples;
     private long strayOver2;
     private double strayMax;
@@ -473,7 +476,14 @@ public final class NpcNavRunner {
     /** After the service's tick: its main-thread time, for the per-NPC cost. */
     public void sampleService() {
         serviceUs[serviceSamples++ % TICK_WINDOW] = (service.lastTickNanos() + groups.lastTickNanos()) / 1000.0;
-        mostPlansAtOnce = Math.max(mostPlansAtOnce, service.queued() + service.plansInFlight());
+        mostLocalLegs = Math.max(mostLocalLegs, service.localLegsInFlight());
+        for (GroupRun run : groupRuns) {
+            int roadPlans = 0;
+            for (Walker member : run.members) {
+                roadPlans += service.planningRoad(member.mover.id()) ? 1 : 0;
+            }
+            mostGroupRoadPlans = Math.max(mostGroupRoadPlans, roadPlans);
+        }
     }
 
     /** The server's last tick duration (ServerTickEndEvent), for the tick mean against the baseline. */
@@ -601,7 +611,9 @@ public final class NpcNavRunner {
         tripSecondsSum = 0;
         blockedReports = 0;
         groupTrips = 0;
-        mostPlansAtOnce = 0;
+        mostGroupRoadPlans = 0;
+        mostLocalLegs = 0;
+        metrics.spells().reset();
         straySamples = 0;
         strayOver2 = 0;
         strayMax = 0;
@@ -634,11 +646,10 @@ public final class NpcNavRunner {
         lines.add(String.format(Locale.ROOT, "K&K navigation on the main thread: mean %.1f µs per tick, p95 %.1f µs%s",
             serviceMean, percentile(serviceUs, serviceSamples, 95),
             npcs == 0 ? "" : String.format(Locale.ROOT, " (%.4f ms per NPC)", serviceMean / 1000.0 / npcs)));
-        lines.add(String.format(Locale.ROOT,
-            "trips %d (mean %.1f s), stretches %d | stuck: engine %d, no progress %d, recovered %d, retries used up %d, "
-                + "orders failed %d", trips, trips == 0 ? 0.0 : tripSecondsSum / trips, since(Event.STRETCH),
-            since(Event.STUCK_ENGINE), since(Event.STUCK_NO_PROGRESS), since(Event.RECOVERED),
-            since(Event.RETRIES_EXHAUSTED), since(Event.FAILED)));
+        lines.add(String.format(Locale.ROOT, "trips %d (mean %.1f s), stretches %d | orders failed %d", trips,
+            trips == 0 ? 0.0 : tripSecondsSum / trips, since(Event.STRETCH), since(Event.FAILED)));
+        // stuck spells (implementation plan 4b.2 item 14): one per spell, split by where, how each ended
+        lines.add(metrics.spells().describe(since(Event.RECOVERY_NO_PATH), since(Event.FELL)));
         lines.add(String.format(Locale.ROOT,
             "waits: no allowed route %d (reported blocked %d), way ahead not loaded %d | chunk-unload pauses %d, resumes %d",
             since(Event.NO_ROUTE_WAIT), blockedReports, since(Event.UNLOADED_WAIT), since(Event.PAUSED),
@@ -688,10 +699,11 @@ public final class NpcNavRunner {
         }
         return String.format(Locale.ROOT,
             "groups %d (%d NPCs%s): trips %d | folds %d, reforms %d, folded now %d | own legs back %d (now %d), "
-                + "left behind %d (now %d), leader waited %d (now %d), furthest behind its slot %.1f blocks | most plans "
-                + "at once %d", groupCount(), members, formations.isEmpty() ? "" : ", " + String.join("/", formations),
+                + "left behind %d (now %d), leader waited %d (now %d), furthest behind its slot %.1f blocks | road plans "
+                + "per group event: max %d | local legs at once: max %d", groupCount(), members, formations.isEmpty() ? "" : ", " + String.join("/", formations),
             groupTrips, since(Event.GROUP_FOLD), since(Event.GROUP_REFORM), folded, since(Event.GROUP_REJOIN), ownLegs,
-            since(Event.GROUP_LOST), leftBehind, since(Event.GROUP_REGROUP), waiting, lag, mostPlansAtOnce);
+            since(Event.GROUP_LOST), leftBehind, since(Event.GROUP_REGROUP), waiting, lag, mostGroupRoadPlans,
+            mostLocalLegs);
     }
 
     /** Writes a report into the run log file. */

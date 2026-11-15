@@ -50,10 +50,10 @@ public final class NavigationSettings {
     public static final Key<Integer> RECHECK_TICKS = new Key<>("recheck-ticks", 40,
         integer(0, 1200), "ticks between rule rechecks of the way ahead (0 = off)");
     /** Ticks without movement before the engine reports stuck (Citizens stationary ticks). */
-    public static final Key<Integer> STATIONARY_TICKS = new Key<>("stationary-ticks", 60,
-        integer(10, 1200), "ticks without movement before the engine reports stuck");
+    public static final Key<Integer> STATIONARY_TICKS = new Key<>("stationary-ticks", 40,
+        integer(10, 1200), "ticks in one block before the engine reports stuck; the first recovery step starts then");
     /** Ticks without progress along the route before K&K's watchdog calls the NPC stuck (NAV-17). */
-    public static final Key<Integer> NO_PROGRESS_TICKS = new Key<>("no-progress-ticks", 60,
+    public static final Key<Integer> NO_PROGRESS_TICKS = new Key<>("no-progress-ticks", 40,
         integer(20, 1200), "ticks without progress along the route before the watchdog steps in");
     /** Whether NPCs push and block each other. */
     public static final Key<Boolean> COLLIDABLE = new Key<>("collidable", false, bool(),
@@ -68,9 +68,28 @@ public final class NavigationSettings {
     /** Blocks between the hops of an off-road or recovery leg, each walked with the engine's path search (NAV-01). */
     public static final Key<Double> HOP_BLOCKS = new Key<>("hop-blocks", 16.0,
         decimal(4, 48), "blocks between the hops of an off-road or recovery leg");
-    /** Recovery attempts per hop or stretch before the route is dropped and planned again (DESIGN §6). */
+    /**
+     * Recovery steps of a stuck NPC before its route is planned again (DESIGN §6; implementation plan 4b.2 item 7):
+     * 1 back-off, 2 side-step, 3 local leg ahead.
+     */
     public static final Key<Integer> MAX_RETRIES = new Key<>("max-retries", 3,
-        integer(0, 10), "recovery attempts per hop or stretch before the route is planned again");
+        integer(0, 10), "recovery steps of a stuck NPC before its route is planned again: 1 back-off, 2 side-step, "
+            + "3 local leg ahead");
+    /** Ticks between two recovery steps of a stuck NPC (implementation plan 4b.2 item 7.1, decided 2026-11-15). */
+    public static final Key<Integer> RECOVERY_WAIT_TICKS = new Key<>("recovery-wait-ticks", 20,
+        integer(0, 200), "ticks between two recovery steps of a stuck NPC (back-off, side-step, local leg, replan)");
+    /**
+     * Blocks an NPC keeps between itself and a wall on the inside of a turn of its route (implementation plan 4b.2
+     * item 1, decided 2026-11-15); 0 = off.
+     */
+    public static final Key<Double> CORNER_CLEARANCE = new Key<>("corner-clearance", 1.0,
+        decimal(0, 2), "blocks an NPC keeps from a wall on the inside of a turn, as far as the road allows (0 = off)");
+    /**
+     * How close an NPC comes to a route waypoint before it heads for the next one (implementation plan 4b.2 item 2,
+     * decided 2026-11-15); Citizens' own default is 1.
+     */
+    public static final Key<Double> WAYPOINT_MARGIN = new Key<>("waypoint-margin", 0.5,
+        decimal(0.2, 1.5), "how close an NPC comes to a route waypoint before it heads for the next one");
     /** Ticks an NPC waits before asking again when the rules allow no route or the way ahead is not loaded (NAV-03). */
     public static final Key<Integer> NO_ROUTE_WAIT_TICKS = new Key<>("no-route-wait-ticks", 100,
         integer(20, 6000), "ticks between asks while no route is allowed or the way ahead is not loaded");
@@ -111,7 +130,8 @@ public final class NavigationSettings {
 
     /** Every per-NPC setting, in display order. */
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
-        STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
+        STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
+        NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
         COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_RANKS_WIDTH, GROUP_REJOIN_BLOCKS,
         GROUP_REGROUP_BLOCKS, GROUP_CATCH_UP_SPEED);
 
