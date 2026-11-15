@@ -11,10 +11,10 @@ import net.knightsandkings.knk.core.npc.nav.NavPoint;
  * WorldEdit schematic pasted into the scenario's box ({@link SceneSchematic}) with the points the scenarios use: the
  * road line as the road graph would give it, where NPCs start and where they go, and the areas the checks watch.
  * <p>
- * Until the developer's schematic of the stair house is posted on PandiO/knk-workspace#603, the stair house is the
- * synthetic stand-in {@value #STAIRHOUSE_STANDIN} (built from the plan's description, in the real place: local = real
- * - (1400, 46, -515)); the jagged straight, the doorway and the plaza are synthetic by design (4c.5 items 4 to 6).
- * When the developer's file arrives as {@value #STAIRHOUSE_DEVELOPER}, its road line and points are taken from its
+ * Until the developer's schematic of the stair house (attached to PandiO/knk-workspace#603) is committed here, the
+ * stair house is the synthetic stand-in {@value #STAIRHOUSE_STANDIN} (built from the plan's description, in the real
+ * place: local = real - (1400, 46, -515)); the jagged straight, the doorway and the plaza are synthetic by design (4c.5 items 4 to 6).
+ * When the developer's file is committed as {@value #STAIRHOUSE_DEVELOPER}, its road line and points are taken from its
  * geometry and the trace on #603, and {@link #stairHouse} switches to it.
  * <p>
  * Coordinates are the box's (x, z 0..31, y 0..23); floor points are the block the NPC stands on.
@@ -23,7 +23,7 @@ public final class NpcMovementScene {
 
     /** The stand-in stair house (tools/scenario-scenes/make_standins.py). */
     public static final String STAIRHOUSE_STANDIN = "npc-stairhouse-standin.schem";
-    /** The developer's schematic, once posted on #603 and committed (not here yet). */
+    /** The developer's schematic, once committed from its attachment on #603 (not here yet). */
     public static final String STAIRHOUSE_DEVELOPER = "knk-stairhouse.schem";
 
     private final ScenarioScene scene;
