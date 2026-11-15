@@ -332,7 +332,12 @@ public final class NpcNavigationModule {
                 return filter(FORMATIONS, args[3]);
             }
             if (args.length == 5 && args[1].equalsIgnoreCase("group")) {
-                return filter(List.copyOf(config.accessProfiles().keySet()), args[4]);
+                List<String> options = new ArrayList<>(config.accessProfiles().keySet());
+                options.addAll(TRIP_WORDS);
+                return filter(options, args[4]);
+            }
+            if (args.length == 6 && args[1].equalsIgnoreCase("group")) {
+                return filter(TRIP_WORDS, args[5]);
             }
             if (args.length == 3 && args[1].equalsIgnoreCase("stats")) {
                 return filter(List.of("reset"), args[2]);
@@ -451,7 +456,10 @@ public final class NpcNavigationModule {
     static final List<String> NAV_ACTIONS = List.of("from", "to", "route", "baseline", "spawn", "group", "goto", "patrol",
         "stats", "trace", "clear", "scene");
     static final String NAV_USAGE = "/knk npc nav <from|to|route list|save|load|delete <name>|baseline|spawn <n> [profile]"
-        + "|group <n> [formation] [profile]|goto|patrol|stats [reset]|trace [npc] [seconds]|clear|scene corners>";
+        + "|group <n> [formation] [profile] [finish-trip|follow-leader]|goto|patrol|stats [reset]|trace [npc] [seconds]"
+        + "|clear|scene corners>";
+    /** The toggle words of {@code /knk npc nav group} (group-followers-finish-trip; implementation plan 4b.3 item 8). */
+    static final List<String> TRIP_WORDS = List.of("finish-trip", "follow-leader");
     /** The formations of {@code /knk npc nav group}, by config name. */
     static final List<String> FORMATIONS = java.util.Arrays.stream(
             net.knightsandkings.knk.core.npc.nav.group.Formation.Type.values())
@@ -464,8 +472,10 @@ public final class NpcNavigationModule {
      * route list|save|load|delete    named routes in npc-routes.yml
      * baseline                       store the current mean tick time as the no-NPC baseline
      * spawn &lt;n&gt; [profile]            n NPCs (a few per tick) that walk the route back and forth
-     * group &lt;n&gt; [formation] [profile] n NPCs that walk the route as one group: column, ranks, cluster or
-     *                                escort-ring (default: the group-formation setting at the route's start)
+     * group &lt;n&gt; [formation] [profile] [finish-trip|follow-leader]
+     *                                n NPCs that walk the route as one group: column, ranks, cluster or
+     *                                escort-ring (default: the group-formation setting at the route's start);
+     *                                finish-trip | follow-leader sets group-followers-finish-trip for the group
      * goto | patrol                  every NPC walks to you once | walks the route again
      * stats [reset]                  the counters (also written to npc-logs/); reset zeroes them
      * trace [npc] [seconds]          per-tick trace of one NPC (nearest by default, 30 s) to npc-logs/
@@ -534,6 +544,34 @@ public final class NpcNavigationModule {
         }
     }
 
+    /**
+     * The words after {@code /knk npc nav group <n>}, in any order: a formation, an access profile and
+     * {@code finish-trip} or {@code follow-leader} (group-followers-finish-trip for this group; null: the settings').
+     */
+    record GroupArgs(net.knightsandkings.knk.core.npc.nav.group.Formation.Type formation, String profile,
+                     Boolean finishTrip, String error) {
+        static GroupArgs parse(String[] args, int from) {
+            net.knightsandkings.knk.core.npc.nav.group.Formation.Type formation = null;
+            String profile = null;
+            Boolean finishTrip = null;
+            for (int i = from; i < args.length; i++) {
+                String word = args[i].toLowerCase(Locale.ROOT);
+                net.knightsandkings.knk.core.npc.nav.group.Formation.Type type =
+                    net.knightsandkings.knk.core.npc.nav.group.Formation.Type.byName(word);
+                if (TRIP_WORDS.contains(word) && finishTrip == null) {
+                    finishTrip = word.equals("finish-trip");
+                } else if (type != null && formation == null && profile == null) {
+                    formation = type;
+                } else if (profile == null && !TRIP_WORDS.contains(word)) {
+                    profile = args[i];
+                } else {
+                    return new GroupArgs(null, null, null, "Too many words or a word twice: " + args[i]);
+                }
+            }
+            return new GroupArgs(formation, profile, finishTrip, null);
+        }
+    }
+
     private static net.knightsandkings.knk.core.npc.nav.NavPoint feetOf(Player player) {
         org.bukkit.Location l = player.getLocation();
         return new net.knightsandkings.knk.core.npc.nav.NavPoint(l.getWorld().getName(), l.getBlockX() + 0.5, l.getBlockY(),
@@ -585,30 +623,26 @@ public final class NpcNavigationModule {
             sender.sendMessage("Not a number: " + args[2]);
             return;
         }
-        net.knightsandkings.knk.core.npc.nav.group.Formation.Type formation = null;
-        String profileId = net.knightsandkings.knk.core.npc.nav.NpcAccessProfile.DEFAULT.id();
-        if (args.length > 3) {
-            formation = net.knightsandkings.knk.core.npc.nav.group.Formation.Type.byName(args[3]);
-            if (formation == null && args.length > 4) {
-                sender.sendMessage("No formation " + args[3] + ": " + FORMATIONS);
-                return;
-            }
-            if (formation == null) {
-                profileId = args[3]; // no formation given: the settings' own, and this is the profile
-            } else if (args.length > 4) {
-                profileId = args[4];
-            }
+        GroupArgs parsed = GroupArgs.parse(args, 3);
+        if (parsed.error() != null) {
+            sender.sendMessage(parsed.error() + ". Formations: " + FORMATIONS + "; " + TRIP_WORDS);
+            return;
         }
+        net.knightsandkings.knk.core.npc.nav.group.Formation.Type formation = parsed.formation();
+        String profileId = parsed.profile() != null ? parsed.profile()
+            : net.knightsandkings.knk.core.npc.nav.NpcAccessProfile.DEFAULT.id();
         net.knightsandkings.knk.core.npc.nav.NpcAccessProfile profile = config.accessProfile(profileId);
         if (profile == null) {
             sender.sendMessage("No formation or access profile " + profileId + ". Formations: " + FORMATIONS
                 + "; access profiles (npc.navigation.access-profiles): " + config.accessProfiles().keySet());
             return;
         }
-        runner.spawnGroup(n, profile, formation);
+        runner.spawnGroup(n, profile, formation, parsed.finishTrip());
         sender.sendMessage("Spawning a group of " + n + " route NPCs, " + config.spawnsPerTick() + " per tick, formation "
             + (formation == null ? "from the settings (group-formation)" : formation.configName()) + ", access profile "
-            + profile.id() + ". The first one leads; /knk npc nav stats has a groups line; /knk npc nav clear removes them.");
+            + profile.id() + (parsed.finishTrip() == null ? "" : parsed.finishTrip()
+                ? ", followers finish their trip" : ", followers follow the leader")
+            + ". The first one leads; /knk npc nav stats has a groups line; /knk npc nav clear removes them.");
     }
 
     private void navRoute(CommandSender sender, String[] args) {

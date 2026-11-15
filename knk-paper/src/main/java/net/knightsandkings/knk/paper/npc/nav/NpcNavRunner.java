@@ -71,6 +71,8 @@ public final class NpcNavRunner {
         final NpcAccessProfile profile;
         /** The formation asked for with the command (the assignment layer), or null for the settings' own. */
         final Formation.Type formation;
+        /** group-followers-finish-trip asked for with the command (the assignment layer), or null. */
+        final Boolean finishTrip;
         final List<Walker> members = new ArrayList<>();
         NavGroup group;
         boolean patrol = true;
@@ -78,10 +80,11 @@ public final class NpcNavRunner {
         long nextOrderTick = -1;
         NavPoint goal;
 
-        GroupRun(int size, NpcAccessProfile profile, Formation.Type formation) {
+        GroupRun(int size, NpcAccessProfile profile, Formation.Type formation, Boolean finishTrip) {
             this.size = size;
             this.profile = profile;
             this.formation = formation;
+            this.finishTrip = finishTrip;
         }
     }
 
@@ -246,14 +249,23 @@ public final class NpcNavRunner {
      * start ({@code group-formation}); else it is the group's own (the assignment layer, decision Q4).
      */
     public void spawnGroup(int n, NpcAccessProfile profile, Formation.Type formation) {
+        spawnGroup(n, profile, formation, null);
+    }
+
+    /**
+     * As {@link #spawnGroup(int, NpcAccessProfile, Formation.Type)}; {@code finishTrip} non-null sets
+     * {@code group-followers-finish-trip} for this group (the assignment layer, implementation plan 4b.3 item 8).
+     */
+    public void spawnGroup(int n, NpcAccessProfile profile, Formation.Type formation, Boolean finishTrip) {
         if (walkers.isEmpty() && spawns.pending() == 0) {
             resetCounters();
             log.rearm();
         }
         log.fileOnly("run: a group of " + n + " NPCs, formation " + (formation == null ? "from the settings"
-            : formation.configName()) + ", profile " + profile.id() + ", route from " + NpcRouteStore.describe(from)
+            : formation.configName()) + (finishTrip == null ? "" : finishTrip ? ", finish-trip" : ", follow-leader")
+            + ", profile " + profile.id() + ", route from " + NpcRouteStore.describe(from)
             + " -> to " + NpcRouteStore.describe(to));
-        GroupRun run = new GroupRun(n, profile, formation);
+        GroupRun run = new GroupRun(n, profile, formation, finishTrip);
         groupRuns.add(run);
         for (int i = 0; i < n; i++) {
             spawns.add(() -> spawnMember(run));
@@ -271,9 +283,15 @@ public final class NpcNavRunner {
         // everybody is out: the group's settings are resolved once, for its leader
         NpcMover leader = run.members.get(0).mover;
         NavPoint at = leader.position().orElse(from);
+        NavigationSettings.Overrides assignment = NavigationSettings.Overrides.EMPTY;
+        if (run.formation != null) {
+            assignment = assignment.with(NavigationSettings.GROUP_FORMATION, run.formation.configName());
+        }
+        if (run.finishTrip != null) {
+            assignment = assignment.with(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, run.finishTrip);
+        }
         NavigationSettings.Scope scope = new NavigationSettings.Scope(at.world(), regionsOuterToInner.apply(at), null,
-            run.formation == null ? null : NavigationSettings.Overrides.of(NavigationSettings.GROUP_FORMATION,
-                run.formation.configName()));
+            assignment);
         GroupSettings groupSettings = GroupSettings.of(settings, scope);
         List<NpcMover> followers = new ArrayList<>();
         for (Walker member : run.members.subList(1, run.members.size())) {
@@ -282,7 +300,9 @@ public final class NpcNavRunner {
         run.group = groups.create(leader, followers, run.profile, groupSettings);
         log.fileOnly("group " + run.group.id() + ": leader " + leader.name() + ", " + followers.size() + " followers, "
             + groupSettings.formation() + ", " + NavigationSettings.GROUP_FORMATION.name() + " from "
-            + settings.resolve(NavigationSettings.GROUP_FORMATION, scope).layer().name().toLowerCase(Locale.ROOT));
+            + settings.resolve(NavigationSettings.GROUP_FORMATION, scope).layer().name().toLowerCase(Locale.ROOT)
+            + ", " + NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP.name() + " "
+            + settings.resolve(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, scope));
         orderGroup(run);
     }
 
@@ -680,6 +700,8 @@ public final class NpcNavRunner {
     private String groupReport() {
         int members = 0;
         int folded = 0;
+        int finishing = 0;
+        java.util.Set<String> abreast = new java.util.TreeSet<>();
         int waiting = 0;
         int ownLegs = 0;
         int leftBehind = 0;
@@ -691,6 +713,8 @@ public final class NpcNavRunner {
             }
             members += run.group.size();
             folded += run.group.folded() ? 1 : 0;
+            finishing += run.group.finishing();
+            abreast.add(run.group.width().ring() ? "ring" : String.valueOf(run.group.width().abreast()));
             waiting += run.group.holding() ? 1 : 0;
             ownLegs += run.group.followers(NavGroup.FollowerState.REJOINING);
             leftBehind += run.group.lost();
@@ -698,10 +722,13 @@ public final class NpcNavRunner {
             formations.add(run.group.settings().formation().type().configName());
         }
         return String.format(Locale.ROOT,
-            "groups %d (%d NPCs%s): trips %d | folds %d, reforms %d, folded now %d | own legs back %d (now %d), "
+            "groups %d (%d NPCs%s): trips %d | widths: narrows %d, widens %d | folds %d, reforms %d, folded now %d | "
+                + "abreast now %s | finished trips %d (finishing now %d) | own legs back %d (now %d), "
                 + "left behind %d (now %d), leader waited %d (now %d), furthest behind its slot %.1f blocks | road plans "
                 + "per group event: max %d | local legs at once: max %d", groupCount(), members, formations.isEmpty() ? "" : ", " + String.join("/", formations),
-            groupTrips, since(Event.GROUP_FOLD), since(Event.GROUP_REFORM), folded, since(Event.GROUP_REJOIN), ownLegs,
+            groupTrips, since(Event.GROUP_NARROW), since(Event.GROUP_WIDEN), since(Event.GROUP_FOLD),
+            since(Event.GROUP_REFORM), folded, abreast.isEmpty() ? "-" : String.join("/", abreast),
+            since(Event.GROUP_FINISH_TRIP), finishing, since(Event.GROUP_REJOIN), ownLegs,
             since(Event.GROUP_LOST), leftBehind, since(Event.GROUP_REGROUP), waiting, lag, mostGroupRoadPlans,
             mostLocalLegs);
     }

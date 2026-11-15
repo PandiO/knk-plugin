@@ -112,9 +112,15 @@ public final class NavigationSettings {
     /** A group's formation: {@code column}, {@code ranks} (rows behind the leader), {@code cluster}, {@code escort-ring}. */
     public static final Key<String> GROUP_FORMATION = new Key<>("group-formation", "column",
         oneOf("column", "ranks", "cluster", "escort-ring"), "a group's formation: column, ranks, cluster or escort-ring");
-    /** Blocks between neighbouring formation slots. */
-    public static final Key<Double> GROUP_SPACING = new Key<>("group-spacing", 2.0,
-        decimal(1, 8), "blocks between neighbouring formation slots");
+    /** Blocks between the rows of a formation and between NPCs in a column (decided 2026-11-15: 1.5, was 2.0). */
+    public static final Key<Double> GROUP_SPACING = new Key<>("group-spacing", 1.5,
+        decimal(1, 8), "blocks between the rows of a formation and between NPCs in a column");
+    /**
+     * Blocks between neighbours in a row of a formation (NAV-22, implementation plan 4b.3 item 1, decided
+     * 2026-11-15); 1 = shoulder to shoulder.
+     */
+    public static final Key<Double> GROUP_LATERAL_SPACING = new Key<>("group-lateral-spacing", 1.0,
+        decimal(1, 8), "blocks between neighbours in a row of a formation (1 = shoulder to shoulder)");
     /** NPCs per row in the {@code ranks} formation (2 = pairs). */
     public static final Key<Integer> GROUP_RANKS_WIDTH = new Key<>("group-ranks-width", 2,
         integer(2, 8), "NPCs per row in the ranks formation (2 = pairs)");
@@ -124,6 +130,18 @@ public final class NavigationSettings {
     /** The leader waits when a follower is this far behind its slot, until the group has closed up; 0 = never. */
     public static final Key<Double> GROUP_REGROUP_BLOCKS = new Key<>("group-regroup-blocks", 24.0,
         decimal(0, 256), "blocks a follower may fall behind its slot before the leader waits (0 = never)");
+    /**
+     * Blocks a narrower width (still 2 abreast or more) or a wider one must last along the path before a group takes
+     * it (implementation plan 4b.3 item 5, decided 2026-11-15); a column at a gate or a stair is taken at once.
+     */
+    public static final Key<Integer> GROUP_WIDTH_HYSTERESIS_BLOCKS = new Key<>("group-width-hysteresis-blocks", 3,
+        integer(0, 16), "blocks a narrower or wider formation width must last before a group changes to it");
+    /**
+     * Followers still on their way when the leader has arrived finish their trip to the goal first, then rejoin the
+     * group (NAV-23, implementation plan 4b.3 items 8 to 11, decided 2026-11-15); false: they follow the leader.
+     */
+    public static final Key<Boolean> GROUP_FOLLOWERS_FINISH_TRIP = new Key<>("group-followers-finish-trip", false,
+        bool(), "followers still on their way when the leader arrived finish their trip first (false: follow the leader)");
     /** Walking speed, as a factor, of a follower that is behind its slot; 1 = no catching up. */
     public static final Key<Double> GROUP_CATCH_UP_SPEED = new Key<>("group-catch-up-speed", 1.3,
         decimal(1, 2), "speed factor of a follower that is behind its slot (1 = off)");
@@ -132,8 +150,9 @@ public final class NavigationSettings {
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
         NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
-        COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_RANKS_WIDTH, GROUP_REJOIN_BLOCKS,
-        GROUP_REGROUP_BLOCKS, GROUP_CATCH_UP_SPEED);
+        COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
+        GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FOLLOWERS_FINISH_TRIP, GROUP_REJOIN_BLOCKS, GROUP_REGROUP_BLOCKS,
+        GROUP_CATCH_UP_SPEED);
 
     /** A resolved value and its origin ({@code scope}: the world, region or template id; null for default/global). */
     public record Resolved<T>(T value, Layer layer, String scope) {

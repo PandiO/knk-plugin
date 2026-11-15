@@ -18,6 +18,9 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnUnderRoofSce
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersLineScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupGateFinishTripScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupNarrowsScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStuckLadderScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupSpacingScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
@@ -65,6 +68,9 @@ public final class PaperScenarios {
             .register(new NpcCornersLineScenario())
             .register(new NpcCornersWalkScenario())
             .register(new NpcStuckLadderScenario())
+            .register(new NpcGroupNarrowsScenario())
+            .register(new NpcGroupGateFinishTripScenario())
+            .register(new NpcGroupAccessChangeScenario())
             // NPC navigation on Citizens, on a fake road network (PandiO/knk-workspace#543)
             .register(new NpcWalksRoadRouteScenario())
             .register(new NpcKeepsToRoadScenario())

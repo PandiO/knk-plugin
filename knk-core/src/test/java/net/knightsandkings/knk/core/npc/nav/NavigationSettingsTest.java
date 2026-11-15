@@ -131,7 +131,10 @@ class NavigationSettingsTest {
         Scope scope = Scope.of("w");
         NavigationSettings defaults = NavigationSettings.defaults();
         assertEquals("column", defaults.value(NavigationSettings.GROUP_FORMATION, scope));
-        assertEquals(2.0, defaults.value(NavigationSettings.GROUP_SPACING, scope));
+        assertEquals(1.5, defaults.value(NavigationSettings.GROUP_SPACING, scope), "decided 2026-11-15 (was 2.0)");
+        assertEquals(1.0, defaults.value(NavigationSettings.GROUP_LATERAL_SPACING, scope));
+        assertEquals(3, defaults.value(NavigationSettings.GROUP_WIDTH_HYSTERESIS_BLOCKS, scope));
+        assertEquals(false, defaults.value(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, scope));
         assertEquals(2, defaults.value(NavigationSettings.GROUP_RANKS_WIDTH, scope));
         assertEquals(4.0, defaults.value(NavigationSettings.GROUP_REJOIN_BLOCKS, scope));
         assertEquals(24.0, defaults.value(NavigationSettings.GROUP_REGROUP_BLOCKS, scope));
@@ -163,8 +166,32 @@ class NavigationSettingsTest {
         bad.put("group-rejoin-blocks", 1);
         bad.put("group-regroup-blocks", -1);
         bad.put("group-catch-up-speed", 3);
+        bad.put("group-lateral-spacing", 0.5);
+        bad.put("group-width-hysteresis-blocks", 17);
+        bad.put("group-followers-finish-trip", "maybe");
         List<String> rejected = new ArrayList<>();
         Overrides.parse(bad, "test", rejected);
-        assertEquals(6, rejected.size(), rejected.toString());
+        assertEquals(9, rejected.size(), rejected.toString());
+    }
+
+    @Test
+    void theNarrowedFormationKeysComeFromEveryLayer() {
+        Scope scope = new Scope("w", List.of("market"), "couriers",
+            Overrides.of(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, false));
+        NavigationSettings settings = NavigationSettings.builder()
+            .global(parse(Map.of("group-lateral-spacing", 1.25)))
+            .world("w", parse(Map.of("group-width-hysteresis-blocks", 5)))
+            .region("market", parse(Map.of("group-width-hysteresis-blocks", 0)))
+            .template("couriers", parse(Map.of("group-followers-finish-trip", true)))
+            .build();
+        assertEquals(new Resolved<>(1.25, Layer.GLOBAL, null), settings.resolve(NavigationSettings.GROUP_LATERAL_SPACING, scope));
+        assertEquals(new Resolved<>(0, Layer.REGION, "market"),
+            settings.resolve(NavigationSettings.GROUP_WIDTH_HYSTERESIS_BLOCKS, scope));
+        assertEquals(new Resolved<>(5, Layer.WORLD, "w"),
+            settings.resolve(NavigationSettings.GROUP_WIDTH_HYSTERESIS_BLOCKS, Scope.of("w")));
+        assertEquals(new Resolved<>(true, Layer.TEMPLATE, "couriers"), settings.resolve(
+            NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, new Scope("w", List.of(), "couriers", null)));
+        assertEquals(new Resolved<>(false, Layer.ASSIGNMENT, null),
+            settings.resolve(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, scope), "the assignment wins");
     }
 }

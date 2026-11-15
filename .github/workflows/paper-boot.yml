@@ -51,7 +51,7 @@ env:
 jobs:
   paper-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -145,7 +145,7 @@ jobs:
         # drive NPCs through that running adapter; the #521 ones start a Citizens registry of their own).
         # --bot-tests (only with BOT_TESTS_ENABLED): the Mineflayer bot tests after the scenarios (#540).
         env:
-          MIN_SCENARIOS: 29
+          MIN_SCENARIOS: 32
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
@@ -155,7 +155,7 @@ jobs:
           --scenarios
           --min-scenarios "$MIN_SCENARIOS"
           --npc-navigation
-          --expect-timeout 360
+          --expect-timeout 600
           ${{ vars.BOT_TESTS_ENABLED == 'true' && '--bot-tests tools/bot-tests --bot-version "$BOT_MC_VERSION"' || '' }}
 
       - name: Upload the server log
