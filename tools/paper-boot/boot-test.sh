@@ -17,6 +17,11 @@
 # In-plugin scenarios (PandiO/knk-workspace#421): --scenarios turns on testing.scenarios.enabled in the KnK config,
 # runs `knk scenario run all` after settling, waits for the KNK-SCENARIO SUMMARY line and checks the scenario lines
 # with check_scenarios.py (every scenario passed, none missing).
+#
+# NPC navigation (PandiO/knk-workspace#543): --npc-navigation needs a Citizens jar in plugins/ (the workflow downloads
+# a pinned build), turns on npc.navigation.enabled in the KnK config and makes check_log.py require Citizens enabled
+# and KnK's "[NPC] navigation: Citizens ..." startup line. The NPC scenarios need it; without it they fail with the
+# reason NPC navigation is off.
 set -euo pipefail
 
 usage() {
@@ -32,6 +37,7 @@ Usage: boot-test.sh --server-dir DIR --plugin-jar JAR [options]
   --expect-timeout SECONDS time allowed for the expected lines (default 120)
   --scenarios              enable the in-plugin scenarios, run them all and check their result lines
   --min-scenarios N        with --scenarios: fail when fewer than N scenarios ran (default 1)
+  --npc-navigation         turn on npc.navigation.enabled (needs plugins/[Cc]itizens*.jar) and require it running
 EOF
 }
 
@@ -47,6 +53,7 @@ EXPECT_LINES=()
 FAIL_LINES=()
 SCENARIOS=0
 MIN_SCENARIOS=1
+NPC_NAVIGATION=0
 # The address check_log.py treats as the unreachable API (the default api.base-url of config.yml).
 UNREACHABLE_API="localhost:5294"
 
@@ -64,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --expect-timeout) EXPECT_TIMEOUT="$2"; shift 2 ;;
     --scenarios) SCENARIOS=1; shift ;;
     --min-scenarios) MIN_SCENARIOS="$2"; shift 2 ;;
+    --npc-navigation) NPC_NAVIGATION=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -80,6 +88,9 @@ PLUGIN_JAR="$(cd "$(dirname "$PLUGIN_JAR")" && pwd)/$(basename "$PLUGIN_JAR")"
 cd "$SERVER_DIR"
 [[ -f paper.jar ]] || { echo "::error::$SERVER_DIR/paper.jar is missing"; exit 2; }
 ls plugins/worldguard-*.jar plugins/worldedit-*.jar >/dev/null || { echo "::error::WorldGuard/WorldEdit jars missing"; exit 2; }
+if [[ $NPC_NAVIGATION -eq 1 ]]; then
+  ls plugins/[Cc]itizens*.jar >/dev/null || { echo "::error::--npc-navigation needs a Citizens jar in plugins/"; exit 2; }
+fi
 
 # A shaded jar holds knk-core; the plain `jar` output (same file name) does not and fails to load.
 if ! unzip -Z1 "$PLUGIN_JAR" 'net/knightsandkings/knk/core/*' >/dev/null 2>&1; then
@@ -118,6 +129,13 @@ if [[ $SCENARIOS -eq 1 ]]; then
   sed -i '/^testing:$/,/^    enabled:/ s/^    enabled: false$/    enabled: true/' plugins/KnightsAndKings/config.yml
   sed -n '/^testing:$/,/^    enabled:/p' plugins/KnightsAndKings/config.yml | grep -q '^    enabled: true$' \
     || { echo "::error::Could not set testing.scenarios.enabled in config.yml (its layout changed)"; exit 2; }
+fi
+
+if [[ $NPC_NAVIGATION -eq 1 ]]; then
+  # npc.navigation.enabled is the first "    enabled:" after the top-level "npc:" key.
+  sed -i '/^npc:$/,/^    enabled:/ s/^    enabled: false$/    enabled: true/' plugins/KnightsAndKings/config.yml
+  sed -n '/^npc:$/,/^    enabled:/p' plugins/KnightsAndKings/config.yml | grep -q '^    enabled: true$' \
+    || { echo "::error::Could not set npc.navigation.enabled in config.yml (its layout changed)"; exit 2; }
 fi
 
 rm -f logs/latest.log console.in
@@ -200,6 +218,7 @@ exec 3>&-
 check_args=(logs/latest.log --unreachable-api "$UNREACHABLE_API")
 [[ -n "$EXPECT_COMMIT" ]] && check_args+=(--expect-commit "$EXPECT_COMMIT")
 [[ $started -eq 1 ]] && check_args+=(--expect-shutdown)
+[[ $NPC_NAVIGATION -eq 1 ]] && check_args+=(--expect-npc-navigation)
 python3 -I "$SCRIPT_DIR/check_log.py" "${check_args[@]}" || FAILED=1
 if [[ $SCENARIOS -eq 1 ]]; then
   python3 -I "$SCRIPT_DIR/check_scenarios.py" logs/latest.log --min-scenarios "$MIN_SCENARIOS" || FAILED=1

@@ -19,6 +19,9 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenar
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersLineScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStuckLadderScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupSpacingScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcWalksRoadRouteScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.TempRegionSweepScenario;
 
 /**
@@ -54,6 +57,10 @@ public final class PaperScenarios {
             // walking ones need Citizens, which CI's paper-boot server has as a pinned build
             .register(new NpcCornersLineScenario())
             .register(new NpcCornersWalkScenario())
-            .register(new NpcStuckLadderScenario());
+            .register(new NpcStuckLadderScenario())
+            // NPC navigation on Citizens, on a fake road network (PandiO/knk-workspace#543)
+            .register(new NpcWalksRoadRouteScenario())
+            .register(new NpcKeepsToRoadScenario())
+            .register(new NpcGroupSpacingScenario());
     }
 }

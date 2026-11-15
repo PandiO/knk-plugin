@@ -167,6 +167,19 @@ public final class NpcNavigationModule {
         factory = null;
     }
 
+    /**
+     * The engine's mover factory while NPC navigation runs (Citizens enabled and {@code npc.navigation.enabled}), else
+     * null. For the plugin scenarios (PandiO/knk-workspace#543), which drive NPCs of their own on a fake road network.
+     */
+    public NpcMoverFactory moverFactory() {
+        return factory;
+    }
+
+    /** Why NPC navigation is off (as {@code /knk npc status} says), or null while it runs. */
+    public String unavailableReason() {
+        return factory == null ? unavailable : null;
+    }
+
     /** Whether NPC route following runs (built on first use of {@code /knk npc nav}; PandiO/knk-workspace#506). */
     public boolean navigating() {
         return service != null;

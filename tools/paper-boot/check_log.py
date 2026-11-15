@@ -7,18 +7,24 @@ Passes when:
   3. the server finished starting ("Done (...)");
   4. no log entry from KnK, WorldGuard or WorldEdit is an ERROR or carries a stack trace, apart from the ones caused
      by the API being unreachable (the boot test runs without knk-web-api on purpose);
-  5. with --expect-shutdown, KnK logged "KnightsAndKings Plugin Disabled!".
+  5. with --expect-shutdown, KnK logged "KnightsAndKings Plugin Disabled!";
+  6. with --expect-npc-navigation (PandiO/knk-workspace#543), Citizens was enabled and KnK's NPC navigation started on
+     it ("[NPC] navigation: Citizens ..."), not "[NPC] navigation unavailable: <reason>".
 
-An entry is a timestamped line plus the untimestamped lines after it (a stack trace). It belongs to KnK, WorldGuard or
-WorldEdit when its text mentions them (logger name, plugin name or a stack frame). Prints GitHub annotations and a
-summary; exits 1 on failure.
+An entry is a timestamped line plus the untimestamped lines after it (a stack trace). It belongs to KnK, WorldGuard,
+WorldEdit or Citizens when its text mentions them (logger name, plugin name or a stack frame). Prints GitHub
+annotations and a summary; exits 1 on failure.
+
+Citizens' own startup lines (its library downloads and relocations, "Loaded 2 templates.", "Loaded 0 NPCs.") are all
+INFO on Paper 26.3 with Citizens build 4269, so no Citizens line is excused; one that turns into a WARN with a stack
+trace or an ERROR fails the check like a KnK error does.
 """
 import argparse
 import re
 import sys
 
 ENTRY_START = re.compile(r"^\[\d{2}:\d{2}:\d{2}\] \[(?P<thread>[^\]]*)/(?P<level>[A-Z]+)\]: ?(?P<message>.*)$")
-WATCHED = re.compile(r"knightsandkings|sk89q|worldguard|worldedit", re.IGNORECASE)
+WATCHED = re.compile(r"knightsandkings|sk89q|worldguard|worldedit|citizens", re.IGNORECASE)
 STACK_LINE = re.compile(r"^\s+at |^\s*Caused by: |^\s*\.\.\. \d+ more|^[\w.$]+(Exception|Error|Throwable)\b")
 VERSION_STAMP = re.compile(r"\[KnightsAndKings\] KnightsAndKings (?P<version>\S+) \(commit (?P<commit>[^)]*)\)")
 ENABLED = "[KnightsAndKings] KnightsAndKings Plugin Enabled!"
@@ -26,6 +32,9 @@ DISABLED = "[KnightsAndKings] KnightsAndKings Plugin Disabled!"
 WORLDGUARD_ENABLED = re.compile(r"\[WorldGuard\] Enabling WorldGuard ")
 WORLDEDIT_ENABLED = re.compile(r"\[WorldEdit\] Enabling WorldEdit ")
 SERVER_DONE = re.compile(r"\]: Done \([\d.,]+s\)!")
+CITIZENS_ENABLED = re.compile(r"\[Citizens\] Enabling Citizens ")
+NPC_NAVIGATION_ON = re.compile(r"\[KnightsAndKings\] \[NPC\] navigation: Citizens ")
+NPC_NAVIGATION_OFF = re.compile(r"\[KnightsAndKings\] \[NPC\] navigation unavailable: (?P<reason>.*)")
 
 
 class Entry:
@@ -71,7 +80,7 @@ def api_down_pattern(address):
     return re.compile(r"Failed to connect to \S*" + re.escape(host) + r"\S*:" + re.escape(port) + r"\b")
 
 
-def check(lines, expect_commit=None, unreachable_api=None, expect_shutdown=False):
+def check(lines, expect_commit=None, unreachable_api=None, expect_shutdown=False, expect_npc_navigation=False):
     """Returns (errors, notes): the failure messages and the informational lines."""
     errors = []
     notes = []
@@ -95,6 +104,15 @@ def check(lines, expect_commit=None, unreachable_api=None, expect_shutdown=False
         errors.append("The server did not finish starting ('Done (...)!' not found)")
     if expect_shutdown and DISABLED not in text:
         errors.append(f"'{DISABLED}' not found (KnK did not shut down cleanly)")
+    if expect_npc_navigation:
+        if not CITIZENS_ENABLED.search(text):
+            errors.append("Citizens was not enabled")
+        if NPC_NAVIGATION_ON.search(text):
+            notes.append("NPC navigation running on Citizens")
+        else:
+            off = NPC_NAVIGATION_OFF.search(text)
+            errors.append("KnK's NPC navigation did not start on Citizens"
+                          + (f": {off.group('reason').strip()}" if off else " ('[NPC] navigation: Citizens' not found)"))
 
     api_down = api_down_pattern(unreachable_api)
     excused = 0
@@ -119,11 +137,14 @@ def main(argv=None):
     parser.add_argument("--expect-commit", help="commit the version stamp must report")
     parser.add_argument("--unreachable-api", help="host:port of the API the test leaves unreachable, e.g. localhost:5294")
     parser.add_argument("--expect-shutdown", action="store_true", help="also require KnK's 'Plugin Disabled!' line")
+    parser.add_argument("--expect-npc-navigation", action="store_true",
+                        help="also require Citizens enabled and KnK's NPC navigation running on it")
     args = parser.parse_args(argv)
 
     with open(args.log, encoding="utf-8", errors="replace") as handle:
         lines = handle.readlines()
-    errors, notes = check(lines, args.expect_commit, args.unreachable_api, args.expect_shutdown)
+    errors, notes = check(lines, args.expect_commit, args.unreachable_api, args.expect_shutdown,
+                          args.expect_npc_navigation)
     for note in notes:
         print(note)
     for error in errors:
