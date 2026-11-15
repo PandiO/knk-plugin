@@ -13,8 +13,9 @@ import org.bukkit.Material;
  * granted {@code knk.feed} is fed and told so. The command goes through the server's dispatch ({@code Player#chat}),
  * the permission answer through the live {@code KnkPermissible} and permission cache.
  * <p>
- * {@code /feed}, not {@code /heal}: on a server with WorldGuard the plain {@code /heal} label is WorldGuard's own
- * command (found by this scenario, PandiO/knk-workspace#580).
+ * {@code /feed}, not {@code /heal}: this scenario found that on a server with WorldGuard the plain {@code /heal} label
+ * was WorldGuard's own command (PandiO/knk-workspace#580); KnK now takes it over, and {@link PlayerHealNeedsGrantScenario}
+ * covers {@code /heal}.
  */
 public final class PlayerCommandNeedsGrantScenario implements Scenario<ScenarioScene> {
 
