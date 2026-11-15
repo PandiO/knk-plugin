@@ -48,6 +48,16 @@ public final class NavGroupService {
         this.ports = Objects.requireNonNull(ports, "ports");
         // a follower walks its group's waypoints without an order of its own: the engine's stuck reports for it come
         // here (implementation plan 4b.2 item 9)
+        // corridor steering leaves group members on the road line until link M3 fits formations to the corridor:
+        // the group path is built from the leader's route line (plan 4c.4 items 2 and 3)
+        ports.navigation().setUnshapedMembers(moverId -> {
+            for (NavGroup group : groups.values()) {
+                if (group.isMember(moverId)) {
+                    return true;
+                }
+            }
+            return false;
+        });
         ports.navigation().setIdleStuckListener((moverId, kind) -> {
             for (NavGroup group : groups.values()) {
                 if (group.engineStuck(moverId, kind)) {

@@ -320,6 +320,7 @@ public final class NpcNavigationService {
     private long tick;
     /** Corridor steering's shaped stretches, shared by every NPC here (plan 4c.3 decision 1.5). */
     private final CorridorShaper corridors;
+    private java.util.function.IntPredicate unshaped = id -> false;
     private long busyNanos;
     private long lastTickNanos;
     private int depth;
@@ -350,9 +351,17 @@ public final class NpcNavigationService {
         return corridors;
     }
 
-    /** The corridor steering an NPC's stretches get: null when its {@code corridor-steering} is off. */
+    /**
+     * The movers whose stretches corridor steering leaves alone although their key is on: a group's members, until
+     * link M3 fits formations to the corridor (the group path follows the leader's route line).
+     */
+    public void setUnshapedMembers(java.util.function.IntPredicate unshaped) {
+        this.unshaped = unshaped == null ? id -> false : unshaped;
+    }
+
+    /** The corridor steering an NPC's stretches get: null when its {@code corridor-steering} is off or it is in a group. */
     private RouteFollower.Steering steering(Nav nav) {
-        return nav.settings.corridorSteering() ? new RouteFollower.Steering(corridors,
+        return nav.settings.corridorSteering() && !unshaped.test(nav.mover.id()) ? new RouteFollower.Steering(corridors,
             new CorridorShaper.Options(nav.settings.corridorHalfWidth(), nav.settings.wallClearance())) : null;
     }
 
