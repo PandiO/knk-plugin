@@ -106,6 +106,15 @@ realtime:
     settle-seconds: 2
     feed-file: "erasure-feed.json"
     minecraft-files-list: "erasure-minecraft-files.txt"
+  # Kick and ban from the web app (PandiO/knk-workspace#574), only while enabled: staff with knk.kick / knk.ban use the
+  # player profile page; the API sends PlayerKick / PlayerBan to every connected game server. A kick removes the player
+  # if they are online here, showing the reason staff typed (or kick-default-reason when they typed none). A ban adds
+  # the player to this server's ban list (banned-players.json, permanent, with the reason and the staff member as
+  # source; unban with /pardon in game) and kicks them with ban-message if online. & colour codes; placeholders
+  # {reason}, {player} and {staff} (the staff member's username).
+  moderation:
+    kick-default-reason: "You were kicked by a member of staff."
+    ban-message: "You are banned from this server.\nReason: {reason}"
 
 # Performance metrics (KNG-232): a Prometheus /metrics endpoint with TPS, tick time, players, chunks/entities per
 # world, JVM heap/off-heap/GC, process CPU and RSS, the container's memory and CPU (cgroup), API-call and task
