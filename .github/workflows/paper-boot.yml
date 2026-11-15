@@ -94,7 +94,7 @@ jobs:
         # (tools/paper-boot/check_scenarios.py; the result table also goes to the job summary). Raise MIN_SCENARIOS
         # when a scenario is added, so a scenario that silently stops registering fails the job.
         env:
-          MIN_SCENARIOS: 3
+          MIN_SCENARIOS: 16
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
