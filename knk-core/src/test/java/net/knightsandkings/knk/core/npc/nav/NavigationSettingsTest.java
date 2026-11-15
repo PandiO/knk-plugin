@@ -123,7 +123,7 @@ class NavigationSettingsTest {
         assertEquals(5, resolved.maxRetries());
         assertEquals(200, resolved.noRouteWaitTicks());
         assertEquals(32.0, resolved.stretchBlocks());
-        assertEquals(60, resolved.noProgressTicks());
+        assertEquals(40, resolved.noProgressTicks());
     }
 
     @Test

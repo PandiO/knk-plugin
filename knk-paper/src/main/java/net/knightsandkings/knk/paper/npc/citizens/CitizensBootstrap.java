@@ -43,6 +43,17 @@ public final class CitizensBootstrap {
     }
 
     /**
+     * A mover factory on Citizens with its own NPC registry, beside the navigation module's (the NPC scenarios of
+     * implementation plan 4b.2 item 18); stop it with {@link #stop}.
+     */
+    public static Optional<NpcMoverFactory> start(Plugin plugin, String registryName) {
+        if (unavailableReason().isPresent()) {
+            return Optional.empty();
+        }
+        return Optional.of(new CitizensNpcRuntime(plugin, registryName));
+    }
+
+    /**
      * How often the K&K block examiner was asked about a cell and how often it blocked one, since the server
      * started: {@code {asked, blocked}}. Zeros without Citizens.
      */
@@ -58,6 +69,19 @@ public final class CitizensBootstrap {
         static long[] read() {
             return new long[] {KnkBlockExaminer.CALLS.sum(), KnkBlockExaminer.BLOCKED.sum()};
         }
+    }
+
+    /**
+     * Puts a Citizens NPC's body somewhere else at once (scenarios: a player pushing an NPC into a corner); false for
+     * a mover that is not a Citizens one.
+     */
+    public static boolean teleport(net.knightsandkings.knk.core.npc.nav.NpcMover mover,
+                                   net.knightsandkings.knk.core.npc.nav.NavPoint feet) {
+        if (mover instanceof CitizensNpcMover citizens) {
+            citizens.teleport(feet);
+            return true;
+        }
+        return false;
     }
 
     /** Removes the runtime's NPCs and registry; safe with any factory or null. */

@@ -49,9 +49,17 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
     /** Never teleport (a teleport would skip a closed gate or a denied region): stop and report stuck instead. */
     private static final StuckAction NO_TELEPORT = (npc, navigator) -> false;
 
+    private final String registryName;
+
     CitizensNpcRuntime(Plugin plugin) {
+        this(plugin, REGISTRY);
+    }
+
+    /** @param registryName the in-memory registry's name (a scenario uses its own, beside the module's) */
+    CitizensNpcRuntime(Plugin plugin, String registryName) {
         this.plugin = plugin;
-        this.registry = CitizensAPI.createInMemoryNPCRegistry(REGISTRY);
+        this.registryName = registryName;
+        this.registry = CitizensAPI.createInMemoryNPCRegistry(registryName);
         Bukkit.getPluginManager().registerEvents(this, plugin);
     }
 
@@ -122,7 +130,7 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
         CitizensNpcMover mover = ours(event.getNPC());
         // PLUGIN: our own stop() or a replaced target - not the engine giving up
         if (mover != null && event.getCancelReason() == CancelReason.STUCK) {
-            mover.listener().stuck(mover);
+            mover.listener().stuck(mover, mover.stuckKind());
         }
     }
 
@@ -154,7 +162,7 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
         HandlerList.unregisterAll(this);
         if (registry != null) {
             registry.deregisterAll();
-            CitizensAPI.removeNamedNPCRegistry(REGISTRY);
+            CitizensAPI.removeNamedNPCRegistry(registryName);
             registry = null;
         }
     }

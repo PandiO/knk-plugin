@@ -436,9 +436,9 @@ public final class NpcNavigationModule {
     // ==================== /knk npc nav ====================
 
     static final List<String> NAV_ACTIONS = List.of("from", "to", "route", "baseline", "spawn", "group", "goto", "patrol",
-        "stats", "trace", "clear");
+        "stats", "trace", "clear", "scene");
     static final String NAV_USAGE = "/knk npc nav <from|to|route list|save|load|delete <name>|baseline|spawn <n> [profile]"
-        + "|group <n> [formation] [profile]|goto|patrol|stats [reset]|trace [npc] [seconds]|clear>";
+        + "|group <n> [formation] [profile]|goto|patrol|stats [reset]|trace [npc] [seconds]|clear|scene corners>";
     /** The formations of {@code /knk npc nav group}, by config name. */
     static final List<String> FORMATIONS = java.util.Arrays.stream(
             net.knightsandkings.knk.core.npc.nav.group.Formation.Type.values())
@@ -457,6 +457,8 @@ public final class NpcNavigationModule {
      * stats [reset]                  the counters (also written to npc-logs/); reset zeroes them
      * trace [npc] [seconds]          per-tick trace of one NPC (nearest by default, 30 s) to npc-logs/
      * clear                          remove every route NPC
+     * scene corners                  build the corner test scene (4b.2 item 19) at testing.scenarios.origin, only
+     *                                while testing.scenarios.enabled, and save the route corner-scene across it
      * </pre>
      */
     private void nav(CommandSender sender, String[] args) {
@@ -514,6 +516,7 @@ public final class NpcNavigationModule {
                 sender.sendMessage(runner.startTrace(sender instanceof Player player ? feetOf(player) : null, name, seconds));
             }
             case "clear" -> sender.sendMessage("Removed " + runner.clear() + " route NPCs.");
+            case "scene" -> navScene(sender, args);
             default -> sender.sendMessage(NAV_USAGE);
         }
     }
@@ -640,5 +643,41 @@ public final class NpcNavigationModule {
             case "delete" -> sender.sendMessage(routes.delete(name) ? "Deleted route " + name : "No route " + name);
             default -> sender.sendMessage("/knk npc nav route <save|load|delete> <name> | route list");
         }
+    }
+
+    /**
+     * {@code /knk npc nav scene corners} (implementation plan 4b.2 item 19): builds the corner test scene in the
+     * scenario world at {@code testing.scenarios.origin} (the box of the first scenario scene), only while
+     * {@code testing.scenarios.enabled} is true, so it never builds in a live world by accident; then saves the route
+     * {@code corner-scene} from the scene's start to its stair corner. The scene has no road: NPCs on that route
+     * walk it as off-road legs; the {@code npc-corners-walk} scenario walks the scene's own loop.
+     */
+    private void navScene(CommandSender sender, String[] args) {
+        if (args.length < 3 || !args[2].equalsIgnoreCase("corners")) {
+            sender.sendMessage("/knk npc nav scene corners");
+            return;
+        }
+        net.knightsandkings.knk.paper.scenario.ScenarioSettings scenarios =
+            net.knightsandkings.knk.paper.scenario.ScenarioSettings.from(plugin.getConfig());
+        if (!scenarios.enabled()) {
+            sender.sendMessage("Test scenes are off: set " + net.knightsandkings.knk.paper.scenario.ScenarioSettings.ENABLED_PATH
+                + ": true on a test server first.");
+            return;
+        }
+        org.bukkit.World world = scenarios.world() == null || scenarios.world().isBlank() ? Bukkit.getWorlds().get(0)
+            : Bukkit.getWorld(scenarios.world());
+        if (world == null) {
+            sender.sendMessage("No world " + scenarios.world() + " (testing.scenarios.world).");
+            return;
+        }
+        net.knightsandkings.knk.paper.scenario.NpcCornerScene scene = new net.knightsandkings.knk.paper.scenario.NpcCornerScene(
+            world, scenarios.originX(), scenarios.originY(), scenarios.originZ());
+        scene.clear();
+        scene.build();
+        NpcRouteStore.Route route = new NpcRouteStore.Route(scene.start(), scene.stairCorner());
+        runner.routes().saveNamed("corner-scene", route);
+        sender.sendMessage("Built the corner scene in " + world.getName() + " at " + scenarios.originX() + " "
+            + scenarios.originY() + " " + scenarios.originZ() + " and saved route corner-scene: "
+            + NpcRouteStore.describe(route.from()) + " -> " + NpcRouteStore.describe(route.to()));
     }
 }
