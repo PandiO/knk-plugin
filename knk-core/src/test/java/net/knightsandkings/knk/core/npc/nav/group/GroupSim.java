@@ -73,8 +73,14 @@ final class GroupSim {
             return Optional.ofNullable(doorBoxes.get(doorId));
         }
 
+        /** When set, the entry rule instead of {@link #deniedRegions} (PandiO/knk-workspace#593: the domain rules). */
+        java.util.function.Function<AccessSubject, Predicate<String>> entry;
+
         @Override
         public Predicate<String> mayEnter(AccessSubject subject) {
+            if (entry != null) {
+                return entry.apply(subject);
+            }
             Set<String> current = subject.currentRegions();
             return region -> current.contains(region) || !deniedRegions.contains(region);
         }

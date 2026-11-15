@@ -302,6 +302,61 @@ class RegionDomainResolverTest {
         assertSame(keep, resolver.getDomainByRegionIdNoRefresh("domain_17").orElseThrow());
     }
 
+    // ===== PandiO/knk-workspace#533 and #593: a realtime domain change, a gate region over a district's entry =====
+
+    @Test
+    void refreshingRegionsReAsksFreshEntriesAndKeepsServingTheOldOnesUntilTheAnswerIsIn() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        RegionDomainResolver resolver = resolver(api, Duration.ofMinutes(1));
+        resolver.registerDomain("world", districtSnapshot(1000004, "district_1000004")); // allowEntry true, fresh
+        CompletableFuture<HashMap<Integer, DomainRegionSummary>> answer = new CompletableFuture<>();
+        api.answer = q -> answer;
+
+        CompletableFuture<Void> done = resolver.refreshRegions("world", Set.of("district_1000004"));
+
+        assertEquals(List.of(Set.of("district_1000004")), api.queries, "asked although the entry is fresh");
+        assertTrue(resolver.getDomainByRegionIdNoRefresh("world", "district_1000004").orElseThrow().allowEntry(),
+            "the old rule meanwhile, not an unknown (open) region");
+        HashMap<Integer, DomainRegionSummary> denied = new HashMap<>();
+        denied.put(0, summary(1000004, "district_1000004", false));
+        answer.complete(denied);
+        done.join();
+
+        assertFalse(resolver.getDomainByRegionIdNoRefresh("world", "district_1000004").orElseThrow().allowEntry());
+    }
+
+    @Test
+    void refreshingNothingOrWithoutAnApiAsksNobody() {
+        FakeDomainsApi api = new FakeDomainsApi();
+        resolver(api, Duration.ofMinutes(1)).refreshRegions("world", Set.of()).join();
+        new RegionDomainResolver().refreshRegions("world", Set.of("district_1000004")).join();
+
+        assertTrue(api.queries.isEmpty());
+    }
+
+    @Test
+    void aGateRegionOverADistrictsEntryKeepsTheDistrictsDenial() {
+        // #593: town_1, district_1000004 and the gate structure region gate_2000131 at the district's entry. The API's
+        // answer for the gate region names the district as a parent decision; warming both keeps the district's deny.
+        DomainRegionSummary town = new DomainRegionSummary(1, "Town", "", "town_1", true, true, "Town", List.of(), "world");
+        DomainRegionSummary district = new DomainRegionSummary(1000004, "Residential District", "", "district_1000004",
+            false, true, "District", List.of(town), "world");
+        DomainRegionSummary gate = new DomainRegionSummary(2000131, "South Gate", "", "gate_2000131", true, true,
+            "GateStructure", List.of(district), "world");
+        FakeDomainsApi api = new FakeDomainsApi();
+        api.answer = q -> switch (q.iterator().next()) {
+            case "town_1" -> FakeDomainsApi.of(town);
+            case "district_1000004" -> FakeDomainsApi.of(district, town);
+            default -> FakeDomainsApi.of(gate, district, town);
+        };
+        RegionDomainResolver resolver = resolver(api, Duration.ofMinutes(1));
+
+        resolver.warmCache("world", Set.of("town_1", "district_1000004", "gate_2000131")).join();
+
+        assertFalse(resolver.getDomainByRegionIdNoRefresh("world", "district_1000004").orElseThrow().allowEntry());
+        assertTrue(resolver.getDomainByRegionIdNoRefresh("world", "gate_2000131").orElseThrow().allowEntry());
+    }
+
     @Test
     void cacheRefreshForgetsEveryRegion() {
         RegionDomainResolver resolver = new RegionDomainResolver();

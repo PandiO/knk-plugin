@@ -19,6 +19,7 @@ import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.gates.GateManager;
 import net.knightsandkings.knk.core.gates.target.GateBox;
 import net.knightsandkings.knk.core.npc.nav.AccessSubject;
+import net.knightsandkings.knk.core.npc.nav.DomainEntryRule;
 import net.knightsandkings.knk.core.npc.nav.SubjectRegionAvailability;
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
@@ -156,14 +157,8 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
      */
     @Override
     public Predicate<String> mayEnter(AccessSubject subject) {
-        String world = subject.world();
-        Set<String> current = Set.copyOf(subject.currentRegions());
-        DomainAvailability rule = new DomainAvailability(evaluator,
-            regionId -> subject.regionOverride(regionId) == AccessSubject.RegionOverride.ALLOW ? Optional.empty()
-                : resolver.getDomainByRegionIdNoRefresh(world, regionId),
-            roadRule, current, null, subject.bypassesDomainRules());
-        return regionId -> current.contains(regionId)
-            || (subject.regionOverride(regionId) != AccessSubject.RegionOverride.DENY && rule.mayEnter(regionId));
+        // PandiO/knk-workspace#593: shared with the core tests; each region is judged on its own
+        return DomainEntryRule.of(subject, evaluator, resolver::getDomainByRegionIdNoRefresh, roadRule);
     }
 
     /** PandiO/knk-workspace#361: the router's gate rule for one door, read now. */
