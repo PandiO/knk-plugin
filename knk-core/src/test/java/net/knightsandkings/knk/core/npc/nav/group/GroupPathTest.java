@@ -13,6 +13,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
 import net.knightsandkings.knk.core.npc.nav.group.GroupSim.SimWorld;
 
 /** The path a group walks: distances along it, lanes beside it and where it is too narrow for them. */
@@ -198,5 +199,51 @@ class GroupPathTest {
         assertEquals(1, path.widest(world, 1), "the foot of the step");
         assertEquals(1, path.widest(world, 2), "the step");
         assertFalse(path.stair(3));
+    }
+
+    // ==================== fold reasons (implementation plan 4c.3 decision 2.8) ====================
+
+    @Test
+    void aStepNamesTheStairAsTheReason() {
+        GroupPath path = new GroupPath();
+        path.levels(new double[] {0.5, 0});
+        path.add(floor(0.5, 0.5));
+        path.add(floor(1.5, 0.5));
+        path.add(new NavPoint(GroupSim.WORLD, 2.5, 65, 0.5)); // a step up
+
+        assertEquals(NpcNavigationMetrics.FoldReason.STAIR, path.misfitReason(world, 1, 0));
+        assertEquals(NpcNavigationMetrics.FoldReason.STAIR, path.misfitReason(world, 2, 0));
+    }
+
+    @Test
+    void noFloorBesideThePathNamesTheNarrowWalk() {
+        GroupPath path = east(4);
+        path.levels(new double[] {1.0, 0});
+        world.noFloor = (x, z) -> z != 0; // 1 wide
+
+        assertEquals(1, path.widest(world, 1));
+        assertEquals(NpcNavigationMetrics.FoldReason.NARROW, path.misfitReason(world, 1, 0));
+    }
+
+    @Test
+    void aLaneInAnotherRegionNamesTheRules() {
+        GroupPath path = east(4);
+        path.levels(new double[] {1.0, 0});
+        world.noFloor = (x, z) -> z < -1 || z > 2;
+        world.regions = (x, z) -> z >= 1 ? Set.of("yard") : Set.of();
+
+        assertEquals(1, path.widest(world, 1), "every shift puts a lane in the yard or off the floor");
+        assertEquals(NpcNavigationMetrics.FoldReason.RULES, path.misfitReason(world, 1, 0),
+            "the nearest try failed on the yard, not on the floor");
+    }
+
+    @Test
+    void aLaneWithFloorButNoRoomAtItsShoulderNamesTheEdge() {
+        GroupPath path = east(4);
+        path.levels(new double[] {1.4, 0});
+        world.noFloor = (x, z) -> z < -1 || z > 1; // 3 wide: lanes at z 1.9 and -0.9 stand on floor, their shoulders do not
+
+        assertEquals(1, path.widest(world, 1));
+        assertEquals(NpcNavigationMetrics.FoldReason.EDGE, path.misfitReason(world, 1, 0));
     }
 }

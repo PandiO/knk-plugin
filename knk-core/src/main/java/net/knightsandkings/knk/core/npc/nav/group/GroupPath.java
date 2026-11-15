@@ -7,6 +7,7 @@ import java.util.Set;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavWorld;
+import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
 
 /**
  * The path a group walks: floor points in walking order with their distance along the path, the leader's route line
@@ -331,6 +332,81 @@ final class GroupPath {
             node.shifts[level] = known;
         }
         return known == Double.POSITIVE_INFINITY ? Double.NaN : known;
+    }
+
+    /**
+     * Why width {@code level} does not fit at a path point (implementation plan 4c.3 decision 2.8, counting only):
+     * {@code STAIR} where {@link #stair} makes the point a column; otherwise the lanes are tried as {@link #shift}
+     * tries them, each try judged by its worse side (no floor on the way out or at the lane point: {@code NARROW};
+     * floor but other regions than the path's point: {@code RULES}; floor and regions but no
+     * {@link #LANE_CLEARANCE} at its shoulder: {@code EDGE}), and the try that came nearest to fitting names the
+     * reason ({@code EDGE} before {@code RULES} before {@code NARROW}). {@code DOOR} is the group's own call (it
+     * knows the gate doors). Reads the same blocks a lane look-up reads; only called when a width changes.
+     */
+    NpcNavigationMetrics.FoldReason misfitReason(NavWorld world, int index, int level) {
+        if (stair(index)) {
+            return NpcNavigationMetrics.FoldReason.STAIR;
+        }
+        double half = levels[Math.max(0, Math.min(level, levels.length - 1))];
+        NpcNavigationMetrics.FoldReason best = NpcNavigationMetrics.FoldReason.NARROW;
+        double most = Math.max(0.5, half);
+        for (double step = 0; step <= most + 1e-9; step += 0.5) {
+            for (double shift : step == 0 ? new double[] {0} : new double[] {step, -step}) {
+                NpcNavigationMetrics.FoldReason right = laneReason(world, index, shift + half);
+                NpcNavigationMetrics.FoldReason left = laneReason(world, index, shift - half);
+                NpcNavigationMetrics.FoldReason worse = severity(right) >= severity(left) ? right : left;
+                if (worse != null && severity(worse) < severity(best)) {
+                    best = worse;
+                }
+            }
+        }
+        return best;
+    }
+
+    private static int severity(NpcNavigationMetrics.FoldReason reason) {
+        if (reason == null) {
+            return 0;
+        }
+        return switch (reason) {
+            case EDGE -> 1;
+            case RULES -> 2;
+            default -> 3;
+        };
+    }
+
+    /** Why the lane {@code side} blocks beside a path point does not exist (see {@link #lookUp}); null when it does. */
+    private NpcNavigationMetrics.FoldReason laneReason(NavWorld world, int index, double side) {
+        if (Math.abs(side) < 1e-9) {
+            return null; // the path's own centre
+        }
+        Node node = nodes.get(index);
+        NavPoint c = node.floor;
+        double[] h = heading(index);
+        int y = (int) Math.round(c.y());
+        double rx = -h[1];
+        double rz = h[0];
+        double sign = Math.signum(side);
+        double reach = Math.abs(side);
+        for (double d = Math.min(1, reach); ; d = Math.min(reach, d + 1)) {
+            double x = c.x() + rx * sign * d;
+            double z = c.z() + rz * sign * d;
+            y = floorNear(world, c.world(), x, y, z);
+            if (y == Integer.MIN_VALUE) {
+                return NpcNavigationMetrics.FoldReason.NARROW;
+            }
+            if (d >= reach) {
+                if (!world.regionsAt(c.world(), (int) Math.floor(x), y + 1, (int) Math.floor(z))
+                    .equals(regions(world, index))) {
+                    return NpcNavigationMetrics.FoldReason.RULES;
+                }
+                for (double edge : new double[] {LANE_CLEARANCE, -LANE_CLEARANCE}) {
+                    if (floorNear(world, c.world(), x + rx * edge, y, z + rz * edge) == Integer.MIN_VALUE) {
+                        return NpcNavigationMetrics.FoldReason.EDGE;
+                    }
+                }
+                return null;
+            }
+        }
     }
 
     /** How far a lane point keeps from a block edge without a floor, across the path (a body, not a line). */

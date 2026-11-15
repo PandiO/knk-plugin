@@ -21,6 +21,7 @@ import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcNavState;
 import net.knightsandkings.knk.core.npc.nav.NavGeometry;
+import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
 import net.knightsandkings.knk.core.npc.nav.PathTargets;
 import net.knightsandkings.knk.core.npc.nav.RecentSteps;
@@ -755,8 +756,27 @@ public final class NavGroup {
             }
         }
         if (target != level) {
-            changeWidth(target, narrowAt >= 0 ? narrowAt : leaderIdx);
+            // the reason is judged where the width just wider than the target first fails (decision 2.8)
+            int reasonAt = target > level ? firstMisfit(widest, from, leaderArc, target - 1, 0) : -1;
+            changeWidth(target, narrowAt >= 0 ? narrowAt : leaderIdx, reasonAt >= 0 ? reasonAt
+                : narrowAt >= 0 ? narrowAt : leaderIdx);
         }
+    }
+
+    /**
+     * Why the group gives up width {@code level} at path point {@code index} (implementation plan 4c.3 decision 2.8,
+     * link M1: counted and logged only): a gate door on the leader's routes there, else what the path says
+     * ({@link GroupPath#misfitReason}).
+     */
+    private NpcNavigationMetrics.FoldReason foldReason(int index, int level) {
+        NavPoint feet = HopPlanner.feet(path.get(index).floor);
+        for (int doorId : routeDoors) {
+            Optional<GateBox> box = doorBoxes.computeIfAbsent(doorId, id -> ports.rules().doorBox(id));
+            if (box.isPresent() && inDoorWay(box.get(), feet)) {
+                return NpcNavigationMetrics.FoldReason.DOOR;
+            }
+        }
+        return path.misfitReason(ports.world(), index, level);
     }
 
     /**
@@ -793,7 +813,7 @@ public final class NavGroup {
         return !(onLine && line != null && lineStart + lineAdded < line.line().size()) && path.endArc() - start > hysteresis;
     }
 
-    private void changeWidth(int target, int atIndex) {
+    private void changeWidth(int target, int atIndex, int reasonIndex) {
         int before = level;
         Formation.Width was = widths.get(before);
         Formation.Width now = widths.get(target);
@@ -802,20 +822,30 @@ public final class NavGroup {
         NavPoint at = path.get(Math.max(0, Math.min(atIndex, path.size() - 1))).floor;
         String what;
         Event event;
+        NpcNavigationMetrics.FoldReason reason = null;
+        if (target > before) {
+            int i = Math.max(0, Math.min(reasonIndex, path.size() - 1));
+            reason = foldReason(i, target - 1);
+        }
         if (now.column()) {
             event = Event.GROUP_FOLD;
-            what = "folds into a column: the path is too narrow for " + widths.get(count - 2).describe();
+            what = "folds into a column: the path is too narrow for " + widths.get(count - 2).describe()
+                + " (" + reason.label() + ")";
         } else if (was.column()) {
             event = Event.GROUP_REFORM;
             what = "takes up " + now.describe() + " again";
         } else if (target > before) {
             event = Event.GROUP_NARROW;
-            what = "narrows to " + now.describe() + ": the path is too narrow for " + was.describe();
+            what = "narrows to " + now.describe() + ": the path is too narrow for " + was.describe()
+                + " (" + reason.label() + ")";
         } else {
             event = Event.GROUP_WIDEN;
             what = "widens to " + now.describe();
         }
         ports.metrics().count(event);
+        if (reason != null && NpcNavigationMetrics.WIDTH_CHANGES.contains(event)) {
+            ports.metrics().countFoldReason(event, reason);
+        }
         ports.log().accept(String.format(Locale.ROOT, "group %d (%s, %d NPCs) %s at %d %d %d", id, leader.name(), size(),
             what, at.blockX(), at.blockY() + 1, at.blockZ()));
     }
