@@ -287,7 +287,8 @@ public final class RouteFollower {
         int end = Math.min(line.size(), start + perStretch);
         int plazaBlocks = steering == null ? 0 : steering.options().plazaBlocks();
         if (plazaBlocks > 0) {
-            end = endHoldingPlazas(start, end, plazaBlocks);
+            // at most one stretch more: junctions close together (a street grid) must not chain into a long stretch
+            end = Math.min(Math.min(line.size(), start + 2 * perStretch), endHoldingPlazas(start, end, plazaBlocks));
         }
         for (NavPoint p : line.subList(start, end)) {
             if (!world.isLoaded(p.world(), p.blockX(), p.blockZ())) {

@@ -79,6 +79,20 @@ class RouteFollowerPlazaTest {
     }
 
     @Test
+    void junctionsCloseTogetherDoNotChainIntoALongStretch() {
+        // a street grid: a junction every 6 blocks along 200 blocks
+        List<RoadPlanner.PlazaCrossing> junctions = new ArrayList<>();
+        for (int x = 6; x < 200; x += 6) {
+            junctions.add(new RoadPlanner.PlazaCrossing(floor(x + 0.5, 64, 0.5), 0));
+        }
+        RouteFollower f = new RouteFollower(List.of(floor(0.5, 64, 0.5), floor(200.5, 64, 0.5)), junctions);
+        Stretch s = f.next(world, 24, 64, 0, new RouteFollower.Steering(shaper,
+            CorridorShaper.Options.plazasOnly(4, 0.8, 16, 0.8)));
+        assertEquals(Kind.WAYPOINTS, s.kind());
+        assertTrue(f.nextIndex() <= 2 * 16, "at most two stretches' worth: " + f.nextIndex());
+    }
+
+    @Test
     void thePlazaLineReplacesTheV() {
         RouteFollower.Steering steering = new RouteFollower.Steering(shaper,
             new CorridorShaper.Options(4, 0.8).withPlazas(16, 0.8));

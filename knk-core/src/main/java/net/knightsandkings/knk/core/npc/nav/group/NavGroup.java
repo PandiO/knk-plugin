@@ -1003,10 +1003,13 @@ public final class NavGroup {
         if (plazas != null) {
             // a chunk holds the whole way across a plaza it reaches into, so both chunks place the same plaza line
             int reach = (int) Math.ceil(plazas.plazaBlocks() / RouteFollower.STEP) + 2;
+            int lowest = Math.max(0, from - SHAPE_CHUNK);
+            int highest = Math.min(line.size(), to + SHAPE_CHUNK);
             for (RouteFollower.PlazaOnLine p : follower.plazas()) {
                 if (p.index() + reach >= from && p.index() - reach < to) {
-                    from = Math.max(0, Math.min(from, p.index() - reach));
-                    to = Math.min(line.size(), Math.max(to, p.index() + reach + 1));
+                    // at most a chunk more either way, so junctions close together don't chain
+                    from = Math.max(lowest, Math.min(from, p.index() - reach));
+                    to = Math.min(highest, Math.max(to, p.index() + reach + 1));
                 }
             }
             crossings = follower.plazasBetween(from, to);
