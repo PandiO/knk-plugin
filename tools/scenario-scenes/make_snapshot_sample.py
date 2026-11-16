@@ -8,8 +8,8 @@ the developer's own snapshot of quarry-to-keep is committed:
 1. world/region/r.2.-2.mca and r.2.-1.mca: the schematic's blocks at their real place (1407 49 -549 to 1418 79 -487),
    stone at y 46..48 under it and under the street east of it (1419..1431, -530..-510), as the stair house scene lays
    them (NpcMovementScene). Anvil format, zlib chunks, block_states with palette and packed indexes.
-2. route.json: the scene's climb line (NpcMovementScene.CLIMB with link M1's line), from the street east of the house to
-   the top hall. No stretches (a real snapshot has them).
+2. route.json: the scene's climb line (NpcMovementScene.CLIMB: the real road line of the developer's traces of
+   2026-11-16), from the street east of the house to the top hall. No stretches (a real snapshot has them).
 3. domains.json: a town polygon, a district cuboid round the house and the stair house as a structure inside it (all
    entry allowed), and an open gate at the entrance.
 4. settings.json: the developer's settings during the smoke test of 2026-11-16 (chain report decision 35.3).
@@ -35,29 +35,20 @@ OUT = os.path.join(ROOT, "knk-paper", "src", "main", "resources", "scenario-snap
 DATA_VERSION = 5023  # Minecraft 26.3, as make_standins.py
 FIXED_TIME = (2026, 11, 16, 0, 0, 0)
 
-# the climb line (floor blocks; the line runs through their centres), as NpcMovementScene.climbLine()
-M1_LINE = [(1413.5, 48, -513.5), (1413.5, 48, -509.5), (1413.0, 48, -507.5), (1412.5, 48, -505.0),
-           (1412.5, 48, -502.5), (1412.5, 48, -500.5), (1412.5, 48, -499.5), (1412.5, 49, -498.5),
-           (1412.5, 49, -496.5), (1412.5, 50, -494.5), (1412.5, 50, -491.5), (1413.5, 50, -489.5)]
-CLIMB = [(1430, 48, -521), (1413, 48, -521), (1413, 50, -490), (1409, 50, -490), (1409, 50, -491), (1409, 51, -492),
-         (1409, 51, -493), (1409, 52, -494), (1409, 52, -497), (1409, 53, -498), (1409, 53, -499), (1409, 54, -500),
-         (1409, 54, -501), (1415, 54, -501), (1415, 55, -500), (1415, 55, -499), (1415, 56, -498), (1415, 56, -495),
-         (1415, 57, -494), (1415, 57, -493), (1415, 58, -492), (1415, 58, -490), (1409, 58, -490), (1409, 58, -491),
-         (1409, 59, -492), (1409, 59, -493), (1409, 60, -494), (1409, 60, -497), (1409, 61, -498), (1409, 61, -499),
-         (1409, 62, -500), (1409, 62, -503), (1411, 62, -503), (1412, 63, -503), (1414, 63, -503), (1414, 63, -504),
-         (1415, 63, -504), (1415, 63, -505), (1415, 64, -506), (1415, 64, -510), (1415, 65, -511), (1415, 65, -530),
-         (1415, 64, -531), (1415, 64, -533), (1415, 65, -534), (1415, 65, -535), (1415, 66, -536), (1415, 66, -539),
-         (1415, 67, -540), (1415, 67, -541), (1415, 68, -542), (1415, 68, -543), (1415, 69, -544), (1415, 69, -546),
-         (1413, 69, -546), (1412, 70, -546), (1409, 70, -546), (1409, 70, -545), (1409, 71, -544), (1409, 71, -543),
-         (1409, 72, -542), (1409, 72, -539), (1409, 73, -538), (1409, 73, -536), (1411, 73, -536), (1412, 74, -536),
-         (1415, 74, -536), (1415, 74, -539), (1415, 75, -540), (1415, 75, -545), (1414, 75, -545)]
+# the real road line through the house as feet blocks, as NpcMovementScene.CLIMB (the # waypoints: lines of the
+# developer's traces 69, 87 and 63 of 2026-11-16, going up; the first point is the scene's own flat street)
+CLIMB = [(1426, 49, -516), (1412, 49, -511), (1412, 49, -500), (1412, 50, -498), (1412, 50, -496), (1412, 51, -491),
+         (1409, 52, -493), (1409, 54, -498), (1411, 55, -503), (1414, 55, -503), (1415, 55, -501), (1415, 56, -499),
+         (1415, 57, -495), (1415, 58, -493), (1414, 59, -489), (1410, 59, -489), (1409, 60, -493), (1409, 61, -494),
+         (1409, 62, -499), (1410, 63, -503), (1413, 64, -503), (1415, 64, -505), (1415, 65, -510), (1415, 66, -516),
+         (1415, 66, -518), (1415, 66, -535), (1415, 67, -539), (1415, 68, -540), (1416, 68, -540), (1416, 69, -543),
+         (1414, 70, -547), (1409, 71, -546), (1409, 72, -543), (1409, 74, -538), (1409, 74, -536), (1410, 74, -535),
+         (1413, 75, -535), (1415, 75, -536), (1415, 76, -546)]
 
 
 def climb_line():
-    line = [(CLIMB[0][0] + 0.5, CLIMB[0][1], CLIMB[0][2] + 0.5), (CLIMB[1][0] + 0.5, CLIMB[1][1], CLIMB[1][2] + 0.5)]
-    line += M1_LINE
-    line += [(x + 0.5, y, z + 0.5) for (x, y, z) in CLIMB[3:]]
-    return line
+    """Floor points: block centres, one below the feet."""
+    return [(x + 0.5, y - 1, z + 0.5) for (x, y, z) in CLIMB]
 
 
 # ==================== NBT ====================

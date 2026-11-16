@@ -139,6 +139,30 @@ class NpcMovementSceneTest {
     }
 
     @Test
+    void theClimbLineIsTheRealLineOfTheDevelopersTraces() throws Exception {
+        // every point but the scene's own street (the first) was handed out on the dev server on 2026-11-16
+        java.util.Set<String> handedOut = new java.util.HashSet<>();
+        java.nio.file.Path folder = java.nio.file.Path.of(getClass().getResource("/scenario/evidence/2026-11-16").toURI());
+        try (var files = java.nio.file.Files.list(folder)) {
+            for (java.nio.file.Path file : files.filter(f -> f.toString().endsWith(".log")).toList()) {
+                for (String line : java.nio.file.Files.readAllLines(file)) {
+                    if (line.startsWith("# waypoints: ")) {
+                        for (String point : line.substring("# waypoints: ".length()).split("; ")) {
+                            handedOut.add(point.trim());
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(handedOut.size() > 50, "the traces are in the test resources: " + handedOut.size());
+        for (int i = 1; i < NpcMovementScene.CLIMB.length; i++) {
+            int[] p = NpcMovementScene.CLIMB[i];
+            String point = p[0] + " " + p[1] + " " + p[2];
+            assertTrue(handedOut.contains(point), point + " is not in a # waypoints: line of the traces");
+        }
+    }
+
+    @Test
     void theClimbLineStandsOnTheStairsAndPassesEveryFlightInOrder() {
         NpcMovementScene house = NpcMovementScene.stairHouse(scene());
         SceneSchematic s = SceneSchematic.fromResource(house.resource());

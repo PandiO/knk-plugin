@@ -178,36 +178,26 @@ public final class NpcMovementScene {
     // ==================== the climb through the whole stair house (link B1, PandiO/knk-workspace#670) ====================
 
     /**
-     * The road line through the whole stair house, in real floor blocks (x, y, z; the line runs through their
-     * centres): from the street east of the house (1430 48 -521) west to 1413, south into M1's line through the
-     * entrance and up the two steps to the hall (floor 50), then up the five flights of the stacked hairpins: north
-     * along x 1409 to the landing at -501 (floor 54), south along x 1415 to the landing at -490 (58), north along x
-     * 1409 to the landing at -503 (62), east and north along x 1415 over the corridor at floor 65 above the street to
-     * -533, north up the flight to the landing at -546 (69), south along x 1409 to the landing at -536 (73), east and
-     * north to the top hall at floor 75 (-545). Every block's floor is the whole block it stands on, as the road
-     * graph stores a line, so the line's height steps at the flights' blocks. Found on the developer's schematic with a
-     * walk search along the middle of each flight (the 3-wide flights' centre columns 1409 and 1415), not from a trace:
-     * the developer's traces of 2026-11-16 were not on their evidence branch when this was built (decision in the B1
-     * report block); replace it with the trace's line when they are.
+     * The real road line through the whole stair house (link B1, PandiO/knk-workspace#670): the {@code # waypoints:}
+     * lines of the developer's traces of 2026-11-16 (knk-plugin {@code evidence/smoke-2026-11-16}, copied to
+     * {@code src/test/resources/scenario/evidence/2026-11-16/}), as feet blocks (x, y, z) in the order they were handed
+     * out going up: the entrance from the east from trace 69 (walked down, reversed), the hall to the landing at -536
+     * from trace 87 (walked up), the top landing and hall from trace 63. Duplicates where two stretches join are left
+     * out. East of the house (x over 1418) the real street falls to 1428 47 -516 and 1433 44 -516, beyond the
+     * schematic, so the scene starts on its own flat street at 1426 49 -516 instead. The line's heights are the whole
+     * blocks the route follower gave (decision 34.2.2: the flights' entries); north of the top hall the real line goes on
+     * to the keep (1415 76 -550, 1399 81 -530), outside the schematic.
      */
     static final int[][] CLIMB = {
-        {1430, 48, -521}, {1413, 48, -521}, // the street from the east
-        // M1's line (houseLine) runs from 1413 -514 to the hall at 1413 50 -490
-        {1413, 50, -490}, {1409, 50, -490}, {1409, 50, -491}, {1409, 51, -492}, {1409, 51, -493}, {1409, 52, -494},
-        {1409, 52, -497}, {1409, 53, -498}, {1409, 53, -499}, {1409, 54, -500}, {1409, 54, -501}, // flight 1
-        {1415, 54, -501}, {1415, 55, -500}, {1415, 55, -499}, {1415, 56, -498}, {1415, 56, -495}, {1415, 57, -494},
-        {1415, 57, -493}, {1415, 58, -492}, {1415, 58, -490}, // flight 2
-        {1409, 58, -490}, {1409, 58, -491}, {1409, 59, -492}, {1409, 59, -493}, {1409, 60, -494}, {1409, 60, -497},
-        {1409, 61, -498}, {1409, 61, -499}, {1409, 62, -500}, {1409, 62, -503}, // flight 3
-        {1411, 62, -503}, {1412, 63, -503}, {1414, 63, -503}, {1414, 63, -504}, {1415, 63, -504}, {1415, 63, -505},
-        {1415, 64, -506}, {1415, 64, -510}, {1415, 65, -511}, {1415, 65, -530}, {1415, 64, -531}, {1415, 64, -533},
-        // the corridor over the street
-        {1415, 65, -534}, {1415, 65, -535}, {1415, 66, -536}, {1415, 66, -539}, {1415, 67, -540}, {1415, 67, -541},
-        {1415, 68, -542}, {1415, 68, -543}, {1415, 69, -544}, {1415, 69, -546}, // flight 4
-        {1413, 69, -546}, {1412, 70, -546}, {1409, 70, -546}, {1409, 70, -545}, {1409, 71, -544}, {1409, 71, -543},
-        {1409, 72, -542}, {1409, 72, -539}, {1409, 73, -538}, {1409, 73, -536}, // flight 5
-        {1411, 73, -536}, {1412, 74, -536}, {1415, 74, -536}, {1415, 74, -539}, {1415, 75, -540}, {1415, 75, -545},
-        {1414, 75, -545}, // the top hall
+        {1426, 49, -516}, // the scene's own flat street east of the house (real: 1428 47 -516)
+        {1412, 49, -511}, {1412, 49, -500}, {1412, 50, -498}, // trace 69, reversed: the entrance and the passage
+        {1412, 50, -496}, {1412, 51, -491}, {1409, 52, -493}, {1409, 54, -498}, {1411, 55, -503}, {1414, 55, -503},
+        {1415, 55, -501}, {1415, 56, -499}, {1415, 57, -495}, {1415, 58, -493}, {1414, 59, -489}, {1410, 59, -489},
+        {1409, 60, -493}, {1409, 61, -494}, {1409, 62, -499}, {1410, 63, -503}, {1413, 64, -503}, {1415, 64, -505},
+        {1415, 65, -510}, {1415, 66, -516}, {1415, 66, -518}, {1415, 66, -535}, {1415, 67, -539}, {1415, 68, -540},
+        {1416, 68, -540}, {1416, 69, -543}, {1414, 70, -547}, {1409, 71, -546}, {1409, 72, -543}, {1409, 74, -538},
+        {1409, 74, -536}, // trace 87: the hall, flights 1 to 5
+        {1410, 74, -535}, {1413, 75, -535}, {1415, 75, -536}, {1415, 76, -546}, // trace 63: the top landing and hall
     };
 
     /**
@@ -231,14 +221,11 @@ public final class NpcMovementScene {
         {"top hall", 1408, 1416, -548, -537, 75, 77},
     };
 
-    /** The road line from the street east of the house through the entrance and up all five flights (floor points). */
+    /** The real road line from the street east of the house through the entrance and up all five flights (floor points). */
     public List<NavPoint> climbLine() {
         List<NavPoint> line = new ArrayList<>();
-        line.add(real(CLIMB[0][0] + 0.5, CLIMB[0][1], CLIMB[0][2] + 0.5));
-        line.add(real(CLIMB[1][0] + 0.5, CLIMB[1][1], CLIMB[1][2] + 0.5));
-        line.addAll(houseLine());
-        for (int i = 3; i < CLIMB.length; i++) {
-            line.add(real(CLIMB[i][0] + 0.5, CLIMB[i][1], CLIMB[i][2] + 0.5));
+        for (int[] feet : CLIMB) {
+            line.add(real(feet[0] + 0.5, feet[1] - 1, feet[2] + 0.5));
         }
         return line;
     }
@@ -267,9 +254,9 @@ public final class NpcMovementScene {
         return realFeet(1425.5 + 1.2 * (i % 5), 48, z);
     }
 
-    /** The climb's goal in the top hall (feet, real 1414.5 76 -544.5). */
+    /** The climb's goal in the top hall, the line's last point in the house (feet, real 1415.5 76 -545.5). */
     public NavPoint climbGoal() {
-        return realFeet(1414.5, 75, -544.5);
+        return realFeet(1415.5, 75, -545.5);
     }
 
     /** The place of the climb a body's feet are on ({@link #CLIMB_PLACES} index), or -1 between them. */

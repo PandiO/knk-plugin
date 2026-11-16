@@ -66,14 +66,14 @@ class SnapshotReplayTest {
         SnapshotReplay replay = SnapshotReplay.fromResource("stairhouse-sample.zip");
         assertEquals("stairhouse-sample", replay.snapshot().manifest().route());
         assertEquals(4, replay.snapshot().domains().size());
-        assertTrue(replay.snapshot().route().line().size() > 50);
+        assertEquals(NpcMovementScene.CLIMB.length, replay.snapshot().route().line().size(), "the scene's climb line");
         List<String> rejected = new ArrayList<>();
         NavigationSettings settings = replay.settings(rejected);
         assertTrue(rejected.isEmpty(), rejected.toString());
         assertEquals(8.0, settings.value(NavigationSettings.STRETCH_BLOCKS, NavigationSettings.Scope.of("world")));
         assertEquals(true, settings.value(NavigationSettings.CROWD_AWARENESS, NavigationSettings.Scope.of("world")));
         org.junit.jupiter.api.Assertions.assertArrayEquals(replay.snapshot().manifest().boxMin(), replay.frame());
-        assertEquals(new ScenarioScene.Box(38, 46, 73),
+        assertEquals(new ScenarioScene.Box(34, 46, 75),
             net.knightsandkings.knk.paper.scenario.scenarios.NpcSnapshotReplayScenario.boxOf(replay.snapshot()));
     }
 }
