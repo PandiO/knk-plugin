@@ -594,6 +594,13 @@ npc:
     plaza-lines: false
     # The largest plaza radius, in blocks, plaza lines widen the corridor to (4 to 32).
     plaza-corridor-blocks: 16
+    # Crowd awareness (off until tested). Narrow places on an NPC's way (a door, an arch, a passage under 2 blocks wide)
+    # are taken in turns: one direction at a time, an NPC already in it first, then first come. The others wait in a
+    # queue a block apart before it, a block to the side of the line, so the way out stays free. Two NPCs that meet
+    # head-on in a narrow place: the second to enter steps back out and waits. Waiting behind another NPC, in a queue
+    # or stepping aside counts as waiting, not as being stuck, and recovery steps never end on a cell where another
+    # NPC stands. /knk npc nav stats shows "crowd: waits N, yields N, longest queue N".
+    crowd-awareness: false
     # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded. An NPC
     # waiting at a closed gate or a district edge is woken by the gate or access change itself; this is the fallback.
     no-route-wait-ticks: 100
