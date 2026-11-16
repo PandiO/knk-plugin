@@ -25,9 +25,12 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * each walks within 5 % of the shortest line from where it entered the plaza to where it left that keeps
  * {@code wall-clearance} from the well (the chord bent round the well, which stands on it), passes the well with the
  * clearance (less the engine's own walking slack) and never near the junction. Then a group of 7 in ranks of 3
- * ({@code group-formation-keeping: elastic}) crosses the same way: the leader arrives, takes the plaza line, the group
- * keeps its width on the open plaza and passes the well with the clearance. Reports the walked lengths against the plain
- * chord too (M1 measured +40 %). Needs Citizens.
+ * ({@code group-formation-keeping: elastic}) crosses the same way: the leader arrives within 10 % of the shortest line
+ * round the well with the group's clearance (its formation's half width plus {@code wall-clearance}), not through the
+ * junction, the group keeps its width on the open plaza (0 folds) and passes the well with the clearance, and corridor
+ * shaping in that phase stays within 0.03 ms per NPC per tick (the singles' phase, the server's first plaza shaping,
+ * is reported, not judged). Reports the walked lengths against the plain chord too
+ * (M1 measured +40 %). Needs Citizens.
  */
 public final class NpcPlazaLineScenario implements Scenario<ScenarioScene> {
 
@@ -37,8 +40,17 @@ public final class NpcPlazaLineScenario implements Scenario<ScenarioScene> {
     static final double OVER = 0.05;
     /** The engine walks a waypoint list within {@code waypoint-margin} of each bend: this much nearer the well is allowed. */
     static final double WALK_SLACK = 0.25;
-    /** Never nearer the plaza junction than this (the chord passes it at 5.3 blocks). */
+    /** A single never nearer the plaza junction than this (the way round the well passes it at about 2.7 blocks). */
     static final double FROM_JUNCTION = 2.0;
+    /**
+     * A group's leader never nearer than this: the group's line keeps its formation's half width plus
+     * {@code wall-clearance} (1.8) from the well, and the way round it passes about 1.7 from the junction.
+     */
+    static final double GROUP_FROM_JUNCTION = 1.0;
+    /** A group's leader within this share over the shortest line round the well with the group's clearance. */
+    static final double GROUP_OVER = 0.10;
+    /** K&K's corridor shaping over the whole run, ms per NPC per tick (NAV-28's budget). */
+    static final double BUDGET_MS = 0.03;
 
     private final boolean collisionOn;
 
@@ -94,6 +106,7 @@ public final class NpcPlazaLineScenario implements Scenario<ScenarioScene> {
         double clearance = NavigationSettings.WALL_CLEARANCE.defaultValue();
         long[] started = {0};
         long[] took = {-1};
+        long[] costBase = {0, 0}; // corridor nanoseconds and NPC ticks when the group phase starts
         plan.act("paste the plaza", () -> built.set(plaza.build()))
             .act("start NPC navigation on Citizens with plaza lines on", () -> {
                 npcs.set(ScenarioNpcs.start(scene, plaza.plazaLoop(),
@@ -182,6 +195,8 @@ public final class NpcPlazaLineScenario implements Scenario<ScenarioScene> {
                 }
                 report.phaseStarts(npcs.get());
                 started[0] = npcs.get().ticks();
+                costBase[0] = npcs.get().service().corridors().nanos();
+                costBase[1] = npcs.get().npcTicks();
                 group.set(npcs.get().group(members, Formation.Type.RANKS));
                 group.get().navigate(plaza.feet(15.5, NpcMovementScene.FLAT, 1.5), r -> {
                     result.set(r);
@@ -201,9 +216,28 @@ public final class NpcPlazaLineScenario implements Scenario<ScenarioScene> {
                 for (Crossing c : groupCrossings.values()) {
                     closestWell = Math.min(closestWell, c.closestToWell);
                 }
-                if (lead == null || lead.closestToJunction < FROM_JUNCTION) {
-                    failed.add(lead == null ? "the leader never crossed the plaza"
-                        : String.format(Locale.ROOT, "the leader passed %.1f from the junction", lead.closestToJunction));
+                double groupClear = group.get().plazaClearance();
+                double leadClear = lead == null ? Double.NaN : plaza.clearChord(lead.entered, lead.left, groupClear);
+                if (lead == null) {
+                    failed.add("the leader never crossed the plaza");
+                } else {
+                    if (lead.closestToJunction < GROUP_FROM_JUNCTION) {
+                        failed.add(String.format(Locale.ROOT, "the leader passed %.1f from the junction",
+                            lead.closestToJunction));
+                    }
+                    if (lead.walked > leadClear * (1 + GROUP_OVER)) {
+                        failed.add(String.format(Locale.ROOT, "the leader walked %.1f, over 10 %% above the line "
+                            + "round the well with the group's clearance %.1f (%.1f)", lead.walked, groupClear, leadClear));
+                    }
+                }
+                // the group phase's own share: the singles before it were the server's first plaza shaping (JIT warm-up
+                // on few NPC ticks), reported but not judged
+                long phaseTicks = npcs.get().npcTicks() - costBase[1];
+                double cost = phaseTicks <= 0 ? Double.NaN
+                    : (npcs.get().service().corridors().nanos() - costBase[0]) / 1e6 / phaseTicks;
+                if (!(cost <= BUDGET_MS)) {
+                    failed.add(String.format(Locale.ROOT, "corridor shaping %.4f ms per NPC per tick in the group phase",
+                        cost));
                 }
                 if (closestWell < clearance - WALK_SLACK) {
                     failed.add(String.format(Locale.ROOT, "a member came %.2f from the well", closestWell));
@@ -212,14 +246,16 @@ public final class NpcPlazaLineScenario implements Scenario<ScenarioScene> {
                     .add("leader", result.get() == null ? "still walking after " + GROUP_TICKS / 20 + " s"
                         : result.get().getClass().getSimpleName() + String.format(Locale.ROOT, " after %.1f s", took[0] / 20.0))
                     .add("leader on the plaza", lead == null ? "-" : String.format(Locale.ROOT,
-                        "walked %.1f vs chord %.1f, junction %.1f", lead.walked, lead.entered.horizontalDistance(lead.left),
-                        lead.closestToJunction))
+                        "walked %.1f vs line round the well at %.1f %.1f (%+.0f %%), chord %.1f, junction %.1f",
+                        lead.walked, groupClear, leadClear, (lead.walked / leadClear - 1) * 100,
+                        lead.entered.horizontalDistance(lead.left), lead.closestToJunction))
                     .add("closest member to the well", closestWell == Double.MAX_VALUE ? "-"
                         : String.format(Locale.ROOT, "%.2f blocks", closestWell))
                     .add("width now", group.get().width().describe())
                     .widthChanges(npcs.get(), plaza)
                     .add("furthest behind its slot", String.format(Locale.ROOT, "%.1f blocks", group.get().maxLag()))
                     .add("lost", group.get().lost())
+                    .add("shaping in this phase", "%.4f ms per NPC per tick", cost)
                     .plazaLines(npcs.get())
                     .common(npcs.get(), plaza)
                     .log("a group of 7 in ranks of 3");

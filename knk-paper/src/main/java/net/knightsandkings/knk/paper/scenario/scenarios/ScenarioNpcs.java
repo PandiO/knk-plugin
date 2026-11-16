@@ -416,6 +416,11 @@ public final class ScenarioNpcs {
         return npcTicks == 0 ? Double.NaN : service.corridors().nanos() / 1e6 / npcTicks;
     }
 
+    /** NPC ticks so far (one per NPC per tick), for a phase's cost per NPC per tick (link M5). */
+    public long npcTicks() {
+        return npcTicks;
+    }
+
     /** The server ticks the NPCs have been ticked so far. */
     public long ticks() {
         return tick;
