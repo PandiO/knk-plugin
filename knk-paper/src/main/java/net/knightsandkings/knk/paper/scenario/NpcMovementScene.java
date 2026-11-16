@@ -240,6 +240,26 @@ public final class NpcMovementScene {
         return thereAndBack(plazaLine());
     }
 
+    /** The plaza junction in the middle (box 15.5 15.5), as the road graph's plaza node: its open floor is measured. */
+    public net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing plazaJunction() {
+        return new net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing(floor(15.5, FLAT, 15.5), 0);
+    }
+
+    /** The horizontal distance from feet to the plaza junction. */
+    public double fromJunction(NavPoint feet) {
+        return Math.hypot(feet.x() - scene.worldX(0) - 15.5, feet.z() - scene.worldZ(0) - 15.5);
+    }
+
+    /**
+     * The shortest line on the plaza from {@code a} to {@code b} that keeps {@code clearance} from the well (link M5's
+     * reference: the chord where it clears the well, else the way round it touching the clearance), in blocks.
+     */
+    public double clearChord(NavPoint a, NavPoint b, double clearance) {
+        double ox = scene.worldX(0);
+        double oz = scene.worldZ(0);
+        return PlazaGeometry.shortestRound(a.x() - ox, a.z() - oz, b.x() - ox, b.z() - oz, 11, 11, 13, 13, clearance);
+    }
+
     /** Whether feet are on the plaza. */
     public boolean onPlaza(NavPoint feet) {
         double x = feet.x() - scene.worldX(0);

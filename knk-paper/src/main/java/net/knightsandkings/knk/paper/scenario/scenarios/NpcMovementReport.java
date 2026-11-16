@@ -73,12 +73,19 @@ public final class NpcMovementReport {
      */
     static NavigationSettings settings(boolean collisionOn, boolean corridorSteering, boolean localLegsClearance,
                                        boolean elastic) {
+        return settings(collisionOn, corridorSteering, localLegsClearance, elastic, false);
+    }
+
+    /** As {@link #settings(boolean, boolean, boolean, boolean)}, with {@code plaza-lines} on or off (link M5). */
+    static NavigationSettings settings(boolean collisionOn, boolean corridorSteering, boolean localLegsClearance,
+                                       boolean elastic, boolean plazaLines) {
         return NavigationSettings.builder()
             .global(NavigationSettings.Overrides.of(NavigationSettings.COLLIDABLE, collisionOn)
                 .with(NavigationSettings.GROUP_RANKS_WIDTH, 3)
                 .with(NavigationSettings.CORRIDOR_STEERING, corridorSteering)
                 .with(NavigationSettings.LOCAL_LEGS_CLEARANCE, localLegsClearance)
-                .with(NavigationSettings.GROUP_FORMATION_KEEPING, elastic ? "elastic" : "levels")).build();
+                .with(NavigationSettings.GROUP_FORMATION_KEEPING, elastic ? "elastic" : "levels")
+                .with(NavigationSettings.PLAZA_LINES, plazaLines)).build();
     }
 
     /** Free width under which 2 abreast don't fit even squeezed (2 × 0.3 + 2 × 0.35 at 0.6): a 1-wide place. */
@@ -169,6 +176,13 @@ public final class NpcMovementReport {
     static final double MAX_CORRIDOR_MS = 0.03;
 
     /** Corridor steering's counts and cost (link M2): stretches shaped, handed out again, ms per NPC per tick. */
+    /** Plaza lines placed and missed, and the shaper's cost (link M5). */
+    NpcMovementReport plazaLines(ScenarioNpcs npcs) {
+        return add("plaza lines", "%d, missed %d, shaping %.4f ms per NPC per tick",
+            npcs.service().corridors().plazaLines(), npcs.service().corridors().plazaMisses(),
+            npcs.corridorMsPerNpcTick());
+    }
+
     NpcMovementReport corridor(ScenarioNpcs npcs) {
         return add("corridor", "shaped %d, shared %d, %.4f ms per NPC per tick", npcs.service().corridors().shaped(),
             npcs.service().corridors().shared(), npcs.corridorMsPerNpcTick());
