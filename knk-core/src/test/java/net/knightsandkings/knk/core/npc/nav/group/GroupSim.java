@@ -243,6 +243,8 @@ final class GroupSim {
     final NavGroupService groups;
     /** The road: a straight line from where the subject stands to the goal unless a test says otherwise. */
     Road road = (subject, from, to) -> RoadPlan.found(List.of(from, to));
+    /** The settings every mover is registered with (link M5's tests turn plaza lines on). */
+    NpcNavigationService.Settings moverSettings = NpcNavigationService.Settings.defaults();
     /** Movers (by name) whose local legs cannot be prepared. */
     final Set<String> failingLegs = new HashSet<>();
     private final List<RoadAsk> roadAsks = new ArrayList<>();
@@ -285,7 +287,7 @@ final class GroupSim {
     SimMover spawn(NavPoint feet) {
         SimMover mover = new SimMover(nextId++, feet);
         movers.add(mover);
-        service.register(mover, NpcAccessProfile.DEFAULT, NpcNavigationService.Settings.defaults());
+        service.register(mover, NpcAccessProfile.DEFAULT, moverSettings);
         return mover;
     }
 

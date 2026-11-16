@@ -197,6 +197,18 @@ public final class NavigationSettings {
      */
     public static final Key<Boolean> GROUP_FOLLOWERS_FINISH_TRIP = new Key<>("group-followers-finish-trip", false,
         bool(), "followers still on their way when the leader arrived finish their trip first (false: follow the leader)");
+    /**
+     * Plaza lines (implementation plan 4c.3 decision 6, link M5; BEHAVIOR_MODEL NAV-27): where a route passes a plaza
+     * junction (a designed plaza, or a junction with open floor round it wider than {@code corridor-half-width}), the
+     * corridor widens to the plaza and the line is string-pulled across it from where the route enters to where it
+     * leaves, with {@code wall-clearance} round wells and stalls and never into a region the line does not pass. Off by
+     * default until the developer has tested it.
+     */
+    public static final Key<Boolean> PLAZA_LINES = new Key<>("plaza-lines", false, bool(),
+        "string-pull the line across plazas from where the route enters to where it leaves, not through the middle");
+    /** The largest plaza radius, in blocks, the corridor widens to (plan 4c.3 decision 6: 16). */
+    public static final Key<Integer> PLAZA_CORRIDOR_BLOCKS = new Key<>("plaza-corridor-blocks", 16,
+        integer(4, 32), "the largest plaza radius in blocks that plaza lines widen the corridor to");
     /** Walking speed, as a factor, of a follower that is behind its slot; 1 = no catching up. */
     public static final Key<Double> GROUP_CATCH_UP_SPEED = new Key<>("group-catch-up-speed", 1.3,
         decimal(1, 2), "speed factor of a follower that is behind its slot (1 = off)");
@@ -204,7 +216,8 @@ public final class NavigationSettings {
     /** Every per-NPC setting, in display order. */
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
-        CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, LOCAL_LEGS_CLEARANCE, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
+        CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, LOCAL_LEGS_CLEARANCE, PLAZA_LINES,
+        PLAZA_CORRIDOR_BLOCKS, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
         COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
         GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FORMATION_KEEPING, GROUP_LATERAL_SPACING_MIN, GROUP_SPACING_MIN,
         GROUP_LOOKAHEAD_BLOCKS, GROUP_FOLLOWERS_FINISH_TRIP, GROUP_REJOIN_BLOCKS, GROUP_REGROUP_BLOCKS,

@@ -17,6 +17,8 @@ public final class RouteFollower {
 
     /** Spacing of the waypoints along the route. */
     public static final double STEP = 1.5;
+    /** A plaza junction further than this from the route line is not on it (link M5). */
+    public static final double PLAZA_ON_LINE = 2.0;
     /** A recovery leg aims at most this many blocks along the line ahead of the NPC unless told otherwise. */
     public static final double RECOVERY_REACH = 16;
 
@@ -53,6 +55,8 @@ public final class RouteFollower {
     }
 
     private final List<NavPoint> line;
+    /** The junctions the line passes that may be plazas (link M5), each at its line point, in route order. */
+    private final List<PlazaOnLine> plazas;
     /** Blocks along the line at each point. */
     private final double[] along;
     private final CornerClearance corners;
@@ -68,13 +72,49 @@ public final class RouteFollower {
     /** The last waypoint the walk was given (a stretch's last, or a recovery target), the next stretch's anchor. */
     private NavPoint lastWaypoint;
 
+    /**
+     * A junction on the line that may be a plaza (link M5).
+     *
+     * @param index    the line point at the junction
+     * @param crossing the crossing, its centre moved onto that line point
+     */
+    public record PlazaOnLine(int index, RoadPlanner.PlazaCrossing crossing) {
+    }
+
     /** @param roadLine the route as floor points (the road's polyline), at least one */
     public RouteFollower(List<NavPoint> roadLine) {
+        this(roadLine, List.of());
+    }
+
+    /**
+     * @param roadLine the route as floor points (the road's polyline), at least one
+     * @param plazas   the junctions the route passes that may be plazas (link M5; a junction further than
+     *                 {@link #PLAZA_ON_LINE} blocks from the line is left out)
+     */
+    public RouteFollower(List<NavPoint> roadLine, List<RoadPlanner.PlazaCrossing> plazas) {
         Objects.requireNonNull(roadLine, "roadLine");
         if (roadLine.isEmpty()) {
             throw new IllegalArgumentException("a route needs at least one point");
         }
         this.line = List.copyOf(HopPlanner.resampleKeepingCorners(roadLine, STEP));
+        List<PlazaOnLine> onLine = new ArrayList<>();
+        for (RoadPlanner.PlazaCrossing p : plazas == null ? List.<RoadPlanner.PlazaCrossing>of() : plazas) {
+            int best = -1;
+            double bestD = Double.MAX_VALUE;
+            for (int i = 0; i < line.size(); i++) {
+                NavPoint q = line.get(i);
+                double d = q.horizontalDistance(p.centre());
+                if (q.world().equals(p.centre().world()) && Math.abs(q.y() - p.centre().y()) <= 3 && d < bestD) {
+                    bestD = d;
+                    best = i;
+                }
+            }
+            if (best >= 0 && bestD <= PLAZA_ON_LINE) {
+                onLine.add(new PlazaOnLine(best, new RoadPlanner.PlazaCrossing(line.get(best), p.radius())));
+            }
+        }
+        onLine.sort(java.util.Comparator.comparingInt(PlazaOnLine::index));
+        this.plazas = List.copyOf(onLine);
         this.along = new double[line.size()];
         for (int i = 1; i < line.size(); i++) {
             NavPoint a = line.get(i - 1);
@@ -135,6 +175,39 @@ public final class RouteFollower {
         sentStart = sentEnd = i;
         lastSnapEnd = -1;
         lastWaypoint = null;
+    }
+
+    /** The junctions the line passes that may be plazas, each at its line point (link M5). */
+    public List<PlazaOnLine> plazas() {
+        return plazas;
+    }
+
+    /** The plaza crossings whose junction lies at a line index in [from, to). */
+    public List<RoadPlanner.PlazaCrossing> plazasBetween(int from, int to) {
+        List<RoadPlanner.PlazaCrossing> out = new ArrayList<>();
+        for (PlazaOnLine p : plazas) {
+            if (p.index() >= from && p.index() < to) {
+                out.add(p.crossing());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Where a piece of the line from {@code start} to {@code end} (exclusive) should end so that it holds the whole
+     * way across every plaza whose footprint (at most {@code plazaBlocks}) it reaches into: a plaza line is placed from
+     * where the route enters to where it leaves, in one piece (link M5).
+     */
+    public int endHoldingPlazas(int start, int end, int plazaBlocks) {
+        int reach = (int) Math.ceil(plazaBlocks / STEP) + 2;
+        int out = end;
+        for (PlazaOnLine p : plazas) {
+            int spanEnd = Math.min(line.size() - 1, p.index() + reach);
+            if (start <= spanEnd && out > p.index() - reach && out <= spanEnd) {
+                out = spanEnd + 1;
+            }
+        }
+        return out;
     }
 
     /** The route as floor points every {@link #STEP} blocks, corners included. */
@@ -212,6 +285,10 @@ public final class RouteFollower {
         int start = next;
         int perStretch = Math.max(4, (int) Math.round(stretchBlocks / STEP));
         int end = Math.min(line.size(), start + perStretch);
+        int plazaBlocks = steering == null ? 0 : steering.options().plazaBlocks();
+        if (plazaBlocks > 0) {
+            end = endHoldingPlazas(start, end, plazaBlocks);
+        }
         for (NavPoint p : line.subList(start, end)) {
             if (!world.isLoaded(p.world(), p.blockX(), p.blockZ())) {
                 return new Stretch(Kind.UNLOADED, List.of());
@@ -254,9 +331,13 @@ public final class RouteFollower {
             return new Stretch(Kind.DONE, List.of());
         }
         int chokepoints = 0;
-        if (steering != null && points.size() >= 2) {
-            CorridorShaper.ShapedLine shaped = steering.shaper().shape(world, shapingInput(points, indexes), indexes,
-                steering.options(), end == line.size());
+        List<RoadPlanner.PlazaCrossing> here = plazaBlocks > 0 ? plazasBetween(start, end) : List.of();
+        boolean shape = steering != null && points.size() >= 2
+            && (!steering.options().plazaOnly() || !here.isEmpty());
+        if (shape) {
+            // plaza lines only (a group's leader): from the block centres as today, only the plazas change
+            CorridorShaper.ShapedLine shaped = steering.shaper().shape(world, steering.options().plazaOnly() ? points
+                : shapingInput(points, indexes), indexes, steering.options(), end == line.size(), here);
             points = new ArrayList<>(shaped.waypoints());
             indexes = new ArrayList<>(shaped.lineIndexes());
             chokepoints = shaped.chokepoints();

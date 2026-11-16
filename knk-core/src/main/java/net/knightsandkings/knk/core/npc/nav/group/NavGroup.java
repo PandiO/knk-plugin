@@ -734,7 +734,7 @@ public final class NavGroup {
                 while (lineStart + lineAdded < points.size() && (lineBase + lineAdded <= index
                     || path.endArc() - path.arc(index) < wanted)) {
                     NavPoint linePoint = points.get(lineStart + lineAdded);
-                    if (elastic) {
+                    if (elastic || plazaOptions() != null) {
                         linePoint = shapedLinePoint(follower, lineStart + lineAdded, leaderFloorY);
                     }
                     path.addSnapped(ports.world(), linePoint, leaderFloorY);
@@ -950,7 +950,7 @@ public final class NavGroup {
             shapedChunks.clear();
         }
         int first = index / SHAPE_CHUNK * SHAPE_CHUNK;
-        List<NavPoint> shaped = shapedChunks.computeIfAbsent(first, f -> shapeChunk(line, f, floorY));
+        List<NavPoint> shaped = shapedChunks.computeIfAbsent(first, f -> shapeChunk(follower, f, floorY));
         NavPoint p = line.get(index);
         if (shaped.size() < 2) {
             return p;
@@ -975,10 +975,45 @@ public final class NavGroup {
         return best;
     }
 
+    /**
+     * The clearance the group path's plaza lines keep (link M5): the widest width's half width plus {@code wall-clearance},
+     * so the formation passes a well on the plaza without squeezing (at most the corridor's cap).
+     */
+    public double plazaClearance() {
+        Formation formation = settings.formation();
+        Formation.Width widest = formation.widths().get(0);
+        double half = widest.ring() ? Formation.RING_RADIUS * formation.lateralSpacing()
+            : (widest.abreast() - 1) / 2.0 * formation.lateralSpacing();
+        return Math.min(net.knightsandkings.knk.core.npc.nav.corridor.Corridor.CAP,
+            half + settings.keeping().wallClearance());
+    }
+
+    /** The plaza-line options of the group path: its leader's {@code plaza-lines}, or null when off (link M5). */
+    private net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options plazaOptions() {
+        return ports.navigation().plazaOptions(leader.id());
+    }
+
     /** One chunk of the route line (with a point of overlap either side) shaped in its corridor; empty without. */
-    private List<NavPoint> shapeChunk(List<NavPoint> line, int first, int floorY) {
+    private List<NavPoint> shapeChunk(RouteFollower follower, int first, int floorY) {
+        List<NavPoint> line = follower.line();
         int from = Math.max(0, first - 1);
         int to = Math.min(line.size(), first + SHAPE_CHUNK + 1);
+        var plazas = plazaOptions();
+        List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing> crossings = List.of();
+        if (plazas != null) {
+            // a chunk holds the whole way across a plaza it reaches into, so both chunks place the same plaza line
+            int reach = (int) Math.ceil(plazas.plazaBlocks() / RouteFollower.STEP) + 2;
+            for (RouteFollower.PlazaOnLine p : follower.plazas()) {
+                if (p.index() + reach >= from && p.index() - reach < to) {
+                    from = Math.max(0, Math.min(from, p.index() - reach));
+                    to = Math.min(line.size(), Math.max(to, p.index() + reach + 1));
+                }
+            }
+            crossings = follower.plazasBetween(from, to);
+            if (!elastic && crossings.isEmpty()) {
+                return List.of(); // levels: the route line as it is away from plazas
+            }
+        }
         List<NavPoint> feet = new ArrayList<>();
         List<Integer> indexes = new ArrayList<>();
         int refY = floorY;
@@ -999,11 +1034,17 @@ public final class NavGroup {
         if (feet.size() < 2) {
             return List.of();
         }
+        var options = new net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options(
+            NavigationSettingsDefaults.HALF_WIDTH, settings.keeping().wallClearance());
+        if (plazas != null) {
+            options = elastic ? options.withPlazas(plazas.plazaBlocks(), plazaClearance())
+                : net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options.plazasOnly(
+                    NavigationSettingsDefaults.HALF_WIDTH, settings.keeping().wallClearance(), plazas.plazaBlocks(),
+                    plazaClearance());
+        }
         try {
-            return ports.navigation().corridors().shape(ports.world(), feet, indexes,
-                new net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options(
-                    NavigationSettingsDefaults.HALF_WIDTH, settings.keeping().wallClearance()),
-                to == line.size()).waypoints();
+            return ports.navigation().corridors().shape(ports.world(), feet, indexes, options, to == line.size(),
+                crossings).waypoints();
         } catch (RuntimeException e) {
             return List.of(); // a line the shaper cannot take (no corridor): the route line as it is
         }
