@@ -79,13 +79,23 @@ public final class NpcMovementReport {
     /** As {@link #settings(boolean, boolean, boolean, boolean)}, with {@code plaza-lines} on or off (link M5). */
     static NavigationSettings settings(boolean collisionOn, boolean corridorSteering, boolean localLegsClearance,
                                        boolean elastic, boolean plazaLines) {
+        return settings(collisionOn, corridorSteering, localLegsClearance, elastic, plazaLines, false);
+    }
+
+    /**
+     * As {@link #settings(boolean, boolean, boolean, boolean, boolean)}, with {@code crowd-awareness} on or off
+     * (link M4).
+     */
+    static NavigationSettings settings(boolean collisionOn, boolean corridorSteering, boolean localLegsClearance,
+                                       boolean elastic, boolean plazaLines, boolean crowdAwareness) {
         return NavigationSettings.builder()
             .global(NavigationSettings.Overrides.of(NavigationSettings.COLLIDABLE, collisionOn)
                 .with(NavigationSettings.GROUP_RANKS_WIDTH, 3)
                 .with(NavigationSettings.CORRIDOR_STEERING, corridorSteering)
                 .with(NavigationSettings.LOCAL_LEGS_CLEARANCE, localLegsClearance)
                 .with(NavigationSettings.GROUP_FORMATION_KEEPING, elastic ? "elastic" : "levels")
-                .with(NavigationSettings.PLAZA_LINES, plazaLines)).build();
+                .with(NavigationSettings.PLAZA_LINES, plazaLines)
+                .with(NavigationSettings.CROWD_AWARENESS, crowdAwareness)).build();
     }
 
     /** Free width under which 2 abreast don't fit even squeezed (2 × 0.3 + 2 × 0.35 at 0.6): a 1-wide place. */
@@ -250,7 +260,53 @@ public final class NpcMovementReport {
         baseNearWall = m.spells().started(true);
         phaseTick = npcs.ticks();
         npcs.resetLongestStill();
+        npcs.service().crowd().resetCounts();
+        npcs.service().occupancy().resetCounts();
         return this;
+    }
+
+    /**
+     * Crowd awareness's numbers in this phase (link M4): waits, yields, the longest queue, the longest wait for a turn
+     * and that wait per NPC that really went first, queues let go after 30 s; and the occupancy's shared cells (M3's
+     * note: lane merges with collision on).
+     */
+    NpcMovementReport crowd(ScenarioNpcs npcs) {
+        net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl c = npcs.service().crowd();
+        net.knightsandkings.knk.core.npc.nav.crowd.Occupancy o = npcs.service().occupancy();
+        add("crowd", "waits %d, yields %d, longest queue %d, longest wait %.1f s (%.1f s per NPC ahead), let go %d",
+            count(npcs, Event.CROWD_WAIT), count(npcs, Event.CROWD_YIELD), c.longestQueue(),
+            c.longestWaitTicks() / 20.0, c.worstWaitPerPass() / 20.0, c.overdue());
+        add("shared cells", "most in one cell %d, most shared cells at once %d, looks with a shared cell %d of %d, "
+                + "closest two in one cell %.2f, looks with bodies overlapping (under 0.6) %d",
+            o.mostInOneCell(), o.mostSharedCells(), o.rebuildsWithSharing(), o.rebuilds(),
+            Double.isNaN(o.closest()) ? -1.0 : o.closest(), o.rebuildsWithOverlap());
+        add("crowd cost", "%.4f ms per NPC per tick", npcs.crowdMsPerNpcTick());
+        return this;
+    }
+
+    /** A wait per NPC ahead longer than this means the queue held an NPC longer than it needed (plan 4c.4 item 4.3). */
+    static final int MAX_WAIT_PER_PASS_TICKS = 3 * 20;
+
+    /**
+     * The crowd checks of plan 4c.4 item 4.3 (link M4): no stuck spell at all (so none for a waiting NPC), nobody waited
+     * longer than the queue ahead of it needed (at most {@link #MAX_WAIT_PER_PASS_TICKS} per NPC that went first), no
+     * queue had to let an NPC go after 30 s. Null when they hold, else what failed.
+     */
+    String crowdFailures(ScenarioNpcs npcs) {
+        List<String> failed = new ArrayList<>();
+        long spells = count(npcs, Event.STUCK_ENGINE) + count(npcs, Event.STUCK_NO_PROGRESS);
+        if (spells != 0) {
+            failed.add(spells + " stuck spells");
+        }
+        net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl c = npcs.service().crowd();
+        if (c.worstWaitPerPass() > MAX_WAIT_PER_PASS_TICKS) {
+            failed.add(String.format(Locale.ROOT, "a wait of %.1f s per NPC ahead (at most %.1f)",
+                c.worstWaitPerPass() / 20.0, MAX_WAIT_PER_PASS_TICKS / 20.0));
+        }
+        if (c.overdue() != 0) {
+            failed.add(c.overdue() + " NPCs let go after 30 s in a queue");
+        }
+        return failed.isEmpty() ? null : String.join("; ", failed);
     }
 
     /** An event's count in this phase. */

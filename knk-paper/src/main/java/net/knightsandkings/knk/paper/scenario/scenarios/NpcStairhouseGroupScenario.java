@@ -23,7 +23,10 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * the tick cost. Link M3 (PandiO/knk-workspace#624) runs it with {@code group-formation-keeping: elastic} (and the
  * corridor and local-leg keys on) and checks plan 4c.4 item 3.3: the leader arrives, folds at most the number of
  * 1-wide places on the line, no stuck spell left open or not freed, nobody stuck near a wall, and (plan 4c.5 item 3)
- * no follower still in the entrance for more than 10 s. Needs Citizens.
+ * no follower still in the entrance for more than 10 s. Link M4 (PandiO/knk-workspace#626) adds {@code crowd-awareness}
+ * and checks plan 4c.4 item 4.3: 0 stuck spells (so none for a waiting follower), no queue held anyone longer than it
+ * needed, and reports the crowd's waits and the cells NPCs shared (M3's note on lane merges with collision on). Needs
+ * Citizens.
  */
 public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene> {
 
@@ -62,7 +65,7 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
         long[] took = {-1};
         plan.act("paste the stair house", () -> built.set(house.build()))
             .act("start NPC navigation on Citizens", () -> npcs.set(ScenarioNpcs.start(scene, house.houseLoop(),
-                NpcMovementReport.settings(collisionOn, true, true, true))))
+                NpcMovementReport.settings(collisionOn, true, true, true, false, true))))
             .cleanup("remove the NPCs", () -> {
                 if (npcs.get() != null) {
                     npcs.get().stop();
@@ -101,6 +104,10 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
                     failed = (failed == null ? "" : failed + "; ") + "a follower still in the entrance for "
                         + entrance.describe();
                 }
+                String crowd = report.crowdFailures(npcs.get()); // link M4: 0 stuck spells, no queue held too long
+                if (crowd != null) {
+                    failed = (failed == null ? "" : failed + "; ") + crowd;
+                }
                 report.add("scene", built.get())
                     .add("formation keeping", "elastic")
                     .add("1-wide places", oneWide)
@@ -113,6 +120,7 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
                     .add("lost", group.get().lost())
                     .add("rejoins", report.count(npcs.get(),
                         net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.GROUP_REJOIN))
+                    .crowd(npcs.get())
                     .common(npcs.get(), house)
                     .corridor(npcs.get())
                     .log("a group of 20 in ranks");

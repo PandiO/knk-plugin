@@ -211,7 +211,9 @@ public final class ScenarioNpcs {
             leaderWaits |= group.leader().id() == mover.id() && group.holding();
             follower |= group.followerState(mover.id()) != null;
         }
-        if (at == null || follower || leaderWaits || state == null || state == NpcNavState.IDLE) {
+        // an NPC crowd awareness holds (link M4) waits in a queue: not "still" (the plan's "outside a queue")
+        if (at == null || follower || leaderWaits || state == null || state == NpcNavState.IDLE
+            || service.crowdHeld(mover.id())) {
             stillTicks.put(mover.id(), 0);
             return;
         }
@@ -414,6 +416,11 @@ public final class ScenarioNpcs {
      */
     public double corridorMsPerNpcTick() {
         return npcTicks == 0 ? Double.NaN : service.corridors().nanos() / 1e6 / npcTicks;
+    }
+
+    /** Crowd awareness's share of {@link #navMsPerNpcTick} (link M4), in milliseconds; NaN before the first NPC tick. */
+    public double crowdMsPerNpcTick() {
+        return npcTicks == 0 ? Double.NaN : service.crowdNanos() / 1e6 / npcTicks;
     }
 
     /** NPC ticks so far (one per NPC per tick), for a phase's cost per NPC per tick (link M5). */
