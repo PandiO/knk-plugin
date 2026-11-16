@@ -6,8 +6,8 @@ the root cause in the chain report (decision 34). Each file starts with a header
 `# waypoints:` lines are the stretches as handed out, `# corridor:` lines the free width per waypoint.
 
 1. `knk-nav-69`, `knk-nav-81`: the stretch handover skipping a flight on the stacked hairpins.
-2. `knk-nav-48`, `-62`, `-63`, `-87`, `-143`, `-152`: group followers, falls at 1412 66 -537 and 1412 49 -500, the stuck
-   spot at 1410 49 -503.
+2. `knk-nav-48`, `-62`, `-63`, `-87`, `-143`, `-152`: other NPCs of the same runs. The report's failures to look for:
+   the falls at 1412 66 -537 and 1412 49 -500, the stuck spot at 1410 49 -503, the queue at 1412 74 -536.
 
 The server's settings during the test (decision 35): `stationary-ticks` and `no-progress-ticks` 60, `group-spacing`
 2.0, `group-formation-keeping` unset (levels), `corridor-steering`, `local-legs-clearance`, `plaza-lines`,
