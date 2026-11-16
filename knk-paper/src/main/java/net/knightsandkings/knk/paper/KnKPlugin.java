@@ -2912,6 +2912,8 @@ public class KnKPlugin extends JavaPlugin {
                     metricsService == null ? null : metricsService::register,
                     // PandiO/knk-workspace#668: asked for on use; the region tracker is built after registerCommands
                     () -> regionTracker == null ? null : regionTracker.regionIds(), () -> navigationService);
+                // link B1 (PandiO/knk-workspace#670): /knk npc nav snapshot reads the domain cache and the gates
+                npcNavigation.setSnapshotSources(() -> regionDomainResolver, () -> gateManager);
             } catch (RuntimeException | LinkageError e) {
                 getLogger().log(java.util.logging.Level.WARNING, "[NPC] navigation module failed to start", e);
             }
