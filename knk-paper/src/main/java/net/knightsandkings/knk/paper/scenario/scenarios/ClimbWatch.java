@@ -44,6 +44,7 @@ final class ClimbWatch {
     private final List<String> falls = new ArrayList<>();
     private final List<String> skips = new ArrayList<>();
     private final List<String> crossLevel = new ArrayList<>();
+    private final List<String> staleTurns = new ArrayList<>();
     private int handovers;
     private long tick;
 
@@ -59,6 +60,8 @@ final class ClimbWatch {
         int furthest = -1;
         boolean falling;
         List<NavPoint> sent;
+        long turnTicks;
+        NavPoint turnAt;
         final Map<List<NavPoint>, Boolean> seen = new IdentityHashMap<>();
     }
 
@@ -74,6 +77,7 @@ final class ClimbWatch {
             fall(mover, body, at);
             place(mover, body, at);
             handover(mover, body, at);
+            turn(mover, body, at);
         }
     }
 
@@ -138,6 +142,31 @@ final class ClimbWatch {
             crossLevel.add(String.format(Locale.ROOT, "%s at %s got a stretch from %s (%.0f blocks %s)", mover.name(),
                 house.realBlock(at), house.realBlock(sent.get(0)), dy, nearest.y() > at.y() ? "up" : "down"));
         }
+    }
+
+    /**
+     * A turn at a narrow place held for the crowd's whole 30 s guard ({@code CrowdControl.STALE_TICKS}) and then
+     * dropped: the NPC never passed the place (it fell, or stands stuck in it), and the queue behind it was released
+     * by the guard (decision 34.2.1).
+     */
+    private void turn(NpcMover mover, Body body, NavPoint at) {
+        if (service.crowd().hasTurn(mover.id())) {
+            if (body.turnTicks == 0) {
+                body.turnAt = at;
+            }
+            body.turnTicks++;
+            return;
+        }
+        if (body.turnTicks >= net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.STALE_TICKS - 20) {
+            staleTurns.add(String.format(Locale.ROOT, "%s held its turn from %s for %.1f s, now at %s", mover.name(),
+                house.realBlock(body.turnAt), body.turnTicks / 20.0, house.realBlock(at)));
+        }
+        body.turnTicks = 0;
+    }
+
+    /** Turns dropped by the crowd's 30 s guard ({@link #turn}). */
+    List<String> staleTurns() {
+        return staleTurns;
     }
 
     List<String> falls() {

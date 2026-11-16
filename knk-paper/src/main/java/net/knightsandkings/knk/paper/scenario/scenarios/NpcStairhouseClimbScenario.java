@@ -205,6 +205,7 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
             .add("stretch handovers", watch.handovers())
             .add("handovers onto another level", ClimbWatch.first(watch.crossLevel(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
+            .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))
             .add("stuck spells", report.count(npcs, Event.STUCK_ENGINE) + report.count(npcs, Event.STUCK_NO_PROGRESS))
             .add("longest still", String.format(Locale.ROOT, "%.1f s, %s", npcs.longestStillTicks() / 20.0,
