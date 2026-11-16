@@ -71,6 +71,36 @@ class LocalLegSearchTest {
     }
 
     @Test
+    void withCrowdAwarenessALegGoesRoundACellAnotherNpcStandsIn() {
+        // an open floor; another NPC stands on the straight line at 5 0 (link M4)
+        LocalLegSearch.CellCost occupied = (x, y, z) -> x == 5 && z == 0 && y == 65 ? LocalLegSearch.OCCUPIED_COST : 0;
+        LocalLegSearch.Result plain = find(0.5, 0.5, 10.5, 0.5, OPEN);
+        LocalLegSearch.Result round = new LocalLegSearch().find(world, world.feet(0.5, 0.5), floor(10.5, 0.5), OPEN,
+            WALL_CLEARANCE, occupied);
+        assertTrue(plain.found() && round.found());
+        assertTrue(passesCell(walked(world.feet(0.5, 0.5), plain.waypoints()), 5, 0), "without it: straight through");
+        assertTrue(!passesCell(walked(world.feet(0.5, 0.5), round.waypoints()), 5, 0),
+            "with it: round the occupied cell " + round.waypoints());
+    }
+
+    /** Whether a polyline's centre line crosses a cell, sampled every 0.1 block. */
+    private static boolean passesCell(List<NavPoint> line, int cx, int cz) {
+        for (int i = 1; i < line.size(); i++) {
+            NavPoint a = line.get(i - 1);
+            NavPoint b = line.get(i);
+            int n = Math.max(1, (int) Math.ceil(a.horizontalDistance(b) / 0.1));
+            for (int k = 0; k <= n; k++) {
+                double x = a.x() + (b.x() - a.x()) * k / n;
+                double z = a.z() + (b.z() - a.z()) * k / n;
+                if ((int) Math.floor(x) == cx && (int) Math.floor(z) == cz) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    @Test
     void aLegPastAJaggedWallKeepsTheMarginWhereTheGapAllows() {
         // a 4-wide road (z -1..2) with walls at z -2 and 3; pieces jut out of the north wall at x 6 and 12
         world.walls(-5, -2, 30, -2).walls(-5, 3, 30, 3).wall(6, -1).wall(12, -1);

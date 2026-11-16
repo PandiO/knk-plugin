@@ -340,6 +340,15 @@ public final class NavGroup {
         return settings;
     }
 
+    /** The followers' mover ids, in slot order (crowd awareness, link M4). */
+    public int[] followerIds() {
+        int[] ids = new int[followers.size()];
+        for (int i = 0; i < ids.length; i++) {
+            ids[i] = followers.get(i).mover.id();
+        }
+        return ids;
+    }
+
     /** Whether the group has an order. */
     /** Whether the mover is this group's leader or one of its followers. */
     public boolean isMember(int moverId) {
@@ -1469,7 +1478,8 @@ public final class NavGroup {
         if (f.ladder.isOpen() && recoveryTick(f, slot, slotArc, at, a)) {
             return; // on a step of its ladder, or waiting before the next
         }
-        if (f.engineStuck != null && f.state == FollowerState.FOLLOWING && targetArc - a > 1) {
+        if (f.engineStuck != null && f.state == FollowerState.FOLLOWING && targetArc - a > 1
+            && !(f.engineStuck == NpcMover.StuckKind.STATIONARY && waitsBehind(f, at))) {
             NpcMover.StuckKind kind = f.engineStuck;
             f.engineStuck = null;
             stuck(f, slot, slotArc, at, a, kind == NpcMover.StuckKind.NO_PATH ? RecoveryLadder.Reporter.NO_PATH
@@ -1524,8 +1534,36 @@ public final class NavGroup {
         } else if (f.heldByRule) {
             f.progressTick = now;
         } else if (targetArc - a > 1 && now - f.progressTick >= settings.noProgressTicks()) {
-            stuck(f, slot, slotArc, at, a, RecoveryLadder.Reporter.NO_PROGRESS);
+            if (waitsBehind(f, at)) {
+                f.progressTick = now; // behind another NPC: a wait, not a stuck spell (link M4, decision 3.4)
+            } else {
+                stuck(f, slot, slotArc, at, a, RecoveryLadder.Reporter.NO_PROGRESS);
+            }
         }
+    }
+
+    /**
+     * Crowd awareness (link M4, plan 4c.3 decision 3.4): whether a follower stands behind another NPC in its lane, a
+     * cell within 1.5 blocks along the path's heading taken by someone else. The wait is counted once; false with the
+     * key off.
+     */
+    private boolean waitsBehind(Follower f, NavPoint at) {
+        if (!ports.navigation().crowdAwareness(f.mover.id()) || path.isEmpty()) {
+            return false;
+        }
+        double[] dir = pathDirection(f);
+        double len = Math.hypot(dir[0], dir[1]);
+        if (len < 1e-9) {
+            return false;
+        }
+        NavPoint ahead = new NavPoint(at.world(), at.x() + dir[0] / len * 1.5, at.y(), at.z() + dir[1] / len * 1.5);
+        return ports.navigation().waitsBehind(f.mover.id(), at, List.of(ahead));
+    }
+
+    /** Crowd awareness (link M4): another NPC stands in this feet cell, so a recovery step does not end there. */
+    private boolean occupied(Follower f, NavPoint feet) {
+        return ports.navigation().crowdAwareness(f.mover.id())
+            && ports.navigation().occupancy().occupied(feet, f.mover.id());
     }
 
     /** Whether a feet position lies on the leader's route line beyond the part of it that is on the group's path. */
@@ -1633,11 +1671,13 @@ public final class NavGroup {
             case BACK_OFF -> {
                 move.clear();
                 move.addAll(f.steps.wayBack(at, 2));
-                yield !move.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, move.get(0));
+                yield !move.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, move.get(0))
+                    && !occupied(f, move.get(move.size() - 1));
             }
             case SIDE_STEP -> {
                 move.clear();
-                NavPoint p = RecoveryMoves.sideStep(ports.world(), at, wall, away, feet -> mayStand(f, here, feet));
+                NavPoint p = RecoveryMoves.sideStep(ports.world(), at, wall, away,
+                    feet -> mayStand(f, here, feet) && !occupied(f, feet));
                 if (p != null) {
                     move.add(p);
                 }

@@ -126,8 +126,26 @@ public final class LocalLegSearch {
      * @param wallClearance the preferred margin ({@code wall-clearance})
      */
     public Result find(NavWorld world, NavPoint feet, NavPoint targetFloor, LocalLeg leg, double wallClearance) {
+        return find(world, feet, targetFloor, leg, wallClearance, null);
+    }
+
+    /**
+     * A cost added to entering a cell (feet position), on top of the access's own and the clearance it lacks: crowd
+     * awareness's occupancy (link M4: {@link #OCCUPIED_COST} for a cell another NPC stands in).
+     */
+    @FunctionalInterface
+    public interface CellCost {
+        double cost(int x, int feetY, int z);
+    }
+
+    /** The extra cost of a cell another NPC stands in (link M4), as about four blocks of detour. */
+    public static final double OCCUPIED_COST = 4.0;
+
+    /** As {@link #find(NavWorld, NavPoint, NavPoint, LocalLeg, double)} with an extra cost per cell (null: none). */
+    public Result find(NavWorld world, NavPoint feet, NavPoint targetFloor, LocalLeg leg, double wallClearance,
+                       CellCost crowd) {
         long start = System.nanoTime();
-        Result result = search(world, feet, targetFloor, leg, wallClearance, MAX_EXPANSIONS);
+        Result result = search(world, feet, targetFloor, leg, wallClearance, MAX_EXPANSIONS, crowd);
         nanos += System.nanoTime() - start;
         searches++;
         expansions += result.expansions();
@@ -141,6 +159,11 @@ public final class LocalLegSearch {
     /** As {@link #find} with another cell budget (tests); counts nothing. */
     static Result search(NavWorld world, NavPoint feet, NavPoint targetFloor, LocalLeg leg, double wallClearance,
                          int budget) {
+        return search(world, feet, targetFloor, leg, wallClearance, budget, null);
+    }
+
+    static Result search(NavWorld world, NavPoint feet, NavPoint targetFloor, LocalLeg leg, double wallClearance,
+                         int budget, CellCost crowd) {
         NavPoint fromFloor = HopPlanner.floor(feet);
         NavPoint startFloor = HopPlanner.floorNear(world, fromFloor, fromFloor.blockY());
         NavPoint goalFloor = HopPlanner.floorNear(world, targetFloor, targetFloor.blockY());
@@ -152,7 +175,7 @@ public final class LocalLegSearch {
         NavPoint goalFeet = HopPlanner.feet(goalFloor);
         double halfWidth = halfWidth(startFeet.horizontalDistance(goalFeet));
         Corridor corridor = Corridor.build(world, List.of(startFeet, goalFeet), halfWidth, true);
-        Grid grid = new Grid(corridor, leg, wallClearance);
+        Grid grid = new Grid(corridor, leg, wallClearance, crowd);
         int sx = startFeet.blockX();
         int sz = startFeet.blockZ();
         int gx = goalFeet.blockX();
@@ -185,11 +208,18 @@ public final class LocalLegSearch {
         final Corridor corridor;
         final LocalLeg leg;
         final double wallClearance;
+        /** Crowd awareness's cost per cell (link M4), or null. */
+        final CellCost crowd;
 
         Grid(Corridor corridor, LocalLeg leg, double wallClearance) {
+            this(corridor, leg, wallClearance, null);
+        }
+
+        Grid(Corridor corridor, LocalLeg leg, double wallClearance, CellCost crowd) {
             this.corridor = corridor;
             this.leg = leg;
             this.wallClearance = wallClearance;
+            this.crowd = crowd;
         }
 
         int floor(int x, int z) {
@@ -207,7 +237,7 @@ public final class LocalLegSearch {
             int f = corridor.floorAt(x, z);
             double access = leg.access().extraCost(x, f + 1, z);
             double lack = Math.max(0, wallClearance - corridor.cellClearance(x, z));
-            return access + CLEARANCE_COST * lack;
+            return access + CLEARANCE_COST * lack + (crowd == null ? 0 : crowd.cost(x, f + 1, z));
         }
     }
 
@@ -391,6 +421,14 @@ public final class LocalLegSearch {
         double needFrom = Math.max(BODY_HALF, Math.min(need, grid.corridor.cellClearance(path[2 * a], path[2 * a + 1])));
         double needTo = Math.max(BODY_HALF, Math.min(need, grid.corridor.cellClearance(path[2 * b], path[2 * b + 1])));
         need = Math.max(need, BODY_HALF);
+        java.util.Set<Long> onPath = null;
+        if (grid.crowd != null) {
+            // crowd awareness (link M4): the step may not cut through an occupied cell the search went round
+            onPath = new java.util.HashSet<>();
+            for (int k = a; k <= b; k++) {
+                onPath.add(((long) path[2 * k] << 32) ^ (path[2 * k + 1] & 0xffffffffL));
+            }
+        }
         int samples = Math.max(1, (int) Math.ceil(len / SAMPLE));
         for (int i = 0; i <= samples; i++) {
             double t = (double) i / samples;
@@ -400,6 +438,14 @@ public final class LocalLegSearch {
             double here = s <= END_SLACK ? needFrom : s >= len - END_SLACK ? needTo : need;
             if (grid.corridor.clearanceAt(x, z, here) < here - EPS) {
                 return false;
+            }
+            if (onPath != null) {
+                int cx = (int) Math.floor(x);
+                int cz = (int) Math.floor(z);
+                if (!onPath.contains(((long) cx << 32) ^ (cz & 0xffffffffL)) && grid.floor(cx, cz) != Corridor.NONE
+                    && grid.crowd.cost(cx, grid.floor(cx, cz) + 1, cz) > 0) {
+                    return false;
+                }
             }
             for (int c = 0; c < 4; c++) {
                 int bx = (int) Math.floor(x + ((c & 1) == 0 ? -BODY_HALF : BODY_HALF));
