@@ -261,9 +261,12 @@ public final class NpcMovementScene {
 
     /** The place of the climb a body's feet are on ({@link #CLIMB_PLACES} index), or -1 between them. */
     public int climbPlace(NavPoint feet) {
-        int x = localX(feet) + STAIRHOUSE_FRAME[0];
-        int y = (int) Math.floor(feet.y() - scene.worldY(0) + 0.01) + STAIRHOUSE_FRAME[1];
-        int z = localZ(feet) + STAIRHOUSE_FRAME[2];
+        return climbPlaceAt(localX(feet) + STAIRHOUSE_FRAME[0],
+            (int) Math.floor(feet.y() - scene.worldY(0) + 0.01) + STAIRHOUSE_FRAME[1], localZ(feet) + STAIRHOUSE_FRAME[2]);
+    }
+
+    /** The place of the climb at real feet block x, y, z ({@link #CLIMB_PLACES} index), or -1 between them. */
+    public static int climbPlaceAt(int x, int y, int z) {
         for (int i = CLIMB_PLACES.length - 1; i >= 0; i--) {
             Object[] p = CLIMB_PLACES[i];
             if (x >= (int) p[1] && x <= (int) p[2] && z >= (int) p[3] && z <= (int) p[4] && y >= (int) p[5]

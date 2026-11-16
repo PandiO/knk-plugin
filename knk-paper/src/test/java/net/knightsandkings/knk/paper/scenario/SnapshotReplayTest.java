@@ -76,4 +76,23 @@ class SnapshotReplayTest {
         assertEquals(new ScenarioScene.Box(34, 46, 75),
             net.knightsandkings.knk.paper.scenario.scenarios.NpcSnapshotReplayScenario.boxOf(replay.snapshot()));
     }
+
+    @Test
+    void theDevelopersSnapshotTrimmedToTheStairHouseLoads() {
+        SnapshotReplay replay = SnapshotReplay.fromResource("quarry-to-keep-stairhouse.zip");
+        NavSnapshot s = replay.snapshot();
+        assertEquals("quarry-to-keep", s.manifest().route());
+        assertEquals("0.1.0+0f039203", s.manifest().pluginVersion());
+        assertEquals(103, s.route().line().size());
+        assertEquals(18, s.route().stretches().size());
+        assertEquals(13, s.domains().size());
+        assertTrue(s.domains().stream().filter(NavSnapshot.Domain::isGate).count() >= 6, "GateStructure domains");
+        List<String> rejected = new ArrayList<>();
+        NavigationSettings settings = replay.settings(rejected);
+        assertTrue(rejected.isEmpty(), rejected.toString());
+        assertEquals("elastic", settings.value(NavigationSettings.GROUP_FORMATION_KEEPING, NavigationSettings.Scope.of("w")));
+        assertEquals(new ScenarioScene.Box(64, 61, 80),
+            net.knightsandkings.knk.paper.scenario.scenarios.NpcSnapshotReplayScenario.boxOf(s));
+        assertTrue(s.manifest().notes().stream().anyMatch(n -> n.contains("trimmed")), s.manifest().notes().toString());
+    }
 }

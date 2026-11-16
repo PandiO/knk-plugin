@@ -75,6 +75,56 @@ class AnvilRegionTest {
     }
 
     @Test
+    void theDevelopersRegionFilesOfMinecraft26AreRead() throws Exception {
+        // the dev server's chunks keep palette entries as block state strings, some wrapped in {"": ...} (2026-11-16)
+        NavSnapshotZip.Loaded loaded;
+        try (InputStream in = getClass().getResourceAsStream("/scenario-snapshots/quarry-to-keep-stairhouse.zip")) {
+            loaded = NavSnapshotZip.read(in);
+        }
+        var m = loaded.snapshot().manifest();
+        SnapshotBox box = new SnapshotBox(m.boxMin(), m.boxMax());
+        Map<String, String> read = new HashMap<>();
+        int skipped = 0;
+        for (Map.Entry<String, byte[]> file : loaded.files().entrySet()) {
+            AnvilRegion.Read r = AnvilRegion.blocks(file.getKey(), file.getValue(), box,
+                (x, y, z, state) -> read.put(x + " " + y + " " + z, state));
+            skipped += r.skipped();
+        }
+        assertEquals(0, skipped);
+        assertTrue(read.size() > 5_000, read.size() + " blocks");
+        // the stair house in the dev world is the developer's schematic: a flight's stair block is there
+        SceneSchematic schematic = SceneSchematic.fromResource(NpcMovementScene.STAIRHOUSE);
+        int[] min = schematic.worldMin();
+        int same = 0;
+        int solid = 0;
+        for (int x = 0; x < schematic.width(); x++) {
+            for (int y = 0; y < schematic.height(); y++) {
+                for (int z = 0; z < schematic.length(); z++) {
+                    String expected = schematic.blockAt(x, y, z);
+                    if (expected == null || expected.endsWith(":air")) {
+                        continue;
+                    }
+                    solid++;
+                    String actual = read.get((min[0] + x) + " " + (min[1] + y) + " " + (min[2] + z));
+                    if (actual != null && sorted(actual).equals(sorted(expected))) {
+                        same++;
+                    }
+                }
+            }
+        }
+        // 85 % on 2026-11-16: the dev world changed a little after the schematic was copied (2026-11-15)
+        assertTrue(same > solid * 8 / 10, same + " of " + solid + " schematic blocks are the same in the snapshot");
+    }
+
+    @Test
+    void paletteEntriesInEveryForm() {
+        assertEquals("minecraft:stone", AnvilRegion.paletteEntry("minecraft:stone"));
+        assertEquals("minecraft:tuff", AnvilRegion.paletteEntry(Map.of("", "minecraft:tuff")));
+        assertEquals("minecraft:oak_stairs[facing=north,half=bottom]", AnvilRegion.paletteEntry(Map.of("Name",
+            "minecraft:oak_stairs", "Properties", Map.of("half", "bottom", "facing", "north"))));
+    }
+
+    @Test
     void onlyTheBoxIsRead() throws Exception {
         NavSnapshotZip.Loaded loaded = sample();
         SnapshotBox one = new SnapshotBox(new int[] {1407, 46, -549}, new int[] {1407, 46, -549});

@@ -19,7 +19,8 @@ import net.knightsandkings.knk.core.npc.nav.snapshot.SnapshotBox;
  * Reads the blocks of a Minecraft region file ({@code r.<x>.<z>.mca}, the Anvil format) without the server (link B1,
  * PandiO/knk-workspace#670): the snapshot replay places a real route's blocks in a scenario box from the files
  * {@code /knk npc nav snapshot} copied. Reads the chunks' {@code sections} with their {@code block_states} (palette and
- * packed indexes, the format since 1.18); gzip, zlib and uncompressed chunks. Chunks stored outside the file
+ * packed indexes, the format since 1.18; palette entries as {@code {Name, Properties}} or, since Minecraft 26.x, as
+ * block state strings, wrapped in {@code {"": ...}} in a list of mixed types); gzip, zlib and uncompressed chunks. Chunks stored outside the file
  * ({@code .mcc}) and LZ4 chunks are skipped and counted.
  */
 public final class AnvilRegion {
@@ -141,7 +142,7 @@ public final class AnvilRegion {
             }
             String[] names = new String[palette.size()];
             for (int p = 0; p < names.length; p++) {
-                names[p] = state(SceneSchematic.Nbt.map(palette.get(p)));
+                names[p] = paletteEntry(palette.get(p));
             }
             long[] data = states.get("data") instanceof long[] longs ? longs : null;
             int bits = Math.max(4, 32 - Integer.numberOfLeadingZeros(names.length - 1));
@@ -177,7 +178,23 @@ public final class AnvilRegion {
         return count;
     }
 
-    /** A palette entry as a block state string: {@code Name[key=value,...]} with the properties sorted. */
+    /**
+     * A palette entry as a block state string. Minecraft 26.x writes the palette as a list of block state strings,
+     * and wraps each entry of a list with mixed element types in a compound under the empty key {@code ""}; before,
+     * an entry was {@code {Name, Properties}}.
+     */
+    static String paletteEntry(Object entry) {
+        if (entry instanceof String text) {
+            return text;
+        }
+        Map<String, Object> map = SceneSchematic.Nbt.map(entry);
+        if (map != null && !map.containsKey("Name") && map.size() == 1 && map.get("") != null) {
+            return paletteEntry(map.get(""));
+        }
+        return state(map);
+    }
+
+    /** A {@code {Name, Properties}} palette entry as {@code Name[key=value,...]} with the properties sorted. */
     static String state(Map<String, Object> entry) {
         if (entry == null || !(entry.get("Name") instanceof String name)) {
             return null;

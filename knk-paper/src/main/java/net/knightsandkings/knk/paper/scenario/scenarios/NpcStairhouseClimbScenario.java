@@ -19,11 +19,13 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
 import net.knightsandkings.knk.paper.scenario.SizedScene;
 
 /**
- * Link B1 (PandiO/knk-workspace#670), report mode: the climb through the developer's whole stair house on the real
- * route's shape, entering from the street in the east and going up all five flights of the stacked hairpins to the
- * top hall (chain report decisions 33 to 35). First a leader alone, then a group of 20 in ranks of 3, each once, with
- * short stretches ({@value #STRETCH_BLOCKS} blocks) so that stretch handovers happen on the hairpins, and the movement
- * keys as on the developer's server during the failed smoke test of 2026-11-16 (decision 35.3).
+ * Link B1 (PandiO/knk-workspace#670), report mode, the light scene: the climb through the developer's whole stair house
+ * on the real road line of the traces of 2026-11-16 ({@link NpcMovementScene#climbLine}), entering from the street in
+ * the east and going up all five flights of the stacked hairpins to the top hall (chain report decisions 33 to 35).
+ * One phase: a group of 20 in ranks of 3 with 20 singles beside it (the smoke test's crowd), with short stretches
+ * ({@value #STRETCH_BLOCKS} blocks) and the movement keys as on the developer's server during the failed smoke test
+ * (decision 35.3). The leader alone and the group of 20 on the real blocks, regions and settings run in
+ * {@code npc-replay-quarry-to-keep}.
  * <p>
  * It reports what {@link ClimbWatch} sees: falls (from where to where), places of the climb skipped or walked back to,
  * stretch handovers and those onto another level, the queue releases by the crowd's 30 s guard ("let go"), stuck
@@ -36,12 +38,9 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
     /** Short stretches: the flights are 10 to 13 blocks long, so a handover falls on most hairpins. */
     static final double STRETCH_BLOCKS = 8;
     static final int MEMBERS = 20;
-    static final int LEADER_TICKS = 90 * 20;
     static final int GROUP_TICKS = 150 * 20;
     /** Singles sent behind the group in the last phase (the smoke test's 39-NPC queue: 19 followers and these). */
     static final int SINGLES = 20;
-    /** Followers keep walking this long after the leader's trip ended. */
-    static final int SETTLE_TICKS = 20 * 20;
     /**
      * With the singles beside the group, everybody keeps walking this long after the leader's trip ended, so a queue
      * held longer than the crowd's 30 s guard shows ({@code let go}).
@@ -55,8 +54,8 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
 
     @Override
     public String description() {
-        return "Report: a leader alone, then a group of 20, from the street east of the stair house up all five flights "
-            + "with short stretches (the smoke test's failures of 2026-11-16)";
+        return "Report: a group of 20 with 20 singles from the street east of the stair house up all five flights "
+            + "with short stretches (the smoke test's crowd of 2026-11-16)";
     }
 
     @Override
@@ -92,10 +91,6 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
         AtomicReference<ScenarioNpcs> npcs = new AtomicReference<>();
         AtomicReference<ClimbWatch> watch = new AtomicReference<>();
         AtomicReference<String> built = new AtomicReference<>();
-        List<NpcMover> leaderAlone = new ArrayList<>();
-        AtomicReference<NavigationResult> leaderResult = new AtomicReference<>();
-        long[] started = {0};
-        long[] took = {-1};
         AtomicReference<NpcMovementReport> report = new AtomicReference<>();
         plan.act("paste the whole stair house", () -> built.set(house.build()))
             .act("start NPC navigation on Citizens with the smoke test's settings", () -> {
@@ -110,29 +105,7 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
                 if (npcs.get() != null) {
                     npcs.get().stop();
                 }
-            })
-            .act("a leader alone walks from the street east of the house to the top hall", () -> {
-                report.set(new NpcMovementReport(scene, name()).phaseStarts(npcs.get()));
-                watch.set(new ClimbWatch(house, npcs.get().service()));
-                NpcMover leader = npcs.get().spawn(house.climbStart(0));
-                leaderAlone.add(leader);
-                started[0] = npcs.get().ticks();
-                if (!npcs.get().service().navigate(leader.id(), house.climbGoal(), r -> {
-                    leaderResult.set(r);
-                    took[0] = npcs.get().ticks() - started[0];
-                })) {
-                    throw new ScenarioAssertionError("the navigation service refused the leader's order");
-                }
-            })
-            .await("the leader's trip ends or the time is up", LEADER_TICKS + 20,
-                () -> leaderResult.get() != null || npcs.get().ticks() - started[0] >= LEADER_TICKS)
-            .check("report: the leader alone", () -> {
-                report(report.get(), npcs.get(), watch.get(), leaderAlone, leaderResult.get(), took[0], LEADER_TICKS,
-                    built.get(), null, house).log("a leader alone");
-                npcs.get().remove(leaderAlone);
-                return null;
             });
-        groupPhase(plan, scene, house, npcs, watch, report, built, 0, SETTLE_TICKS, "a group of 20 in ranks");
         groupPhase(plan, scene, house, npcs, watch, report, built, SINGLES, CROWD_SETTLE_TICKS,
             "a group of 20 in ranks with " + SINGLES + " singles beside it");
     }

@@ -60,7 +60,7 @@ class PaperScenariosTest {
             "npc-landing-ranks",
             "npc-walks-road-route", "npc-keeps-to-road-around-obstacle", "npc-group-keeps-spacing",
             "npc-stairhouse-singles", "npc-stairhouse-singles-collision-on", "npc-stairhouse-group",
-            "npc-stairhouse-group-collision-on", "npc-stairhouse-climb", "npc-snapshot-replay", "npc-jagged-straight", "npc-jagged-straight-collision-on",
+            "npc-stairhouse-group-collision-on", "npc-stairhouse-climb", "npc-replay-quarry-to-keep", "npc-jagged-straight", "npc-jagged-straight-collision-on",
             "npc-doorway-crowd", "npc-doorway-crowd-collision-on", "npc-plaza-line", "npc-plaza-line-collision-on",
             "npc-collision-policy", "npc-guard-ledge-push", "npc-door-column",
             "player-command-needs-grant", "player-heal-needs-grant", "player-chat-group-colours", "player-join-loading-hold", "player-menu-click",

@@ -293,7 +293,8 @@ final class NavSnapshotTaker {
             }
             List<NavSnapshot.GateDoor> doors = new ArrayList<>();
             String type = domain.map(RegionDomainResolver.DomainSnapshot::domainType).orElse(null);
-            if ("gate".equalsIgnoreCase(type) && gates != null) {
+            // a gate's domain type is "gate" or "GateStructure" (the dev server's, 2026-11-16 snapshot)
+            if (type != null && type.toLowerCase(java.util.Locale.ROOT).contains("gate") && gates != null) {
                 int id = domain.get().id() == null ? Integer.MIN_VALUE : domain.get().id();
                 for (CachedGateDoor door : gates.getAllGates().values()) {
                     if (door.getGateStructureId() == id || door.getId() == id) {

@@ -204,6 +204,12 @@ public final class SnapshotReplay {
      * came from are in the snapshot). Values this plugin no longer knows go to {@code rejected}.
      */
     public NavigationSettings settings(List<String> rejected) {
+        return settings(rejected, java.util.function.UnaryOperator.identity());
+    }
+
+    /** As {@link #settings(List)}, with {@code change} applied to the stored values (another configuration to compare). */
+    public NavigationSettings settings(List<String> rejected,
+                                       java.util.function.UnaryOperator<NavigationSettings.Overrides> change) {
         Map<String, Object> raw = new LinkedHashMap<>();
         for (NavSnapshot.Setting s : snapshot().settings()) {
             if (s.value() != null && !"null".equals(s.value())) {
@@ -211,7 +217,8 @@ public final class SnapshotReplay {
             }
         }
         return NavigationSettings.builder()
-            .global(NavigationSettings.Overrides.parse(raw, "snapshot " + snapshot().manifest().route(), rejected))
+            .global(change.apply(NavigationSettings.Overrides.parse(raw, "snapshot " + snapshot().manifest().route(),
+                rejected)))
             .build();
     }
 

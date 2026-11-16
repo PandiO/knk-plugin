@@ -38,7 +38,16 @@ final class ClimbWatch {
     /** A new stretch whose nearest waypoint is this far above or below the feet starts on another level. */
     static final double LEVEL_BLOCKS = 2.5;
 
-    private final NpcMovementScene house;
+    /** Where a body is in the dev world's coordinates: the scene's frame or a snapshot replay's. */
+    interface Frame {
+        /** "x y z" of a world position's block in real coordinates. */
+        String realBlock(NavPoint at);
+
+        /** The place of the climb a body's feet are on, or -1. */
+        int place(NavPoint feet);
+    }
+
+    private final Frame house;
     private final NpcNavigationService service;
     private final Map<Integer, Body> bodies = new HashMap<>();
     private final List<String> falls = new ArrayList<>();
@@ -49,7 +58,45 @@ final class ClimbWatch {
     private long tick;
 
     ClimbWatch(NpcMovementScene house, NpcNavigationService service) {
-        this.house = house;
+        this(new Frame() {
+            @Override
+            public String realBlock(NavPoint at) {
+                return house.realBlock(at);
+            }
+
+            @Override
+            public int place(NavPoint feet) {
+                return house.climbPlace(feet);
+            }
+        }, service);
+    }
+
+    /** A watch in a snapshot replay's frame: real = world - the scene's origin + the replay's frame. */
+    ClimbWatch(net.knightsandkings.knk.paper.scenario.ScenarioScene scene,
+               net.knightsandkings.knk.paper.scenario.SnapshotReplay replay, NpcNavigationService service) {
+        this(new Frame() {
+            private int[] real(NavPoint at) {
+                int[] f = replay.frame();
+                return new int[] {at.blockX() - scene.worldX(0) + f[0],
+                    (int) Math.floor(at.y() - scene.worldY(0) + 0.01) + f[1], at.blockZ() - scene.worldZ(0) + f[2]};
+            }
+
+            @Override
+            public String realBlock(NavPoint at) {
+                int[] r = real(at);
+                return r[0] + " " + r[1] + " " + r[2];
+            }
+
+            @Override
+            public int place(NavPoint feet) {
+                int[] r = real(feet);
+                return NpcMovementScene.climbPlaceAt(r[0], r[1], r[2]);
+            }
+        }, service);
+    }
+
+    ClimbWatch(Frame frame, NpcNavigationService service) {
+        this.house = frame;
         this.service = service;
     }
 
@@ -102,7 +149,7 @@ final class ClimbWatch {
     }
 
     private void place(NpcMover mover, Body body, NavPoint at) {
-        int p = house.climbPlace(at);
+        int p = house.place(at);
         if (p < 0 || p == body.place) {
             return;
         }
