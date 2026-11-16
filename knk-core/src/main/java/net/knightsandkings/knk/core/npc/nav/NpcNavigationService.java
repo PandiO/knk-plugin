@@ -109,7 +109,19 @@ public final class NpcNavigationService {
                            int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
                            double cornerClearance, double waypointMargin, int recoveryWaitTicks,
                            boolean corridorSteering, double corridorHalfWidth, double wallClearance,
-                           boolean localLegsClearance) {
+                           boolean localLegsClearance, boolean plazaLines, int plazaCorridorBlocks) {
+
+        /** With plaza lines off (plan 4c.3 decision 6; link M5). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                        boolean corridorSteering, double corridorHalfWidth, double wallClearance,
+                        boolean localLegsClearance) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering, corridorHalfWidth,
+                wallClearance, localLegsClearance, NavigationSettings.PLAZA_LINES.defaultValue(),
+                NavigationSettings.PLAZA_CORRIDOR_BLOCKS.defaultValue());
+        }
 
         /** With clearance-aware local legs off (plan 4c.3 decision 8; link M6). */
         public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
@@ -161,7 +173,9 @@ public final class NpcNavigationService {
                 settings.value(NavigationSettings.CORRIDOR_STEERING, scope),
                 settings.value(NavigationSettings.CORRIDOR_HALF_WIDTH, scope),
                 settings.value(NavigationSettings.WALL_CLEARANCE, scope),
-                settings.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, scope));
+                settings.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, scope),
+                settings.value(NavigationSettings.PLAZA_LINES, scope),
+                settings.value(NavigationSettings.PLAZA_CORRIDOR_BLOCKS, scope));
         }
 
         /** The waypoint margin for a stretch: {@link CorridorShaper#CHOKE_MARGIN} with an aligned chokepoint. */
@@ -346,6 +360,7 @@ public final class NpcNavigationService {
     /** K&K's own local leg search (plan 4c.3 decision 8, link M6). */
     private final LocalLegSearch localLegs = new LocalLegSearch();
     private java.util.function.IntPredicate unshaped = id -> false;
+    private java.util.function.IntToDoubleFunction plazaClearance = id -> Double.NaN;
     private long busyNanos;
     private long lastTickNanos;
     private int depth;
@@ -384,10 +399,42 @@ public final class NpcNavigationService {
         this.unshaped = unshaped == null ? id -> false : unshaped;
     }
 
-    /** The corridor steering an NPC's stretches get: null when its {@code corridor-steering} is off or it is in a group. */
+    /**
+     * The clearance a group member's plaza lines keep (link M5): the group's formation half width plus
+     * {@code wall-clearance} for its leader, so the formation fits round a well; NaN for {@code wall-clearance}.
+     */
+    public void setPlazaClearance(java.util.function.IntToDoubleFunction clearance) {
+        this.plazaClearance = clearance == null ? id -> Double.NaN : clearance;
+    }
+
+    /**
+     * The corridor steering an NPC's stretches get: null when its {@code corridor-steering} and {@code plaza-lines} are
+     * off. A group member, and an NPC with only {@code plaza-lines} on, get plaza lines only (link M5).
+     */
     private RouteFollower.Steering steering(Nav nav) {
-        return nav.settings.corridorSteering() && !unshaped.test(nav.mover.id()) ? new RouteFollower.Steering(corridors,
-            new CorridorShaper.Options(nav.settings.corridorHalfWidth(), nav.settings.wallClearance())) : null;
+        CorridorShaper.Options plazas = plazaOptions(nav.mover.id());
+        if (nav.settings.corridorSteering() && !unshaped.test(nav.mover.id())) {
+            CorridorShaper.Options options = new CorridorShaper.Options(nav.settings.corridorHalfWidth(),
+                nav.settings.wallClearance());
+            return new RouteFollower.Steering(corridors, plazas == null ? options
+                : options.withPlazas(plazas.plazaBlocks(), plazas.plazaClearance()));
+        }
+        return plazas == null ? null : new RouteFollower.Steering(corridors, plazas);
+    }
+
+    /**
+     * Plaza lines only, as a mover's settings ask for them (link M5): null when its {@code plaza-lines} is off or it is
+     * not registered. A group's path asks with its leader's id.
+     */
+    public CorridorShaper.Options plazaOptions(int moverId) {
+        Nav nav = npcs.get(moverId);
+        if (nav == null || !nav.settings.plazaLines()) {
+            return null;
+        }
+        double clearance = plazaClearance.applyAsDouble(moverId);
+        return CorridorShaper.Options.plazasOnly(nav.settings.corridorHalfWidth(), nav.settings.wallClearance(),
+            nav.settings.plazaCorridorBlocks(), Double.isNaN(clearance) ? nav.settings.wallClearance()
+                : Math.max(clearance, nav.settings.wallClearance()));
     }
 
     // ==================== callers ====================
@@ -824,7 +871,7 @@ public final class NpcNavigationService {
                 }
                 nav.blockedReported = false;
                 nav.reportedElement = null;
-                startRoute(nav, generation, at, plan.line(), plan.gates(), from, to);
+                startRoute(nav, generation, at, plan.line(), plan.gates(), plan.plazas(), from, to);
             }
             case BLOCKED -> {
                 // a route exists without the current rules (a closed gate, a denied region): walk as far as the rules
@@ -836,7 +883,7 @@ public final class NpcNavigationService {
                 if (!partial.isEmpty()
                     && partial.get(partial.size() - 1).horizontalDistance(from) > ROAD_JOIN_DISTANCE) {
                     ports.metrics().count(Event.BLOCKED_WALK);
-                    startRoute(nav, generation, at, partial, plan.gates(), from, null);
+                    startRoute(nav, generation, at, partial, plan.gates(), plan.plazas(), from, null);
                 } else {
                     waitAtBlock(nav);
                 }
@@ -877,8 +924,9 @@ public final class NpcNavigationService {
      * a blocking element and ends there.
      */
     private void startRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
-                            List<RoadPlanner.GateCrossing> gates, NavPoint from, NavPoint to) {
-        nav.follower = new RouteFollower(line);
+                            List<RoadPlanner.GateCrossing> gates, List<RoadPlanner.PlazaCrossing> plazas,
+                            NavPoint from, NavPoint to) {
+        nav.follower = new RouteFollower(line, plazas);
         nav.onTrail = false;
         List<GateOnLine> onLine = new java.util.ArrayList<>();
         for (RoadPlanner.GateCrossing gate : gates) {

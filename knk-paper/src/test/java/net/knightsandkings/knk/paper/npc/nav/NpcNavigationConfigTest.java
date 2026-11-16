@@ -299,6 +299,56 @@ class NpcNavigationConfigTest {
     }
 
     @Test
+    void readsThePlazaLinesKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.PLAZA_LINES, anywhere), "off by default");
+        assertEquals(16, defaults.value(NavigationSettings.PLAZA_CORRIDOR_BLOCKS, anywhere));
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.PLAZA_LINES, anywhere).layer(),
+            "the shipped config.yml has the key");
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.PLAZA_CORRIDOR_BLOCKS, anywhere).layer(),
+            "the shipped config.yml has the key");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                plaza-lines: true
+                plaza-corridor-blocks: 12
+                worlds:
+                  w2:
+                    plaza-lines: false
+                regions:
+                  market:
+                    plaza-corridor-blocks: 24
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        assertEquals(true, settings.value(NavigationSettings.PLAZA_LINES, anywhere), "the global layer");
+        assertEquals(false, settings.value(NavigationSettings.PLAZA_LINES, Scope.of("w2")), "a world turns it off");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+                new Scope("w", List.of("town", "market"), null, null));
+        assertEquals(true, resolved.plazaLines());
+        assertEquals(24, resolved.plazaCorridorBlocks(), "a region widens it");
+        assertEquals(12, net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere)
+            .plazaCorridorBlocks());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                plaza-lines: sometimes
+                plaza-corridor-blocks: 2
+            """);
+        assertEquals(2, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
     void readsTheLocalLegsClearanceKeyInEveryConfigLayer() throws Exception {
         YamlConfiguration shipped = new YamlConfiguration();
         try (InputStreamReader reader = new InputStreamReader(

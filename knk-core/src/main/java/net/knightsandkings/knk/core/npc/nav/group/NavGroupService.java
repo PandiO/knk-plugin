@@ -58,6 +58,16 @@ public final class NavGroupService {
             }
             return false;
         });
+        // a leader's plaza lines keep its group's formation half width from wells and walls, as the group path does
+        // (link M5)
+        ports.navigation().setPlazaClearance(moverId -> {
+            for (NavGroup group : groups.values()) {
+                if (group.leader().id() == moverId) {
+                    return group.plazaClearance();
+                }
+            }
+            return Double.NaN;
+        });
         ports.navigation().setIdleStuckListener((moverId, kind) -> {
             for (NavGroup group : groups.values()) {
                 if (group.engineStuck(moverId, kind)) {

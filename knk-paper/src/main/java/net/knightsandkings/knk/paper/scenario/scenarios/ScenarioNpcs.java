@@ -138,7 +138,14 @@ public final class ScenarioNpcs {
     }
 
     private NpcMover traced;
+    /** The junctions on the scene's road that may be plazas, handed out with every road plan (link M5). */
+    private List<RoadPlanner.PlazaCrossing> plazas = List.of();
     private final List<Runnable> watchers = new ArrayList<>();
+
+    /** The junctions on the scene's road that may be plazas (link M5): each road plan names them, as the router does. */
+    public void plazas(List<RoadPlanner.PlazaCrossing> crossings) {
+        plazas = List.copyOf(crossings);
+    }
     private final Map<NavGroup, List<NpcMover>> groupMembers = new HashMap<>();
 
     /** Runs {@code watcher} every tick after the NPCs moved (a scenario's own per-tick check). */
@@ -258,7 +265,7 @@ public final class ScenarioNpcs {
                 }
             }
         }
-        return CompletableFuture.completedFuture(RoadPlanner.RoadPlan.found(line, crossed));
+        return CompletableFuture.completedFuture(RoadPlanner.RoadPlan.found(line, crossed).withPlazas(plazas));
     }
 
     private CompletableFuture<LocalLegPreparer.Prepared> prepare(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
@@ -407,6 +414,11 @@ public final class ScenarioNpcs {
      */
     public double corridorMsPerNpcTick() {
         return npcTicks == 0 ? Double.NaN : service.corridors().nanos() / 1e6 / npcTicks;
+    }
+
+    /** NPC ticks so far (one per NPC per tick), for a phase's cost per NPC per tick (link M5). */
+    public long npcTicks() {
+        return npcTicks;
     }
 
     /** The server ticks the NPCs have been ticked so far. */

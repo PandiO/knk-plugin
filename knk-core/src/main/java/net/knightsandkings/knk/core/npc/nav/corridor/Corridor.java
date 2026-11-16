@@ -88,6 +88,29 @@ public final class Corridor {
      * clearance).
      */
     public static Corridor build(NavWorld world, List<NavPoint> feet, double halfWidth, boolean anyRegion) {
+        return build(world, feet, halfWidth, anyRegion, List.of());
+    }
+
+    /**
+     * A round area the corridor also covers (link M5: a plaza's footprint round its junction, plan 4c.3 decision 6).
+     *
+     * @param x      the centre's x
+     * @param z      the centre's z
+     * @param radius blocks from the centre
+     */
+    public record Disc(double x, double z, double radius) {
+        boolean holds(double px, double pz) {
+            return Math.hypot(px - x, pz - z) <= radius;
+        }
+    }
+
+    /**
+     * As {@link #build(NavWorld, List, double, boolean)}; the strip also covers {@code discs} (link M5: the corridor
+     * widens to a plaza's footprint). Their cells are flooded from the line like the others, with the same floor and
+     * region rules.
+     */
+    public static Corridor build(NavWorld world, List<NavPoint> feet, double halfWidth, boolean anyRegion,
+                                 List<Disc> discs) {
         if (feet.isEmpty()) {
             throw new IllegalArgumentException("a corridor needs a line");
         }
@@ -105,13 +128,26 @@ public final class Corridor {
         int reach = (int) Math.ceil(halfWidth) + 1;
         int minX = (int) Math.floor(minPX) - reach;
         int minZ = (int) Math.floor(minPZ) - reach;
-        int sizeX = (int) Math.floor(maxPX) + reach - minX + 1;
-        int sizeZ = (int) Math.floor(maxPZ) + reach - minZ + 1;
+        int maxX = (int) Math.floor(maxPX) + reach;
+        int maxZ = (int) Math.floor(maxPZ) + reach;
+        for (Disc d : discs) {
+            int r = (int) Math.ceil(d.radius()) + 1;
+            minX = Math.min(minX, (int) Math.floor(d.x()) - r);
+            minZ = Math.min(minZ, (int) Math.floor(d.z()) - r);
+            maxX = Math.max(maxX, (int) Math.floor(d.x()) + r);
+            maxZ = Math.max(maxZ, (int) Math.floor(d.z()) + r);
+        }
+        int sizeX = maxX - minX + 1;
+        int sizeZ = maxZ - minZ + 1;
         int[] floors = new int[sizeX * sizeZ];
         for (int i = 0; i < floors.length; i++) {
             int x = minX + i % sizeX;
             int z = minZ + i / sizeX;
-            floors[i] = withinOf(feet, x + 0.5, z + 0.5, halfWidth) ? BLOCKED : OUTSIDE;
+            boolean in = withinOf(feet, x + 0.5, z + 0.5, halfWidth);
+            for (int k = 0; !in && k < discs.size(); k++) {
+                in = discs.get(k).holds(x + 0.5, z + 0.5);
+            }
+            floors[i] = in ? BLOCKED : OUTSIDE;
         }
         CountingReads reads = new CountingReads(world);
         Set<Set<String>> regionSets = new HashSet<>();
