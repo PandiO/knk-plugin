@@ -38,9 +38,14 @@ final class GroupSim {
     /** Blocks a mover walks per tick at normal speed (about 4.3 blocks per second). */
     static final double SPEED = 0.215;
 
-    /** Flat at floor y 64; columns can lose their floor (walls) and have regions. */
+    /**
+     * Flat at floor y 64 unless {@code floorY} says otherwise (stairs, link M3); columns can lose their floor and have
+     * regions; {@code walls} columns also stop a body (the elastic fit tells a wall from a drop).
+     */
     static final class SimWorld implements NavWorld {
         BiPredicate<Integer, Integer> noFloor = (x, z) -> false;
+        BiPredicate<Integer, Integer> walls = (x, z) -> false;
+        java.util.function.ToIntBiFunction<Integer, Integer> floorY = (x, z) -> 64;
         BiFunction<Integer, Integer, Set<String>> regions = (x, z) -> Set.of();
 
         @Override
@@ -50,7 +55,12 @@ final class GroupSim {
 
         @Override
         public boolean isStandableFloor(String world, int x, int floorY, int z) {
-            return floorY == 64 && !noFloor.test(x, z);
+            return floorY == this.floorY.applyAsInt(x, z) && !noFloor.test(x, z) && !walls.test(x, z);
+        }
+
+        @Override
+        public boolean blocksBody(String world, int x, int y, int z) {
+            return walls.test(x, z) && y > this.floorY.applyAsInt(x, z);
         }
 
         @Override

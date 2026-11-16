@@ -64,11 +64,83 @@ public final class NpcMovementReport {
 
     /** As {@link #settings(boolean, boolean)}, with {@code local-legs-clearance} on or off (link M6). */
     static NavigationSettings settings(boolean collisionOn, boolean corridorSteering, boolean localLegsClearance) {
+        return settings(collisionOn, corridorSteering, localLegsClearance, false);
+    }
+
+    /**
+     * As {@link #settings(boolean, boolean, boolean)}, with {@code group-formation-keeping} {@code elastic} or
+     * {@code levels} (link M3).
+     */
+    static NavigationSettings settings(boolean collisionOn, boolean corridorSteering, boolean localLegsClearance,
+                                       boolean elastic) {
         return NavigationSettings.builder()
             .global(NavigationSettings.Overrides.of(NavigationSettings.COLLIDABLE, collisionOn)
                 .with(NavigationSettings.GROUP_RANKS_WIDTH, 3)
                 .with(NavigationSettings.CORRIDOR_STEERING, corridorSteering)
-                .with(NavigationSettings.LOCAL_LEGS_CLEARANCE, localLegsClearance)).build();
+                .with(NavigationSettings.LOCAL_LEGS_CLEARANCE, localLegsClearance)
+                .with(NavigationSettings.GROUP_FORMATION_KEEPING, elastic ? "elastic" : "levels")).build();
+    }
+
+    /** Free width under which 2 abreast don't fit even squeezed (2 × 0.3 + 2 × 0.35 at 0.6): a 1-wide place. */
+    static final double ONE_WIDE = 0.6 + 0.7;
+
+    /**
+     * The 1-wide places on a road line (plan 4c.4 item 3.3): runs of points, every half block along the line, where
+     * the free width across it (M1's {@code FreeWidth}, the trace's measure) is under {@link #ONE_WIDE}.
+     */
+    static int oneWidePlaces(net.knightsandkings.knk.core.npc.nav.NavWorld world, List<NavPoint> floorLine) {
+        List<NavPoint> points = net.knightsandkings.knk.core.npc.nav.HopPlanner.resampleKeepingCorners(floorLine, 0.5);
+        int places = 0;
+        boolean in = false;
+        for (int i = 0; i < points.size(); i++) {
+            NavPoint before = points.get(Math.max(0, i - 1));
+            NavPoint after = points.get(Math.min(points.size() - 1, i + 1));
+            NavPoint feet = net.knightsandkings.knk.core.npc.nav.HopPlanner.feet(points.get(i));
+            boolean narrow = net.knightsandkings.knk.core.npc.nav.corridor.FreeWidth.at(world, feet,
+                after.x() - before.x(), after.z() - before.z()).total() < ONE_WIDE;
+            places += narrow && !in ? 1 : 0;
+            in = narrow;
+        }
+        return places;
+    }
+
+    /**
+     * The group checks of plan 4c.4 item 3.3 (link M3, with {@code group-formation-keeping: elastic}): the leader
+     * arrived, at most {@code maxFolds} folds, no stuck spell left open or not freed, nobody stuck near a wall (no
+     * clipped wall corner). Null when they hold, else what failed.
+     */
+    String groupFailures(ScenarioNpcs npcs, net.knightsandkings.knk.core.npc.nav.NavigationResult result, int maxFolds) {
+        List<String> failed = new ArrayList<>();
+        if (!(result instanceof net.knightsandkings.knk.core.npc.nav.NavigationResult.Arrived)) {
+            failed.add("the leader " + (result == null ? "did not arrive in time" : "ended with " + result));
+        }
+        long folds = count(npcs, Event.GROUP_FOLD);
+        if (folds > maxFolds) {
+            failed.add(folds + " folds (at most " + maxFolds + ", the 1-wide places)");
+        }
+        NpcNavigationMetrics m = npcs.metrics();
+        if (m.spells().open() != 0 || count(npcs, Event.NOT_FREED) != 0) {
+            failed.add("stuck spells open " + m.spells().open() + ", not freed " + count(npcs, Event.NOT_FREED));
+        }
+        long nearWall = m.spells().started(true) - baseNearWall;
+        if (nearWall != 0) {
+            failed.add(nearWall + " stuck spells near a wall");
+        }
+        if (failed.isEmpty()) {
+            return null;
+        }
+        // the spells' own lines, so a CI failure says where and why without the run log
+        StringBuilder lines = new StringBuilder();
+        int shown = 0;
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            String text = line.text();
+            if (line.tick() >= phaseTick && shown < 16 && (text.contains("stuck") || text.contains("freed")
+                || text.contains("goes on without") || text.contains("own leg"))) {
+                lines.append("\n  ").append(line.tick() - phaseTick).append(": ").append(text);
+                shown++;
+            }
+        }
+        return String.join("; ", failed) + lines;
     }
 
     /** The local legs of this phase (link M6): found by K&K, walked with the engine's search, no path either way. */
@@ -196,6 +268,7 @@ public final class NpcMovementReport {
         NpcNavigationMetrics m = npcs.metrics();
         add("folds", count(npcs, Event.GROUP_FOLD) + reasons(m, Event.GROUP_FOLD));
         add("narrows", count(npcs, Event.GROUP_NARROW) + reasons(m, Event.GROUP_NARROW));
+        add("merges", count(npcs, Event.GROUP_MERGE) + reasons(m, Event.GROUP_MERGE));
         add("reforms", count(npcs, Event.GROUP_REFORM));
         add("widens", count(npcs, Event.GROUP_WIDEN));
         List<String> changes = new ArrayList<>();
@@ -205,7 +278,7 @@ public final class NpcMovementReport {
             }
             String text = line.text();
             if (text.startsWith("group ") && (text.contains(" folds ") || text.contains(" narrows ")
-                || text.contains(" takes up ") || text.contains(" widens "))) {
+                || text.contains(" takes up ") || text.contains(" widens ") || text.contains(" merges its lanes "))) {
                 changes.add(shortChange(text, where));
             }
         }
@@ -239,7 +312,7 @@ public final class NpcMovementReport {
     /** "folds (door) at 13 2 7" from a width line, the position in box coordinates (floor y). */
     static String shortChange(String line, NpcMovementScene where) {
         String what = line.contains(" folds ") ? "fold" : line.contains(" narrows ") ? "narrow"
-            : line.contains(" takes up ") ? "reform" : "widen";
+            : line.contains(" merges its lanes ") ? "merge" : line.contains(" takes up ") ? "reform" : "widen";
         int open = line.lastIndexOf(" (");
         int at = line.lastIndexOf(" at ");
         // a reason is the bracket right before " at " after the change's text ("group 1 (name, n NPCs)" is not one)

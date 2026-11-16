@@ -163,6 +163,35 @@ public final class NavigationSettings {
     public static final Key<Integer> GROUP_WIDTH_HYSTERESIS_BLOCKS = new Key<>("group-width-hysteresis-blocks", 3,
         integer(0, 16), "blocks a narrower or wider formation width must last before a group changes to it");
     /**
+     * How a group keeps its formation (implementation plan 4c.3 decision 2, link M3; BEHAVIOR_MODEL NAV-25):
+     * {@code levels} (today: fixed widths, a column at once where 2 abreast does not fit) or {@code elastic} (the
+     * width fitted from the free width across the path, squeezed to {@code group-lateral-spacing-min} and
+     * {@code group-spacing-min} before it narrows, decided {@code group-lookahead-blocks} ahead, the same hysteresis for
+     * every change with lanes merging for short tight places, the column only as a last resort, stairs like any road,
+     * lanes by the access rules, slots re-assigned by place). Default {@code levels} until the developer has tested it.
+     */
+    public static final Key<String> GROUP_FORMATION_KEEPING = new Key<>("group-formation-keeping", "levels",
+        oneOf("levels", "elastic"), "how a group keeps its formation: levels (fixed widths) or elastic (squeeze, "
+            + "look ahead, fold last)");
+    /**
+     * Blocks between neighbours in a row that an elastic formation squeezes down to before it narrows (plan 4c.6
+     * question 5, decided 2026-11-15: 0.6, the body's width, so shoulders touch).
+     */
+    public static final Key<Double> GROUP_LATERAL_SPACING_MIN = new Key<>("group-lateral-spacing-min", 0.6,
+        decimal(0.5, 8), "blocks between neighbours in a row an elastic formation squeezes to before it narrows");
+    /**
+     * Blocks between the rows that an elastic formation closes up to while it squeezes (plan 4c.6 question 5, decided
+     * 2026-11-15: 1.0, the body's depth plus 0.4).
+     */
+    public static final Key<Double> GROUP_SPACING_MIN = new Key<>("group-spacing-min", 1.0,
+        decimal(0.6, 8), "blocks between the rows an elastic formation closes up to while it squeezes");
+    /**
+     * Blocks an elastic formation looks ahead past its own depth when it decides its width (plan 4c.6 question 8,
+     * decided 2026-11-15: the formation's depth plus 4).
+     */
+    public static final Key<Integer> GROUP_LOOKAHEAD_BLOCKS = new Key<>("group-lookahead-blocks", 4,
+        integer(0, 32), "blocks an elastic formation looks ahead of its leader past its own depth");
+    /**
      * Followers still on their way when the leader has arrived finish their trip to the goal first, then rejoin the
      * group (NAV-23, implementation plan 4b.3 items 8 to 11, decided 2026-11-15); false: they follow the leader.
      */
@@ -177,7 +206,8 @@ public final class NavigationSettings {
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
         CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, LOCAL_LEGS_CLEARANCE, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
         COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
-        GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FOLLOWERS_FINISH_TRIP, GROUP_REJOIN_BLOCKS, GROUP_REGROUP_BLOCKS,
+        GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FORMATION_KEEPING, GROUP_LATERAL_SPACING_MIN, GROUP_SPACING_MIN,
+        GROUP_LOOKAHEAD_BLOCKS, GROUP_FOLLOWERS_FINISH_TRIP, GROUP_REJOIN_BLOCKS, GROUP_REGROUP_BLOCKS,
         GROUP_CATCH_UP_SPEED);
 
     /** A resolved value and its origin ({@code scope}: the world, region or template id; null for default/global). */

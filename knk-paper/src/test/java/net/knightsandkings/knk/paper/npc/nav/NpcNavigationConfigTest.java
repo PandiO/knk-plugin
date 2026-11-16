@@ -395,6 +395,64 @@ class NpcNavigationConfigTest {
     }
 
     @Test
+    void readsTheFormationKeepingKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals("levels", defaults.value(NavigationSettings.GROUP_FORMATION_KEEPING, anywhere), "levels by default");
+        assertEquals(0.6, defaults.value(NavigationSettings.GROUP_LATERAL_SPACING_MIN, anywhere));
+        assertEquals(1.0, defaults.value(NavigationSettings.GROUP_SPACING_MIN, anywhere));
+        assertEquals(4, defaults.value(NavigationSettings.GROUP_LOOKAHEAD_BLOCKS, anywhere));
+        for (NavigationSettings.Key<?> key : List.of(NavigationSettings.GROUP_FORMATION_KEEPING,
+            NavigationSettings.GROUP_LATERAL_SPACING_MIN, NavigationSettings.GROUP_SPACING_MIN,
+            NavigationSettings.GROUP_LOOKAHEAD_BLOCKS)) {
+            assertEquals(Layer.GLOBAL, defaults.resolve(key, anywhere).layer(), "the shipped config.yml has " + key);
+        }
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                group-formation-keeping: elastic
+                group-lateral-spacing-min: 0.75
+                group-spacing-min: 1.25
+                group-lookahead-blocks: 6
+                worlds:
+                  w2:
+                    group-formation-keeping: levels
+                regions:
+                  stairhouse:
+                    group-lookahead-blocks: 2
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        net.knightsandkings.knk.core.npc.nav.group.GroupSettings.Keeping keeping =
+            net.knightsandkings.knk.core.npc.nav.group.GroupSettings.of(config.settings(), anywhere).keeping();
+        assertTrue(keeping.elastic(), "the global layer");
+        assertEquals(0.75, keeping.lateralSpacingMin());
+        assertEquals(1.25, keeping.spacingMin());
+        assertEquals(6, keeping.lookaheadBlocks());
+        assertFalse(net.knightsandkings.knk.core.npc.nav.group.GroupSettings.of(config.settings(), Scope.of("w2"))
+            .keeping().elastic(), "a world keeps levels");
+        assertEquals(2, net.knightsandkings.knk.core.npc.nav.group.GroupSettings.of(config.settings(),
+            new Scope("w", List.of("stairhouse"), null, null)).keeping().lookaheadBlocks(), "a region");
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                group-formation-keeping: wobbly
+                group-lateral-spacing-min: 0.2
+                group-spacing-min: 0.1
+                group-lookahead-blocks: 99
+            """);
+        assertEquals(4, bad.rejected().size(), bad.rejected().toString());
+        assertEquals("levels", bad.settings().value(NavigationSettings.GROUP_FORMATION_KEEPING, anywhere));
+    }
+
+    @Test
     void readsTheNarrowedFormationKeysInEveryConfigLayer() throws Exception {
         NpcNavigationConfig config = parse("""
             npc:

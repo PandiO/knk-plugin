@@ -84,6 +84,11 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         GROUP_NARROW,
         /** A group of 2 abreast or more took up a wider width again (NAV-22). */
         GROUP_WIDEN,
+        /**
+         * An elastic group passed a tight place shorter than {@code group-width-hysteresis-blocks} with its lanes merged
+         * instead of changing its width (link M3, plan 4c.3 decision 2.4).
+         */
+        GROUP_MERGE,
         /** A follower finished its trip to its slot at the goal after the leader had arrived (NAV-23). */
         GROUP_FINISH_TRIP,
         /** A follower that fell off its lane or got stuck planned its own leg back to the group's path. */
@@ -95,20 +100,29 @@ public final class NpcNavigationMetrics implements MetricsCollector {
     }
 
     /**
-     * Why a group gave up a width (implementation plan 4c.3 decision 2.8, link M1: counted and logged only, no
-     * behaviour depends on it), judged at the first path point where the width it gave up does not fit; the metric
-     * label is the lower-case name.
+     * Why a group gave up a width or merged its lanes (implementation plan 4c.3 decision 2.8; link M1 counted them,
+     * link M3's elastic formations judge them from the free width across the path), judged at the first path point
+     * where the width it gave up does not fit; the metric label is the lower-case name.
      */
     public enum FoldReason {
-        /** The path climbs or drops a block or more there: L4's rule makes a flight of stairs a column. */
+        /**
+         * The path climbs or drops a block or more there: with {@code levels} L4's rule makes a flight of stairs a
+         * column; elastic: a lane has no step of its own (its floor is not at the path's height on the flight).
+         */
         STAIR,
         /** No floor (or an unloaded chunk) where a lane would stand, or on the way out to it: the walk is too narrow. */
         NARROW,
         /** A gate door on the leader's routes is there (its box, with the followers' door margin). */
         DOOR,
-        /** A lane point has floor but other WorldGuard regions than the path's own point (a structure, a district edge). */
+        /**
+         * A lane point has floor but other WorldGuard regions than the path's own point (a structure, a district edge);
+         * elastic: regions the group's access rules do not let it enter.
+         */
         RULES,
-        /** A lane point has floor but not {@code LANE_CLEARANCE} to its side: a jutting wall piece breaks the body's room. */
+        /**
+         * A lane point has floor but not {@code LANE_CLEARANCE} to its side: a jutting wall piece breaks the body's
+         * room; elastic: the free width ends at a drop.
+         */
         EDGE;
 
         /** The lower-case name used in the log, the stats and the metric label. */
@@ -183,8 +197,8 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         return events.get(event).sum();
     }
 
-    /** The width changes that carry a reason (decision 2.8): a fold and a narrowing. */
-    public static final List<Event> WIDTH_CHANGES = List.of(Event.GROUP_FOLD, Event.GROUP_NARROW);
+    /** The width changes that carry a reason (decision 2.8): a fold, a narrowing and a merge of lanes (link M3). */
+    public static final List<Event> WIDTH_CHANGES = List.of(Event.GROUP_FOLD, Event.GROUP_NARROW, Event.GROUP_MERGE);
 
     /**
      * A group folded or narrowed for {@code reason} (decision 2.8): counts the reason under {@code change}
@@ -286,8 +300,9 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         for (Map.Entry<Event, Map<FoldReason, LongAdder>> change : foldReasons.entrySet()) {
             for (Map.Entry<FoldReason, LongAdder> reason : change.getValue().entrySet()) {
                 out.counter("knk_npc_nav_group_width_reasons_total",
-                    "Group folds and narrowings by the reason at the place the wider width did not fit.",
-                    reason.getValue().sum(), "change", change.getKey() == Event.GROUP_FOLD ? "fold" : "narrow",
+                    "Group folds, narrowings and lane merges by the reason at the place the wider width did not fit.",
+                    reason.getValue().sum(), "change", change.getKey() == Event.GROUP_FOLD ? "fold"
+                        : change.getKey() == Event.GROUP_MERGE ? "merge" : "narrow",
                     "reason", reason.getKey().label());
             }
         }

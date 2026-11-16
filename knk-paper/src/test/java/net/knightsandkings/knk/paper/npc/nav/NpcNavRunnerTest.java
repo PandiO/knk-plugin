@@ -330,9 +330,12 @@ class NpcNavRunnerTest {
         metrics.countFoldReason(fold, FoldReason.STAIR);
         metrics.countFoldReason(fold, FoldReason.DOOR);
         metrics.countFoldReason(narrow, FoldReason.EDGE);
+        var merge = net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.GROUP_MERGE;
+        metrics.countFoldReason(merge, FoldReason.NARROW);
 
         assertEquals(" (stair 2, door 1)", runner.reasons(fold));
         assertEquals(" (edge 1)", runner.reasons(narrow));
+        assertEquals(" (narrow 1)", runner.reasons(merge), "merges carry their reason too (link M3)");
     }
 
     @Test
@@ -380,7 +383,7 @@ class NpcNavRunnerTest {
             assertEquals(NpcNavState.IDLE, service.state(follower.id()), "a follower has no order of its own");
         }
         String line = runner.report(0, 0).stream().filter(l -> l.startsWith("groups ")).findFirst().orElseThrow();
-        assertTrue(line.startsWith("groups 1 (5 NPCs, ranks): trips 0 | widths: narrows 0, widens 0 | folds 0, reforms 0, "
+        assertTrue(line.startsWith("groups 1 (5 NPCs, ranks): trips 0 | widths: narrows 0, widens 0, merges 0 | folds 0, reforms 0, "
             + "folded now 0 | abreast now 2 | finished trips 0 (finishing now 0) | own legs back 0"), line);
         assertTrue(line.endsWith("road plans per group event: max 0 | local legs at once: max 0"),
             "this test's planner answers at once: " + line);
