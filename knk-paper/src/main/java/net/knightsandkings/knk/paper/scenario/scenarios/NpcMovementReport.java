@@ -321,6 +321,11 @@ public final class NpcMovementReport {
         add("stuck spells", spells + " (near a wall " + (m.spells().started(true) - baseNearWall) + ", not freed "
             + count(npcs, Event.NOT_FREED) + ", open now " + m.spells().open() + ")");
         add("recovery no path", count(npcs, Event.RECOVERY_NO_PATH));
+        if (count(npcs, Event.PUSHED) > 0 || count(npcs, Event.PUSH_RETURNED) > 0) {
+            long[] p = npcs.service().pushCounts();
+            add("pushes", count(npcs, Event.PUSHED) + " (players " + p[1] + ", attacks " + p[2] + ", returned "
+                + count(npcs, Event.PUSH_RETURNED) + ", teleported " + count(npcs, Event.PUSH_TELEPORT) + ")");
+        }
         localLegs(npcs);
         add("falls", count(npcs, Event.FELL));
         add("trespasses", count(npcs, Event.TRESPASS));

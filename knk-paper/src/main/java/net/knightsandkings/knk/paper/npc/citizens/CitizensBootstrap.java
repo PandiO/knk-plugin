@@ -92,6 +92,18 @@ public final class CitizensBootstrap {
         return java.util.Optional.empty();
     }
 
+    /**
+     * Citizens' protection of an NPC (scenarios only): a protected NPC takes no damage, so an attack knocks it back
+     * only when it is not protected. K&K's NPCs keep Citizens' default (protected).
+     */
+    public static boolean setProtected(net.knightsandkings.knk.core.npc.nav.NpcMover mover, boolean on) {
+        if (mover instanceof CitizensNpcMover citizens) {
+            citizens.npc().setProtected(on);
+            return true;
+        }
+        return false;
+    }
+
     /** Removes the runtime's NPCs and registry; safe with any factory or null. */
     public static void stop(NpcMoverFactory factory) {
         if (factory instanceof CitizensNpcRuntime runtime) {

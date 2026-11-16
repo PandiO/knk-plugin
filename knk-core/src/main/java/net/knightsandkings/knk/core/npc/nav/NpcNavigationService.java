@@ -231,6 +231,15 @@ public final class NpcNavigationService {
         public static Settings defaults() {
             return of(NavigationSettings.defaults(), NavigationSettings.Scope.of(null));
         }
+
+        /** These settings with bodies on or off ({@code collidable}), the push resistance keys kept. */
+        public Settings withCollidable(boolean on) {
+            return new Settings(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks,
+                recheckTicks, stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering,
+                corridorHalfWidth, wallClearance, localLegsClearance, plazaLines, plazaCorridorBlocks, crowdAwareness,
+                on, playersPushNpcs, pushReturn, pushExemptAfter, pushExemptWindowTicks, pushExemptTicks,
+                pushTeleportTicks);
+        }
     }
 
     private final class Nav implements NpcMover.MoverListener {
@@ -490,7 +499,7 @@ public final class NpcNavigationService {
 
     /** @param ruleChecksPerTick NPCs whose rules are checked per tick at most (NAV-13: never all at once) */
     public NpcNavigationService(Ports ports, int maxPlansInFlight, int ruleChecksPerTick) {
-        crowd.setEdgeGuarded(id -> {
+        crowd.setBodies(id -> {
             Nav nav = npcs.get(id);
             return nav != null && nav.settings.collidable();
         });
@@ -1578,8 +1587,15 @@ public final class NpcNavigationService {
      */
     // ==================== push resistance (plan 4c.4 item 7, link M7) ====================
 
-    /** A pushed NPC within this many blocks of where it returns to is back. */
-    static final double RETURNED_BLOCKS = 0.8;
+    /**
+     * A pushed NPC within this many blocks of where it returns to is back: under {@link PushWatch#STANDING_PUSH}, so
+     * a push it noticed always walks it back, and the walk back's own margin (0.3) ends within it.
+     */
+    static final double RETURNED_BLOCKS = 0.35;
+    /** An NPC with no order of its own, pushed this far from its post by another NPC, walks back (a guard). */
+    static final double NPC_SHOVE_BLOCKS = 1.0;
+    /** An unexplained push with another NPC this near is that NPC's body (two bodies 0.6 wide, and a step). */
+    static final double NPC_NEAR_BLOCKS = 1.5;
     /** A teleport home only when the NPC is further than this from home. */
     static final double TELEPORT_MIN_BLOCKS = 1.5;
     /** Ticks between two looks at the per-player exemptions whose time is up. */
@@ -1656,13 +1672,23 @@ public final class NpcNavigationService {
         PushWatch.Push p = nav.push.look(at, tick, walking, dir[0], dir[1]);
         if (p != null) {
             onPushed(nav, p, at);
-        } else if (nav.returnTo != null) {
+        }
+        if (nav.returnTo != null && (p == null || p.continued())) {
             watchReturn(nav, at);
         }
     }
 
     /** A push: counted, logged with who did it, the pusher maybe exempted, and the walk back started. */
     private void onPushed(Nav nav, PushWatch.Push p, NavPoint at) {
+        if (p.kind() == null && npcNear(nav, at)) {
+            // a body's push without a contact report (the engine reports only the pushed side of some pushes): another
+            // NPC within reach did it
+            p = new PushWatch.Push(p.from(), p.to(), NpcMover.ContactKind.NPC, null, p.walking(), false, p.continued());
+        }
+        if (p.continued()) {
+            onStillPushed(nav, p, at);
+            return;
+        }
         pushes++;
         if (p.byPlayer()) {
             pushesByPlayers++;
@@ -1695,14 +1721,69 @@ public final class NpcNavigationService {
         if (!nav.settings.pushReturn()) {
             return;
         }
-        if (p.walking() && p.kind() == NpcMover.ContactKind.NPC && !towardsDrop) {
-            return; // jostled by another NPC on its way: crowds push; it walks on
+        if (wantsReturn(nav, p, at, towardsDrop)) {
+            startReturn(nav, nav.returnTo != null ? nav.returnTo : p.from(), at);
         }
-        if (nav.goal == null && groupFollower.test(id)) {
-            return; // a follower: its group's slot walks bring it back
+    }
+
+    /**
+     * Whether a push makes the NPC walk back: always after a player, an attack or something unknown; after another
+     * NPC's body only towards a drop, or for an NPC standing at its post (no order) moved {@link #NPC_SHOVE_BLOCKS} or
+     * more (crowds jostle; on its way, in a queue or at its goal it is the crowd's business). Never for a group
+     * follower (its group's slot walks bring it back).
+     */
+    private boolean wantsReturn(Nav nav, PushWatch.Push p, NavPoint at, boolean towardsDrop) {
+        if (!nav.settings.pushReturn() || (nav.goal == null && groupFollower.test(nav.mover.id()))) {
+            return false;
         }
-        NavPoint home = nav.returnTo != null ? nav.returnTo : p.from();
-        startReturn(nav, home, at);
+        if (p.kind() != NpcMover.ContactKind.NPC || towardsDrop) {
+            return true;
+        }
+        return nav.goal == null && !p.walking() && at.horizontalDistance(p.from()) >= NPC_SHOVE_BLOCKS;
+    }
+
+    /**
+     * A look in an open push (the body is still being moved): an NPC found back too soon walks back again; when the
+     * push now goes towards a drop, the edge guard acts at once: a player pushing is exempted (with
+     * {@code players-push-npcs} on), and an NPC that was let walk on (jostled by another NPC) walks back after all.
+     */
+    private void onStillPushed(Nav nav, PushWatch.Push p, NavPoint at) {
+        boolean towardsDrop = EdgeGuard.towardsDrop(ports.world(), p.from(), at);
+        if (nav.returnTo == null && at.horizontalDistance(p.from()) > RETURNED_BLOCKS
+            && wantsReturn(nav, p, at, towardsDrop)) {
+            startReturn(nav, p.from(), at); // it was back too soon: the push carried it on
+        }
+        if (!towardsDrop) {
+            return;
+        }
+        int id = nav.mover.id();
+        if (nav.settings.playersPushNpcs() && p.byPlayer() && p.kind() == NpcMover.ContactKind.PLAYER
+            && !pushLedger.isExempt(id, p.by())) {
+            pushLedger.exempted(id, p.by(), tick + nav.settings.pushExemptTicks());
+            collision.exempt(id, p.by(), true);
+            ports.metrics().count(Event.PUSH_EXEMPT);
+            ports.log().accept(String.format(Locale.ROOT, "%s: player %s pushed it towards a drop at %s; collision "
+                + "between them off for %d s", nav.mover.name(), p.by(), NavGeometry.block(at),
+                nav.settings.pushExemptTicks() / 20));
+        }
+        if (nav.returnTo == null && wantsReturn(nav, p, at, true)) {
+            startReturn(nav, p.from(), at);
+        }
+    }
+
+    /** Another spawned NPC here stands within {@link #NPC_NEAR_BLOCKS} of {@code at} (looked at only on a push). */
+    private boolean npcNear(Nav nav, NavPoint at) {
+        for (Nav other : npcs.values()) {
+            if (other == nav || !other.mover.isSpawned()) {
+                continue;
+            }
+            NavPoint o = other.mover.position().orElse(null);
+            if (o != null && o.world().equals(at.world()) && Math.abs(o.y() - at.y()) < 2
+                && o.horizontalDistance(at) <= NPC_NEAR_BLOCKS) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Starts the walk back to {@code home}: a step of the order for a walking NPC, else a walk of the body only. */
@@ -1835,6 +1916,7 @@ public final class NpcNavigationService {
 
     private void returned(Nav nav, NavPoint at, String how) {
         long ticks = tick - nav.returnSince;
+        nav.push.settle(nav.returnTo); // a post stays where it was, it does not creep with each return
         nav.returnTo = null;
         nav.bodyReturn = false;
         pushReturns++;

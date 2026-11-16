@@ -15,7 +15,8 @@ import net.knightsandkings.knk.core.npc.nav.NpcMover;
  *     stand is a push.</li>
  * </ol>
  * One push is one episode: the looks within {@link #EPISODE_TICKS} of the last unexplained one belong to it, so a
- * player leaning on an NPC for three seconds gives about three pushes, not thirty. Each push says where the NPC was
+ * player leaning on an NPC for three seconds gives about three pushes, not thirty; those later looks come back as
+ * {@link Push#continued()}, so the edge guard sees where the push goes. Each push says where the NPC was
  * before it ({@link Push#from()}: its last explained position walking, or where it stood), which is where it returns
  * to; after it the watch measures from where the push left the body. The watch knows nothing of routes or the world;
  * main thread; one per NPC.
@@ -49,9 +50,11 @@ public final class PushWatch {
      * @param by      the engine's id of who touched it, or null
      * @param walking whether it was walking when pushed
      * @param playerAttack for {@link NpcMover.ContactKind#ATTACK}: whether a player attacked
+     * @param continued    a look later in an open push (the body is still being moved): not a new push, but the
+     *                     edge guard looks again; {@link #from} is where the push began
      */
     public record Push(NavPoint from, NavPoint to, NpcMover.ContactKind kind, String by, boolean walking,
-                       boolean playerAttack) {
+                       boolean playerAttack, boolean continued) {
 
         /** Horizontal blocks between {@link #from} and {@link #to}. */
         public double blocks() {
@@ -161,11 +164,10 @@ public final class PushWatch {
         }
         boolean open = tick - episodeTick <= EPISODE_TICKS;
         episodeTick = tick;
-        if (open) {
-            return null; // the same push goes on
+        if (!open) {
+            episodeFrom = before;
+            pushes++;
         }
-        episodeFrom = before;
-        pushes++;
         NpcMover.ContactKind kind = null;
         String by = null;
         boolean playerAttack = false;
@@ -183,7 +185,7 @@ public final class PushWatch {
             kind = NpcMover.ContactKind.OTHER;
             by = other;
         }
-        return new Push(before, feet, kind, by, walking, playerAttack);
+        return new Push(open ? episodeFrom : before, feet, kind, by, walking, playerAttack, open);
     }
 
     /** Where the open push episode began (where the NPC returns to), or null when none is open. */
@@ -201,6 +203,16 @@ public final class PushWatch {
         anchor = walking ? feet : null;
         episodeFrom = null;
         episodeTick = Long.MIN_VALUE / 2;
+    }
+
+    /**
+     * The NPC is back where a push took it from ({@code home}): a standing NPC's post is {@code home} again, not the
+     * spot within a few tenths of it where its walk back ended, so its post does not creep with each push.
+     */
+    public void settle(NavPoint home) {
+        if (rest != null && home != null && home.world().equals(rest.world())) {
+            rest = home;
+        }
     }
 
     /** Where the standing NPC came to stand (its post while it has no order), or null while it walks. */

@@ -212,6 +212,19 @@ class NpcNavigationPushTest {
     }
 
     @Test
+    void anUnreportedPushWithAnotherNpcAtItsSideIsThatNpcsJostle() {
+        FakeMover m = walking(1, settings(true, false));
+        walk(m, 4);
+        register(2, feet(m.position.x() + 0.3, 1.6), settings(true, false));
+        int follows = m.follows.size();
+        m.position = feet(m.position.x() - 0.6, 0.6); // back half a block, nothing reported it
+        ticks(2);
+        assertEquals(1, metrics.total(Event.PUSHED));
+        assertFalse(service.returning(1), "the NPC beside it did it: it walks on");
+        assertEquals(follows, m.follows.size());
+    }
+
+    @Test
     void aStandingNpcPushedFromItsPostWalksBackToIt() {
         FakeMover m = register(1, feet(5.5, 5.5), settings(true, false));
         ticks(4);
@@ -283,6 +296,24 @@ class NpcNavigationPushTest {
         assertTrue(policy.calls.contains("exempt 1 steve"), "the first push already: " + policy.calls);
         assertTrue(log.stream().anyMatch(l -> l.contains("(towards a drop)")), log.toString());
         assertTrue(log.stream().anyMatch(l -> l.contains("pushed it towards a drop")), log.toString());
+        assertTrue(service.returning(1));
+    }
+
+    @Test
+    void aPushThatReachesTheEdgeLaterInTheSameEpisodeStillExemptsAtOnce() {
+        world.floor = (x, z) -> z >= 8 ? 50 : 64;
+        FakeMover m = register(1, feet(5.5, 5.5), settings(true, true));
+        ticks(4);
+        m.listener.contact(m, new Contact(ContactKind.PLAYER, "steve"));
+        m.position = feet(5.5, 6.1); // not next to the drop yet: one push of three
+        ticks(2);
+        assertEquals(1, metrics.total(Event.PUSHED));
+        assertFalse(policy.calls.contains("exempt 1 steve"));
+        m.listener.contact(m, new Contact(ContactKind.PLAYER, "steve"));
+        m.position = feet(5.5, 7.3); // the same push goes on, onto the edge cell
+        ticks(2);
+        assertEquals(1, metrics.total(Event.PUSHED), "still one push");
+        assertTrue(policy.calls.contains("exempt 1 steve"), "exempted as soon as it goes towards the drop");
         assertTrue(service.returning(1));
     }
 

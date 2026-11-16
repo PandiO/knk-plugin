@@ -102,7 +102,9 @@ class PushWatchTest {
         assertNotNull(watch.look(at(6.0, 65, 5.5), 2, false, 0, 0));
         for (int t = 4; t <= 20; t += 2) {
             watch.contact(new Contact(ContactKind.PLAYER, "steve"), t - 1);
-            assertNull(watch.look(at(6.0 + 0.5 * (t - 2) / 2, 65, 5.5), t, false, 0, 0), "the same push, tick " + t);
+            PushWatch.Push same = watch.look(at(6.0 + 0.5 * (t - 2) / 2, 65, 5.5), t, false, 0, 0);
+            assertTrue(same != null && same.continued(), "the same push goes on, tick " + t);
+            assertEquals(at(5.5, 65, 5.5), same.from(), "from where it began");
         }
         assertEquals(1, watch.pushes());
         // still where the push left it: nothing new

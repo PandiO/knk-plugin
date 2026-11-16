@@ -75,7 +75,7 @@ class NpcNavigationRulesTest {
     void setUp() {
         metrics.setEnabled(true);
         service = service(NpcNavigationService.DEFAULT_RULE_CHECKS_PER_TICK);
-        mover = register(1, START, Settings.defaults());
+        mover = register(1, START, Settings.defaults().withCollidable(false)); // fake bodies jump: no push resistance here
     }
 
     private NpcNavigationService service(int ruleChecksPerTick) {
