@@ -23,7 +23,7 @@ class NpcMovementReportTest {
         when(world.getName()).thenReturn("world");
         return NpcMovementScene.stairHouse(new ScenarioScene("report-test", 0, world, 30_000, 100, 30_000,
             new ScenarioServices(null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null,
-                () -> null, () -> null, () -> null, () -> null, () -> null)));
+                () -> null, () -> null, () -> null, () -> null, () -> null, () -> null)));
     }
 
     @Test

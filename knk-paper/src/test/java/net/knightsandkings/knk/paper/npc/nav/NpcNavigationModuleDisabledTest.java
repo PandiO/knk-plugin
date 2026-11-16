@@ -111,7 +111,7 @@ class NpcNavigationModuleDisabledTest {
         when(plugin.getLogger()).thenReturn(Logger.getLogger("test"));
         KnkAdminCommand knk = mock(KnkAdminCommand.class);
 
-        NpcNavigationModule.start(plugin, knk, null, null);
+        NpcNavigationModule.start(plugin, knk, null, (java.util.function.Supplier<net.knightsandkings.knk.paper.regions.RegionIds>) null);
 
         ArgumentCaptor<net.knightsandkings.knk.paper.commands.CommandMetadata> metadata =
             ArgumentCaptor.forClass(net.knightsandkings.knk.paper.commands.CommandMetadata.class);

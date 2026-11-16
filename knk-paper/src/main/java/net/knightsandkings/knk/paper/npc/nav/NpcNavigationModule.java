@@ -38,7 +38,12 @@ public final class NpcNavigationModule {
     private final NpcNavigationConfig config;
     private final NpcNavigationMetrics metrics = new NpcNavigationMetrics();
     private final NpcEventAudit audit;
-    private final RegionIds regionIds;
+    /**
+     * The WorldGuard region query, asked for when it is used (PandiO/knk-workspace#668): the module starts in
+     * {@code registerCommands}, before the plugin builds its region tracker, so a query handed over at start was
+     * always null on a server and every NPC rule check saw no region at all.
+     */
+    private final java.util.function.Supplier<RegionIds> regionIds;
     private NpcMoverFactory factory;
     /** Players' collision with NPCs (link M7), while route following runs. */
     private BukkitCollisionPolicy collisionPolicy;
@@ -58,11 +63,12 @@ public final class NpcNavigationModule {
     /** Ends the subscription to road navigation's gate and availability events (PandiO/knk-workspace#361). */
     private Runnable ruleEvents;
 
-    private NpcNavigationModule(JavaPlugin plugin, NpcNavigationConfig config, RegionIds regionIds) {
+    private NpcNavigationModule(JavaPlugin plugin, NpcNavigationConfig config,
+                                java.util.function.Supplier<RegionIds> regionIds) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.config = config;
-        this.regionIds = regionIds;
+        this.regionIds = regionIds == null ? () -> null : regionIds;
         this.audit = new NpcEventAudit(plugin);
     }
 
@@ -71,11 +77,13 @@ public final class NpcNavigationModule {
      * (always, so status explains why NPC navigation is off) and the metrics.
      *
      * @param metricsRegistrar adds a collector to the running metrics endpoint, or null when metrics are off
-     * @param regionIds        WorldGuard region lookup for the status command's region layer, or null
+     * @param regionIds        the WorldGuard region lookup of the NPC rule checks and the settings' region layer, asked
+     *                         for when used (it may not exist yet when the module starts); null, or a null answer: no
+     *                         regions known
      */
     public static NpcNavigationModule start(JavaPlugin plugin, KnkAdminCommand knk,
                                             java.util.function.Consumer<net.knightsandkings.knk.core.metrics.MetricsCollector> metricsRegistrar,
-                                            RegionIds regionIds) {
+                                            java.util.function.Supplier<RegionIds> regionIds) {
         return start(plugin, knk, metricsRegistrar, regionIds, null);
     }
 
@@ -87,7 +95,7 @@ public final class NpcNavigationModule {
      */
     public static NpcNavigationModule start(JavaPlugin plugin, KnkAdminCommand knk,
                                             java.util.function.Consumer<net.knightsandkings.knk.core.metrics.MetricsCollector> metricsRegistrar,
-                                            RegionIds regionIds,
+                                            java.util.function.Supplier<RegionIds> regionIds,
                                             java.util.function.Supplier<net.knightsandkings.knk.paper.navigation.NavigationService> navigation) {
         NpcNavigationConfig config = NpcNavigationConfig.from(plugin.getConfig().getConfigurationSection(NpcNavigationConfig.PATH));
         NpcNavigationModule module = new NpcNavigationModule(plugin, config, regionIds);
@@ -186,6 +194,17 @@ public final class NpcNavigationModule {
         return factory == null ? unavailable : null;
     }
 
+    /**
+     * The world route following reads regions and blocks from: the recheck of an NPC's way ahead, the trespass
+     * guard, and a group's follower lanes and guard. PandiO/knk-workspace#668: built with the region query as it is
+     * when asked (the plugin's region tracker is built after this module starts; a query taken at start was null on
+     * every server, so those checks saw no region and let every NPC in). Scenarios with domain rules read regions
+     * through it, so they see what the server's NPC checks see.
+     */
+    public BukkitNavWorld rulesWorld() {
+        return new BukkitNavWorld(regionIds.get());
+    }
+
     /** Whether NPC route following runs (built on first use of {@code /knk npc nav}; PandiO/knk-workspace#506). */
     public boolean navigating() {
         return service != null;
@@ -230,7 +249,11 @@ public final class NpcNavigationModule {
             || !(walk.preparer() instanceof net.knightsandkings.knk.paper.navigation.walk.WalkLegPreparer legs)) {
             return "walk paths are off (navigation.walk.enabled): local legs need their capture";
         }
-        BukkitNavWorld world = new BukkitNavWorld(regionIds);
+        BukkitNavWorld world = rulesWorld();
+        if (!world.knowsRegions()) {
+            logger.warning("[NPC] no WorldGuard region query: the NPC rule checks see no region, so domain entry and "
+                + "exit rules hold only where a route is planned");
+        }
         NpcNavLog log = new NpcNavLog(plugin.getDataFolder().toPath(), logger);
         service = new NpcNavigationService(new NpcNavigationService.Ports(nav::planRoadFor,
             new NpcLegPreparer(legs, walk.searches(), task -> Bukkit.getScheduler().runTask(plugin, task),
@@ -395,10 +418,11 @@ public final class NpcNavigationModule {
      * a domain a higher priority than its parent), then by id. The innermost region's override wins.
      */
     List<String> regionsOuterToInner(org.bukkit.Location location) {
-        if (regionIds == null) {
+        RegionIds regions = regionIds.get();
+        if (regions == null) {
             return List.of();
         }
-        com.sk89q.worldguard.protection.ApplicableRegionSet set = regionIds.applicable(location);
+        com.sk89q.worldguard.protection.ApplicableRegionSet set = regions.applicable(location);
         if (set == null) {
             return List.of();
         }

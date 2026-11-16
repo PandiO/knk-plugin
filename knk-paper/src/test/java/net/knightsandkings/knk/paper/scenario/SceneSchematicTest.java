@@ -47,7 +47,7 @@ class SceneSchematicTest {
     private ScenarioScene scene() {
         return new ScenarioScene("scene-test", 1, world, 64, 70, 0,
             new ScenarioServices(null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null,
-                () -> null, () -> null, () -> null, () -> null, () -> null));
+                () -> null, () -> null, () -> null, () -> null, () -> null, () -> null));
     }
 
     // ==================== reading ====================
