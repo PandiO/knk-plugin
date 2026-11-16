@@ -204,8 +204,8 @@ public class UserAccountListener implements Listener {
                 online.sendMessage(getPrefixComponent().append(linkPrompt(onboarding.unlinkedReminder())));
             }
         } catch (Exception ex) {
-            logger.severe("Failed to display join messages for " + online.getName() + ": " + ex.getMessage());
-            ex.printStackTrace();
+            logger.log(java.util.logging.Level.SEVERE,
+                "Failed to display join messages for " + online.getName() + ": " + ex.getMessage(), ex);
 
             online.sendMessage(
                 getPrefixComponent()
