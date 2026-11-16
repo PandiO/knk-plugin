@@ -51,6 +51,43 @@ public final class WaypointChain {
     }
 
     /**
+     * The waypoints bridged as far as the walk allows (link B2, PandiO/knk-workspace#671, decision 34.1): every step
+     * a straight walk, with the bridge's extra waypoints where needed, up to the first step the bridge cannot make.
+     * That step is not left as it is (a straight walk across air or onto another level): its target comes back as
+     * {@link Split#gap()} for a local leg, and nothing after it is in {@link Split#walk()}.
+     *
+     * @param from      where the walk starts (the NPC's feet), or null
+     * @param waypoints feet positions
+     */
+    public static Split split(NavWorld world, NavPoint from, List<NavPoint> waypoints) {
+        List<NavPoint> out = new ArrayList<>(waypoints.size() + 4);
+        NavPoint prev = from;
+        for (int i = 0; i < waypoints.size(); i++) {
+            NavPoint p = waypoints.get(i);
+            if (prev != null && !NavGeometry.straightWalkable(world, prev, p)) {
+                List<NavPoint> extra = bridge(world, prev, p);
+                if (extra.isEmpty()) {
+                    return new Split(List.copyOf(out), p, i);
+                }
+                out.addAll(extra);
+            }
+            out.add(p);
+            prev = p;
+        }
+        return new Split(List.copyOf(out), null, -1);
+    }
+
+    /**
+     * A bridged waypoint list ({@link #split}).
+     *
+     * @param walk     the waypoints to walk, every step a straight walk (empty when the first step is the gap)
+     * @param gap      the waypoint the bridge could not reach from the one before it (or from the start), or null
+     * @param gapIndex the gap's index in the list given to {@link #split}, or -1
+     */
+    public record Split(List<NavPoint> walk, NavPoint gap, int gapIndex) {
+    }
+
+    /**
      * The extra waypoints between two feet positions whose straight walk leaves the floor: the turns of the shortest
      * cell path on the walk, each step between them a straight walk. Empty when there is no such path in the box.
      */

@@ -281,6 +281,64 @@ class NpcNavigationServiceTest {
     }
 
     @Test
+    void theNextStretchIsAppendedToTheWaypointsNotYetWalked() {
+        // link B2 (decision 34.1): the waypoints left of the first stretch stay in front of the next one
+        goFar();
+        lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
+        List<NavPoint> first = mover.follows.get(0);
+
+        mover.position = first.get(first.size() - 3);
+        ticks(NpcNavigationService.HANDOVER_TICKS);
+
+        assertEquals(2, mover.follows.size());
+        List<NavPoint> second = mover.follows.get(1);
+        assertEquals(first.subList(first.size() - 2, first.size()), second.subList(0, 2),
+            "the two waypoints it has not walked yet come first");
+        assertTrue(second.size() > 2, "then the new stretch");
+        assertEquals(second, service.trailOf(mover.id()));
+    }
+
+    @Test
+    void theHandoverWaitsForProgressAlongTheWaypointsNotForTheHorizontalDistance() {
+        // link B2: the stretch end is under 4 blocks away horizontally but 6 blocks up (the flight above)
+        goFar();
+        lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
+        List<NavPoint> first = mover.follows.get(0);
+        NavPoint end = first.get(first.size() - 1);
+
+        mover.position = new NavPoint(WORLD, end.x() - 2, end.y() - 6, end.z());
+        ticks(NpcNavigationService.HANDOVER_TICKS * 2);
+
+        assertEquals(1, mover.follows.size(), "a flight below the stretch end is not near it");
+    }
+
+    @Test
+    void aStepOfTheLineTheBridgeCannotMakeIsWalkedAsALocalLeg() {
+        // link B2 (decision 34.1, item 4): the road crosses a drop (floor 57) from x 10 to x 14 with no walk beside it
+        world.floor = (x, z) -> x >= 10 && x <= 14 ? 57 : 64;
+        goFar();
+        lastRoadAsk().answer().complete(road(floor(0.5, 64, 0.5), floor(100.5, 64, 0.5)));
+        List<NavPoint> first = mover.follows.get(0);
+
+        assertTrue(first.get(first.size() - 1).x() < 10, "walked up to the drop: " + first);
+        assertTrue(log.stream().anyMatch(l -> l.contains("a local leg takes that step")), log.toString());
+        assertTrue(legAsks.isEmpty());
+
+        mover.arrive();
+        service.tick();
+
+        assertEquals(1, legAsks.size(), "then a local leg across");
+        assertTrue(lastLegAsk().target().x() > 14, "to the waypoint after the drop: " + lastLegAsk().target());
+        lastLegAsk().answer().complete(Prepared.ready(LEG));
+        assertEquals(1, mover.walks.size());
+        mover.arrive();
+
+        assertEquals(2, mover.follows.size(), "the line goes on from there");
+        assertTrue(mover.follows.get(1).get(0).x() >= mover.walks.get(0).x() - 1.5, mover.follows.get(1).toString());
+        assertEquals(1, service.gapLegs());
+    }
+
+    @Test
     void offRoadEndsAreWalkedAsLocalLegsBeforeAndAfterTheLine() {
         // the road runs along z 20; the NPC starts and the goal lies off it
         goFar();

@@ -66,6 +66,10 @@ public final class NavGroup {
     static final double HANDOVER = 4;
     /** The leader is on its route line within this many blocks of it. */
     static final double ON_LINE = 2.5;
+    /** The leader this many blocks or more below the group path where it last was on it has fallen (link B2). */
+    static final double FELL_BELOW = 1.75;
+    /** After this many ticks below the path, the path follows a fallen leader again (link B2). */
+    static final int FELL_HOLD_TICKS = 30 * 20;
     /** Off the route line, a footstep of the leader joins the path every this many blocks. */
     static final double FOOTSTEP = 1.0;
     /** A follower's place on the path is looked for this many points ahead of its last one. */
@@ -251,6 +255,10 @@ public final class NavGroup {
     private final Map<Integer, Boolean> doorVerdicts = new HashMap<>();
     private long verdictTick;
     private long now;
+    /** Since when the leader is below the path ({@link #leaderFell}), or -1. */
+    private long fellSince = -1;
+    /** How often the leader fell below the group path (link B2; diagnostics). */
+    private int leaderFalls;
     private boolean disbanded;
     /** A rule changed since the last look: the next tick looks at the group whatever its turn. */
     private boolean rulesPending;
@@ -402,6 +410,11 @@ public final class NavGroup {
     }
 
     /** Followers the group goes on without (their own legs back keep failing). */
+    /** How often the leader fell below the group path, its fall kept out of it (link B2). */
+    public int leaderFalls() {
+        return leaderFalls;
+    }
+
     public int lost() {
         int n = 0;
         for (Follower f : followers) {
@@ -713,9 +726,42 @@ public final class NavGroup {
         closeUp(leaderState, maxLag);
     }
 
+    /**
+     * Whether the leader, walking a route line, is well below the group path where it last was on it (more than
+     * {@value #FELL_BELOW} blocks under the lower of its path point and the one before): it fell, off a landing or a
+     * flight (link B2, PandiO/knk-workspace#671, decision 34.1). Its points there are no group path points, so no
+     * follower walks off the same edge; the path waits for the leader to come back up to it or on along its line. After
+     * {@value #FELL_HOLD_TICKS} ticks below, the path follows the leader again as before.
+     */
+
+    private boolean leaderFell(RouteFollower follower, NavPoint at) {
+        if (follower == null || leaderIdx < 0 || leaderIdx >= path.size()) {
+            fellSince = -1;
+            return false;
+        }
+        double floor = path.get(leaderIdx).floor.y();
+        if (leaderIdx > 0) {
+            floor = Math.min(floor, path.get(leaderIdx - 1).floor.y());
+        }
+        if (at.y() >= floor + 1 - FELL_BELOW) {
+            fellSince = -1;
+            return false;
+        }
+        if (fellSince < 0) {
+            fellSince = now;
+            leaderFalls++;
+            ports.log().accept(String.format(Locale.ROOT, "group %d (%s): the leader is %.1f blocks below the group "
+                + "path; its fall is kept out of the path", id, leader.name(), floor + 1 - at.y()));
+        }
+        return now - fellSince < FELL_HOLD_TICKS;
+    }
+
     /** Keeps the path up to date with where the leader is: its route line while it is on it, else its footsteps. */
     private void trackLeader(NavPoint at) {
         RouteFollower follower = ports.navigation().followerOf(leader.id());
+        if (leaderFell(follower, at)) {
+            return; // no point of the leader's fall goes into the group path (link B2, decision 34.1)
+        }
         int leaderFloorY = at.blockY() - 1;
         boolean on = false;
         if (follower != null) {

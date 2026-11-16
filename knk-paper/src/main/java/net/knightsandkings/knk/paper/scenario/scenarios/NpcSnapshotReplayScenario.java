@@ -33,7 +33,9 @@ import net.knightsandkings.knk.paper.scenario.SnapshotReplay;
  * street east of the house (1436 43 -492) up all five flights to the top hall (1415 76 -546), each reported by
  * {@link ClimbWatch} (falls, places skipped, handovers onto another level, the 30 s guards), twice: with the stored
  * settings (the merged dev config: {@code elastic}, spacing 1.5, 40/40, stretches of 32 blocks) and with the settings
- * of the failed smoke test (decision 35.3: {@code levels}, spacing 2.0, 60/60). B2 to B4 turn them into checks.
+ * of the failed smoke test (decision 35.3: {@code levels}, spacing 2.0, 60/60). Since link B2 (PandiO/knk-workspace#671)
+ * each walk fails on a fall from a flight or landing, a handover onto another level, a turn released by the 30 s guard
+ * after its holder fell ({@link ClimbWatch#failures}), a leader that does not arrive and a lost follower.
  */
 public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>, SizedScene {
 
@@ -64,7 +66,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
 
     @Override
     public String description() {
-        return "Report: the developer's snapshot of quarry-to-keep replayed (real blocks, regions, line, settings); "
+        return "The developer's snapshot of quarry-to-keep replayed (real blocks, regions, line, settings); "
             + "a leader alone and a group of 20 up the stair house";
     }
 
@@ -181,8 +183,12 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .check("report: the leader alone (" + config + ")", () -> {
                 report(report.get(), npcs.get(), watch.get(), alone, leaderResult.get(), t[1], LEADER_TICKS, null,
                     placed.get(), config).log("a leader alone, " + config);
+                List<String> failures = new ArrayList<>(watch.get().failures());
+                if (!(leaderResult.get() instanceof NavigationResult.Arrived)) {
+                    failures.add("the leader did not arrive: " + leaderResult.get());
+                }
                 npcs.get().remove(alone);
-                return null;
+                return failures.isEmpty() ? null : String.join("; ", failures);
             });
 
         // a group of 20
@@ -217,8 +223,15 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .check("report: the group of 20 (" + config + ")", () -> {
                 report(report.get(), npcs.get(), watch.get(), members, groupResult.get(), g[1], GROUP_TICKS,
                     group.get(), placed.get(), config).log("a group of 20 in ranks, " + config);
+                List<String> failures = new ArrayList<>(watch.get().failures());
+                if (!(groupResult.get() instanceof NavigationResult.Arrived)) {
+                    failures.add("the group's leader did not arrive: " + groupResult.get());
+                }
+                if (group.get().lost() > 0) {
+                    failures.add(group.get().lost() + " followers lost");
+                }
                 npcs.get().stop();
-                return null;
+                return failures.isEmpty() ? null : String.join("; ", failures);
             });
     }
 
@@ -236,13 +249,17 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .add("places skipped or walked back to", ClimbWatch.first(watch.skips(), 4))
             .add("stretch handovers", watch.handovers())
             .add("handovers onto another level", ClimbWatch.first(watch.crossLevel(), 4))
+            .add("new stretches starting off the feet level (B1's measure)", watch.stretchOffLevel().size())
+            .add("falls from the climb", watch.fallsFromClimb().size())
             .add("queue let go by the 30 s guard", crowd.overdue())
             .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))
+            .add("line steps walked as local legs", npcs.service().gapLegs())
             .add("stuck spells", report.count(npcs, Event.STUCK_ENGINE) + report.count(npcs, Event.STUCK_NO_PROGRESS))
             .add("trespasses", report.count(npcs, Event.TRESPASS));
         if (group != null) {
-            report.add("width now", group.width().describe()).add("lost", group.lost());
+            report.add("width now", group.width().describe()).add("lost", group.lost())
+                .add("leader falls kept out of the group path", group.leaderFalls());
         }
         return report.crowd(npcs);
     }

@@ -23,11 +23,17 @@ import net.knightsandkings.knk.paper.scenario.NpcMovementScene;
  *   {@value #FALL_WINDOW_TICKS} ticks, with where the fall started and where the body landed.</li>
  *   <li><b>Skipped places:</b> the body reaches a flight or landing of the climb ({@link NpcMovementScene#climbPlace})
  *   more than one place after the last one it stood on, or goes back to an earlier one (after a fall).</li>
- *   <li><b>Stretch handovers</b> of an NPC with an order of its own: how many, and how many handed it a stretch whose
- *   nearest waypoint is {@value #LEVEL_BLOCKS} blocks or more above or below its feet (a stretch on another flight of
- *   the stacked hairpins: decision 34's main cause).</li>
+ *   <li><b>Stretch handovers</b> of an NPC with an order of its own: how many, and how many sent it onto another
+ *   level: after the handover, the waypoint it walks to next is {@value #LEVEL_BLOCKS} blocks or more above or below
+ *   its feet (a stretch on another flight of the stacked hairpins: decision 34's main cause). Link B2 appends the
+ *   stretch to the waypoints not yet walked, so the next waypoint is that list's first
+ *   ({@link NpcNavigationService#trailOf}). B1's own measure, the new stretch's waypoint nearest the feet
+ *   horizontally, is still counted ({@link #stretchOffLevel()}, report only): with stretches handed out by 3D progress
+ *   a stretch going up the next flight is a flight above the NPC before it gets there.</li>
+ *   <li><b>Turns dropped by the 30 s guard</b>, and of those the ones whose holder fell while it held the turn.</li>
  * </ol>
- * Report only: nothing here fails a scenario; links B2 to B4 turn these numbers into checks.
+ * Since link B2 (PandiO/knk-workspace#671) the climb and the replay fail on falls from a flight or landing, on
+ * handovers onto another level and on turns dropped after a fall ({@link #failures}).
  */
 final class ClimbWatch {
 
@@ -53,6 +59,9 @@ final class ClimbWatch {
     private final List<String> falls = new ArrayList<>();
     private final List<String> skips = new ArrayList<>();
     private final List<String> crossLevel = new ArrayList<>();
+    private final List<String> stretchOffLevel = new ArrayList<>();
+    private final List<String> fallsFromClimb = new ArrayList<>();
+    private final List<String> fallenTurns = new ArrayList<>();
     private final List<String> staleTurns = new ArrayList<>();
     private int handovers;
     private long tick;
@@ -109,6 +118,7 @@ final class ClimbWatch {
         List<NavPoint> sent;
         long turnTicks;
         NavPoint turnAt;
+        boolean fellInTurn;
         final Map<List<NavPoint>, Boolean> seen = new IdentityHashMap<>();
     }
 
@@ -142,8 +152,13 @@ final class ClimbWatch {
         }
         boolean fallen = top - at.y() > FALL_BLOCKS;
         if (fallen && !body.falling && mover.isSpawned()) {
-            falls.add(String.format(Locale.ROOT, "%s from %s to %s", mover.name(), house.realBlock(body.highest),
-                house.realBlock(at)));
+            String line = String.format(Locale.ROOT, "%s from %s to %s", mover.name(), house.realBlock(body.highest),
+                house.realBlock(at));
+            falls.add(line);
+            if (house.place(body.highest) >= 0) {
+                fallsFromClimb.add(line); // from a flight, a landing, the hall or the street of the climb
+            }
+            body.fellInTurn |= body.turnTicks > 0;
         }
         body.falling = fallen;
     }
@@ -177,6 +192,17 @@ final class ClimbWatch {
             return; // the first stretch of an order is no handover
         }
         handovers++;
+        List<NavPoint> trail = service.trailOf(mover.id());
+        if (trail != null && !trail.isEmpty()) {
+            // the waypoint it walks to next: the first of the list it was given (the rest of the old stretch, then
+            // the new one; or the bridge from its feet)
+            NavPoint next = trail.get(0);
+            double up = Math.min(Math.abs(next.y() - at.y()), Math.abs(next.y() + 1 - at.y()));
+            if (up >= LEVEL_BLOCKS) {
+                crossLevel.add(String.format(Locale.ROOT, "%s at %s was sent to %s (%.0f blocks %s)", mover.name(),
+                    house.realBlock(at), house.realBlock(next), up, next.y() > at.y() ? "up" : "down"));
+            }
+        }
         NavPoint nearest = sent.get(0);
         for (NavPoint p : sent) {
             if (p.horizontalDistance(at) < nearest.horizontalDistance(at)) {
@@ -186,7 +212,7 @@ final class ClimbWatch {
         // waypoints are floor or feet points: judge the nearer of the two readings
         double dy = Math.min(Math.abs(nearest.y() - at.y()), Math.abs(nearest.y() + 1 - at.y()));
         if (dy >= LEVEL_BLOCKS) {
-            crossLevel.add(String.format(Locale.ROOT, "%s at %s got a stretch from %s (%.0f blocks %s)", mover.name(),
+            stretchOffLevel.add(String.format(Locale.ROOT, "%s at %s got a stretch from %s (%.0f blocks %s)", mover.name(),
                 house.realBlock(at), house.realBlock(sent.get(0)), dy, nearest.y() > at.y() ? "up" : "down"));
         }
     }
@@ -205,10 +231,16 @@ final class ClimbWatch {
             return;
         }
         if (body.turnTicks >= net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.STALE_TICKS - 20) {
-            staleTurns.add(String.format(Locale.ROOT, "%s held its turn from %s for %.1f s, now at %s", mover.name(),
-                house.realBlock(body.turnAt), body.turnTicks / 20.0, house.realBlock(at)));
+            String line = String.format(Locale.ROOT, "%s held its turn from %s for %.1f s, now at %s%s", mover.name(),
+                house.realBlock(body.turnAt), body.turnTicks / 20.0, house.realBlock(at),
+                body.fellInTurn ? " (it fell)" : "");
+            staleTurns.add(line);
+            if (body.fellInTurn) {
+                fallenTurns.add(line);
+            }
         }
         body.turnTicks = 0;
+        body.fellInTurn = false;
     }
 
     /** Turns dropped by the crowd's 30 s guard ({@link #turn}). */
@@ -230,6 +262,40 @@ final class ClimbWatch {
 
     List<String> crossLevel() {
         return crossLevel;
+    }
+
+    /** B1's measure: new stretches whose waypoint nearest the feet horizontally is on another level (report only). */
+    List<String> stretchOffLevel() {
+        return stretchOffLevel;
+    }
+
+    /** Falls that started on a place of the climb (a flight, a landing, the hall or the street). */
+    List<String> fallsFromClimb() {
+        return fallsFromClimb;
+    }
+
+    /** Turns dropped by the 30 s guard whose holder fell while it held the turn. */
+    List<String> fallenTurns() {
+        return fallenTurns;
+    }
+
+    /**
+     * Link B2's checks (PandiO/knk-workspace#671): no fall from a flight or landing, no handover onto another level,
+     * no turn released by the 30 s guard because its holder fell. Empty when all hold. A guard release whose holder
+     * did not fall is B3's (crowd turns in 3D) and stays report only.
+     */
+    List<String> failures() {
+        List<String> out = new ArrayList<>();
+        if (!fallsFromClimb.isEmpty()) {
+            out.add("falls from the climb " + first(fallsFromClimb, 3));
+        }
+        if (!crossLevel.isEmpty()) {
+            out.add("handovers onto another level " + first(crossLevel, 3));
+        }
+        if (!fallenTurns.isEmpty()) {
+            out.add("turns dropped by the 30 s guard after a fall " + first(fallenTurns, 3));
+        }
+        return out;
     }
 
     /** The furthest place each mover reached, counted: "top hall 1, flight 3 (x 1409, north) 19". */

@@ -67,7 +67,10 @@ public final class NpcNavigationService {
     static final int WATCHDOG_TICKS = 20;
     /** The early hand-over of the next stretch is checked this often. */
     static final int HANDOVER_TICKS = 5;
-    /** The next stretch is handed over within this many blocks of the current one's end. */
+    /**
+     * The next stretch is handed over once fewer than this many blocks (3D, along the waypoints not yet walked) are
+     * left of the current one (link B2: before, the horizontal distance to the stretch end).
+     */
     static final double HANDOVER_DISTANCE = 4;
     /** Within this many blocks (horizontally) and two blocks of height the goal counts as reached. */
     static final double ARRIVAL_DISTANCE = 1.5;
@@ -265,6 +268,12 @@ public final class NpcNavigationService {
         RouteFollower follower;
         /** True while the mover follows a stretch as a waypoint list, false during a local leg. */
         boolean onTrail;
+        /** The waypoint list last given for the road line, with how far the NPC came along it (link B2); null otherwise. */
+        Trail trail;
+        /** A step of the line the bridge could not make: walked as a local leg once {@link #trail} is walked (B2). */
+        NavPoint gapLeg;
+        /** The local leg of {@link #gapLeg} runs: the line restarts where the NPC stands once it is walked. */
+        boolean afterGap;
         boolean recovering;
         long lastProgressTick;
         /** The waypoints of the running local leg K&K's own search found (link M6); null for any other order. */
@@ -486,6 +495,8 @@ public final class NpcNavigationService {
     private long pushesByAttacks;
     private long pushReturns;
     private long pushTeleports;
+    /** Steps of the line the bridge could not make, walked as local legs (link B2). */
+    private long gapLegs;
     /** Main-thread time of push resistance's looks, for its share of the cost. */
     private long pushNanos;
     private java.util.function.IntToDoubleFunction plazaClearance = id -> Double.NaN;
@@ -700,6 +711,28 @@ public final class NpcNavigationService {
     }
 
     /**
+     * The waypoint list last given to the NPC for the road line (a stretch appended to what was left of the one before,
+     * link B2), or null while it walks anything else (diagnostics and scenarios).
+     */
+    public List<NavPoint> trailOf(int moverId) {
+        Nav nav = npcs.get(moverId);
+        return nav == null || nav.trail == null ? null : nav.trail.points();
+    }
+
+    /** Steps of the line the bridge could not make, walked as local legs since start (link B2; diagnostics). */
+    public long gapLegs() {
+        return gapLegs;
+    }
+
+    /** The feet, with the NPC's place on its waypoint list brought up to date. */
+    private static NavPoint trailUpdated(Nav nav, NavPoint at) {
+        if (nav.trail != null) {
+            nav.trail.update(at);
+        }
+        return at;
+    }
+
+    /**
      * The gate doors on the NPC's current route, passed or still ahead, in route order (PandiO/knk-workspace#507: a
      * group's followers walk behind the leader through gates the leader has passed); empty without a route.
      */
@@ -852,9 +885,13 @@ public final class NpcNavigationService {
                 }
             }
         }
-        if (handover) {
+        if (handover && nav.gapLeg == null) {
+            // by progress along the waypoints in 3D (link B2, decision 34.1): on a stacked staircase the stretch end
+            // can be right above the NPC and still a flight away
             NavPoint end = nav.follower.sentEndPoint();
-            if (end != null && at.horizontalDistance(end) < HANDOVER_DISTANCE) {
+            double rest = nav.trail != null ? nav.trail.rest(trailUpdated(nav, at))
+                : end == null ? Double.MAX_VALUE : Trail.dist3(at, HopPlanner.feet(end));
+            if (rest < HANDOVER_DISTANCE) {
                 sendStretch(nav, false);
             }
         }
@@ -1088,6 +1125,9 @@ public final class NpcNavigationService {
                             List<RoadPlanner.GateCrossing> gates, List<RoadPlanner.PlazaCrossing> plazas,
                             NavPoint from, NavPoint to) {
         nav.follower = new RouteFollower(line, plazas);
+        nav.trail = null;
+        nav.gapLeg = null;
+        nav.afterGap = false;
         nav.onTrail = false;
         List<GateOnLine> onLine = new java.util.ArrayList<>();
         for (RoadPlanner.GateCrossing gate : gates) {
@@ -1196,11 +1236,13 @@ public final class NpcNavigationService {
                         nav.knkLeg = way;
                         nav.knkLegRest = Double.NaN;
                         nav.lastProgressTick = tick;
+                        nav.trail = null;
                         nav.mover.follow(way, nav.settings.waypointMargin());
                     } else {
                         nav.engineLegOpen = true; // counted engine or none once the engine's search answered
                         nav.legTarget = target;
                         nav.legPrepared = prepared.leg();
+                        nav.trail = null;
                         nav.mover.walkTo(HopPlanner.feet(target), prepared.leg());
                     }
                 }
@@ -1480,6 +1522,7 @@ public final class NpcNavigationService {
         }
         nav.state = NpcNavState.WAITING; // before the stop: a held NPC is neither moving nor stuck
         nav.waitUntil = Long.MAX_VALUE;
+        nav.trail = null;
         nav.mover.stop();
         toSpot(nav, at, d.spot());
     }
@@ -1490,6 +1533,7 @@ public final class NpcNavigationService {
         }
         nav.crowdSpot = spot;
         if (at.horizontalDistance(spot) > 0.4) {
+            nav.trail = null;
             nav.mover.follow(List.of(spot), 0.3);
         }
     }
@@ -1539,6 +1583,7 @@ public final class NpcNavigationService {
                 List<NavPoint> rest = nav.knkLeg.subList(Math.min(nav.knkLeg.size() - 1, nearestOf(nav.knkLeg, at)),
                     nav.knkLeg.size());
                 nav.knkLegRest = Double.NaN;
+                nav.trail = null;
                 nav.mover.follow(List.copyOf(rest), nav.settings.waypointMargin());
             }
             case ENGINE_LEG -> {
@@ -1546,6 +1591,7 @@ public final class NpcNavigationService {
                     enqueue(nav);
                     return;
                 }
+                nav.trail = null;
                 nav.mover.walkTo(HopPlanner.feet(nav.legTarget), nav.legPrepared);
             }
             case REPLAN -> enqueue(nav);
@@ -1801,6 +1847,7 @@ public final class NpcNavigationService {
             returnOnOrder(nav, home, at);
         } else if (NavGeometry.straightWalkable(ports.world(), at, home)) {
             nav.bodyReturn = true;
+            nav.trail = null;
             nav.mover.follow(List.of(home), 0.3);
         } else if (nav.goal == null) {
             // no straight way back to its post: an order home, under K&K's rules (NAV-02), whose result nobody needs
@@ -1863,6 +1910,7 @@ public final class NpcNavigationService {
             nav.knkLeg = null;
             nav.state = NpcNavState.MOVING;
             nav.mover.follow(back, nav.settings.waypointMargin());
+            nav.trail = nav.onTrail && !back.isEmpty() ? new Trail(back) : null;
             return;
         }
         NavPoint floor = HopPlanner.floor(home);
@@ -1878,6 +1926,7 @@ public final class NpcNavigationService {
         nav.moveOnly = false;
         nav.knkLeg = null;
         nav.state = NpcNavState.WAITING; // before the stop, so its cancel is not taken for a stuck NPC
+        nav.trail = null;
         nav.mover.stop();
         enqueue(nav);
     }
@@ -1898,6 +1947,7 @@ public final class NpcNavigationService {
         if (sight.seen(at) || sight.seen(home)) {
             return; // seen: it keeps walking (or waiting); looked at again in a second
         }
+        nav.trail = null;
         if (!nav.mover.teleport(home)) {
             return;
         }
@@ -1953,17 +2003,53 @@ public final class NpcNavigationService {
                 if (!nav.onTrail || nav.follower.bestIndex() < 0) {
                     nav.lastProgressTick = tick;
                 }
+                // appended to the waypoints not yet walked, not replacing them (link B2, decision 34.1)
+                boolean append = !required && nav.onTrail && nav.trail != null;
+                List<NavPoint> way = append ? nav.trail.appended(stretch.waypoints()) : stretch.waypoints();
+                // bridged from the feet, not from the last waypoint; a step the bridge cannot make is a local leg
+                WaypointChain.Split split = WaypointChain.split(ports.world(), nav.mover.onGround() ? at : null, way);
                 nav.onTrail = true;
                 nav.state = NpcNavState.MOVING;
                 ports.metrics().count(Event.STRETCH);
-                nav.mover.follow(stretch.waypoints(), nav.settings.marginFor(stretch));
+                nav.gapLeg = split.gap();
+                if (split.gap() != null) {
+                    ports.log().accept(String.format(Locale.ROOT, "%s: no walk from %s to %s on the line, a local leg "
+                        + "takes that step", nav.mover.name(), NavGeometry.block(split.gapIndex() == 0 ? at
+                        : way.get(split.gapIndex() - 1)), NavGeometry.block(split.gap())));
+                    if (split.walk().isEmpty()) {
+                        startGapLeg(nav);
+                        return;
+                    }
+                }
+                nav.trail = new Trail(split.walk());
+                nav.mover.follow(split.walk(), nav.settings.marginFor(stretch));
             }
             default -> { }
         }
     }
 
+    /**
+     * The step of the line the bridge could not make (link B2, decision 34.1, item 4) as a local leg: the engine's
+     * search under K&K's rules to the waypoint after the step; the line goes on from there ({@link #legDone}).
+     */
+    private void startGapLeg(Nav nav) {
+        NavPoint target = nav.gapLeg;
+        nav.gapLeg = null;
+        nav.trail = null;
+        nav.onTrail = false;
+        nav.afterGap = true;
+        nav.hops.clear();
+        nav.hops.add(HopPlanner.floor(target));
+        gapLegs++;
+        enqueue(nav);
+    }
+
     /** A stretch or a local leg was walked: the next hop, the next stretch, the tail, or the end of the order. */
     private void legDone(Nav nav) {
+        if (nav.onTrail && nav.gapLeg != null) {
+            startGapLeg(nav); // the waypoints up to the step the bridge could not make are walked
+            return;
+        }
         nav.retries = 0;
         nav.knkLeg = null;
         if (!nav.onTrail && !nav.hops.isEmpty()) {
@@ -1973,6 +2059,11 @@ public final class NpcNavigationService {
             }
         }
         nav.recovering = false;
+        if (nav.hops.isEmpty() && nav.afterGap && nav.follower != null) {
+            // the step the bridge could not make was walked: the line goes on from where the NPC stands
+            nav.afterGap = false;
+            nav.mover.position().ifPresent(nav.follower::restartAtNpc);
+        }
         if (!nav.hops.isEmpty()) {
             enqueue(nav);
         } else if (nav.follower != null && nav.follower.hasMore()) {
@@ -2259,6 +2350,7 @@ public final class NpcNavigationService {
         nav.state = NpcNavState.WAITING;
         enqueue(nav); // QUEUED before the stop below, so the engine's cancel is not taken for a stuck NPC
         if (nav.mover.isSpawned()) {
+            nav.trail = null;
             nav.mover.stop();
         }
     }
@@ -2328,6 +2420,7 @@ public final class NpcNavigationService {
      */
     private void onStuck(Nav nav, RecoveryLadder.Reporter by) {
         NavPoint at = nav.mover.position().orElse(null);
+        nav.gapLeg = null; // a recovery step hands the line out again from where it leaves the NPC
         if (by == RecoveryLadder.Reporter.NO_PATH) {
             ports.metrics().count(Event.RECOVERY_NO_PATH);
         }
@@ -2336,6 +2429,7 @@ public final class NpcNavigationService {
         switch (nav.ladder.report(tick, at, by, wall, nav.settings.recoveryWaitTicks())) {
             case STARTED -> {
                 ports.metrics().spellStarted(by != RecoveryLadder.Reporter.NO_PROGRESS, wall);
+                nav.trail = null;
                 nav.mover.stop();
                 nextTry(nav);
             }
@@ -2356,6 +2450,7 @@ public final class NpcNavigationService {
         nav.recovering = false;
         if (nav.mover.isSpawned()) {
             nav.state = NpcNavState.WAITING; // before the stop, so its cancel is not taken for a stuck NPC
+            nav.trail = null;
             nav.mover.stop();
         }
         nav.ladderPending = true;
@@ -2440,6 +2535,7 @@ public final class NpcNavigationService {
                 }
                 nav.state = NpcNavState.MOVING;
                 nav.mover.follow(waypoints, nav.settings.waypointMargin());
+                nav.trail = nav.onTrail && !waypoints.isEmpty() ? new Trail(waypoints) : null;
             }
             case LOCAL_LEG -> {
                 if (legTarget[0] != null) {
@@ -2597,6 +2693,7 @@ public final class NpcNavigationService {
                 ports.metrics().count(Event.FAILED);
             }
             if (nav.mover.isSpawned()) {
+                nav.trail = null;
                 nav.mover.stop();
             }
         }
