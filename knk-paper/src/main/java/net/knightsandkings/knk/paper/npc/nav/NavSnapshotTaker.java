@@ -54,12 +54,8 @@ import net.knightsandkings.knk.paper.regions.access.DomainAccessFlags;
  * in {@code plugins/KnightsAndKings/npc-snapshots/} with a saved route's road line as NPC navigation plans it, its
  * stretches, the road graph, the domains and the settings around it, and the region files its box touches, copied
  * after a save. Reads the plugin's caches and the world on the main thread; copies and zips on another thread. Changes
-<<<<<<< HEAD
- * nothing on the server apart from the world save. Works without Citizens (only road navigation must run).
-=======
  * nothing on the server apart from the world save. Needs {@code npc.navigation.enabled} and road navigation, not
  * Citizens.
->>>>>>> claude/npc-movement-b1
  */
 final class NavSnapshotTaker {
 
