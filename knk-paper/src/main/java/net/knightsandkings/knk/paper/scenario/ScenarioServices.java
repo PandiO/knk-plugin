@@ -10,6 +10,7 @@ import net.knightsandkings.knk.paper.navigation.NavigationService;
 import net.knightsandkings.knk.paper.gates.GateDisplayManager;
 import net.knightsandkings.knk.paper.gates.GateLoaderAdapter;
 import net.knightsandkings.knk.paper.menu.MenuService;
+import net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.Plugin;
 
@@ -38,7 +39,9 @@ public record ScenarioServices(
     Supplier<PermissionsDataAccess> permissionsDataAccess,
     Supplier<MenuService> menuService,
     Supplier<MenuTemplatesDataAccess> menuTemplatesDataAccess,
-    Supplier<ApiConnectivity> apiConnectivity
+    Supplier<ApiConnectivity> apiConnectivity,
+    // PandiO/knk-workspace#668: the world the live NPC module's rule checks read WorldGuard regions from
+    Supplier<BukkitNavWorld> npcRulesWorld
 ) {
 
     public FileConfiguration config() {
@@ -88,6 +91,15 @@ public record ScenarioServices(
                 + (reason == null ? "it did not start" : reason));
         }
         return factory;
+    }
+
+    /**
+     * The world the live NPC module's rule checks read regions and blocks from (PandiO/knk-workspace#668): a scenario
+     * with domain rules reads regions through it, so it sees the regions the server's NPC checks see, wired the way
+     * the plugin wires them. Fails the step when the NPC module did not start.
+     */
+    public BukkitNavWorld npcRules() {
+        return required(npcRulesWorld.get(), "the NPC module");
     }
 
     /** The live user cache (UUID to account summary); a fake player's fake account goes in here. */

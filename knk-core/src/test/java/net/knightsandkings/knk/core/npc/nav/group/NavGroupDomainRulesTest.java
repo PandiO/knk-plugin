@@ -52,6 +52,8 @@ class NavGroupDomainRulesTest {
     private final GroupSim sim = new GroupSim();
     private final Results results = new Results();
     private final RegionDomainResolver map = new RegionDomainResolver();
+    /** Every subject the NPC checks asked the rules about. */
+    private final List<net.knightsandkings.knk.core.npc.nav.AccessSubject> subjects = new java.util.ArrayList<>();
     /** What the API would answer now: the current rules. */
     private final Map<String, DomainSnapshot> api = new HashMap<>();
 
@@ -77,8 +79,10 @@ class NavGroupDomainRulesTest {
         }
         warm();
         DomainAccessEvaluator evaluator = new DomainAccessEvaluator();
-        sim.rules.entry = subject -> DomainEntryRule.of(subject, evaluator, map::getDomainByRegionIdNoRefresh,
-            RoadRule.ALWAYS);
+        sim.rules.entry = subject -> {
+            subjects.add(subject);
+            return DomainEntryRule.of(subject, evaluator, map::getDomainByRegionIdNoRefresh, RoadRule.ALWAYS);
+        };
     }
 
     /** The API's answers are in the map (a warm-up or an in-place refresh of the roads' regions). */
@@ -171,6 +175,29 @@ class NavGroupDomainRulesTest {
     @Test
     void entryRemovedThroughACacheRefreshStopsTheOutsideFollowersAtTheGate() {
         entryRemovedMidColumn(Path.CACHE_REFRESH, true);
+    }
+
+    /**
+     * PandiO/knk-workspace#668, the developer's question: is it the entry bypass of the op who ran
+     * {@code /knk npc nav group 20}? No. A group's NPCs are judged as NPCs with the group's access profile (the
+     * command's profile argument, else {@code default}, whose {@code bypass-domain-rules} is false): no player, and
+     * so no op or {@code knk.region.bypass}, is ever the subject of an NPC check.
+     */
+    @Test
+    void theGroupsNpcsAreJudgedWithTheirAccessProfileNeverAsThePlayerWhoStartedIt() {
+        entryRemovedMidColumn(Path.REALTIME_ENTITY_CHANGED, true);
+
+        assertFalse(subjects.isEmpty());
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (var subject : subjects) {
+            var npc = assertInstanceOf(net.knightsandkings.knk.core.npc.nav.NpcAccessSubject.class, subject);
+            assertEquals(net.knightsandkings.knk.core.npc.nav.NpcAccessProfile.DEFAULT, npc.profile());
+            assertFalse(subject.bypassesDomainRules(), subject.name() + " bypasses the domain rules");
+            assertTrue(subject.playerId().isEmpty(), subject.name() + " is a player");
+            names.add(subject.name());
+        }
+        assertTrue(names.size() > 1, "followers are asked about as themselves: " + names);
+        assertFalse(net.knightsandkings.knk.core.npc.nav.NpcAccessProfile.DEFAULT.bypassDomainRules());
     }
 
     @Test

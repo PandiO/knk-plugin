@@ -82,9 +82,10 @@ public final class ScenarioNpcs {
         this.factory = factory;
         this.settings = settings;
         metrics.setEnabled(true);
-        // the scenarios with rules of their own see WorldGuard's regions (a scenario region); the others none, as in L3
-        BukkitNavWorld world = new BukkitNavWorld(rules == AccessRules.OPEN ? null
-            : new net.knightsandkings.knk.paper.regions.RegionIds());
+        // the scenarios with rules of their own see WorldGuard's regions (a scenario region) the way the live NPC module
+        // sees them (PandiO/knk-workspace#668: a region query of their own hid that the module's was missing); the
+        // others none, as in L3
+        BukkitNavWorld world = rules == AccessRules.OPEN ? new BukkitNavWorld(null) : scene.services().npcRules();
         Consumer<String> logLine = line -> log.add(new LogLine(tick, line));
         service = new NpcNavigationService(new NpcNavigationService.Ports(this::plan, this::prepare, world, metrics,
             System::nanoTime, logLine, rules), 4);

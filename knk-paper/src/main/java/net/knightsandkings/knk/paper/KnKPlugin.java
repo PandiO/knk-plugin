@@ -2845,7 +2845,8 @@ public class KnKPlugin extends JavaPlugin {
             () -> npcNavigation != null ? npcNavigation.unavailableReason() : "the NPC module did not start",
             // Scripted players (PandiO/knk-workspace#540)
             () -> cacheManager != null ? cacheManager.getUserCache() : null,
-            () -> permissionsDataAccess, () -> menuService, () -> menuTemplatesDataAccess, this::getApiConnectivity);
+            () -> permissionsDataAccess, () -> menuService, () -> menuTemplatesDataAccess, this::getApiConnectivity,
+            () -> npcNavigation != null ? npcNavigation.rulesWorld() : null);
         var scenarioCommand = new net.knightsandkings.knk.paper.scenario.ScenarioCommand(this,
             net.knightsandkings.knk.paper.scenario.PaperScenarios.registry(),
             new net.knightsandkings.knk.paper.scenario.PaperScenarioHost(settings, services));
@@ -2909,7 +2910,8 @@ public class KnKPlugin extends JavaPlugin {
             try {
                 npcNavigation = net.knightsandkings.knk.paper.npc.nav.NpcNavigationModule.start(this, knkAdminCommand,
                     metricsService == null ? null : metricsService::register,
-                    regionTracker == null ? null : regionTracker.regionIds(), () -> navigationService);
+                    // PandiO/knk-workspace#668: asked for on use; the region tracker is built after registerCommands
+                    () -> regionTracker == null ? null : regionTracker.regionIds(), () -> navigationService);
             } catch (RuntimeException | LinkageError e) {
                 getLogger().log(java.util.logging.Level.WARNING, "[NPC] navigation module failed to start", e);
             }

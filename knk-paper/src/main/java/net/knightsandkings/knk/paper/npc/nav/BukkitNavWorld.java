@@ -25,6 +25,11 @@ public final class BukkitNavWorld implements NavWorld {
         this.regionIds = regionIds;
     }
 
+    /** Whether WorldGuard's regions are known here (false: {@link #regionsAt} is always empty). */
+    public boolean knowsRegions() {
+        return regionIds != null;
+    }
+
     @Override
     public boolean isLoaded(String world, int x, int z) {
         World w = Bukkit.getWorld(world);

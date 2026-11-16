@@ -26,7 +26,7 @@ class ScenarioPlayerTest {
     private ScenarioScene scene() {
         return new ScenarioScene("player-test", 3, world, 30192, 100, 30000,
             new ScenarioServices(null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null,
-                () -> null, () -> null, () -> null, () -> null, () -> null));
+                () -> null, () -> null, () -> null, () -> null, () -> null, () -> null));
     }
 
     @Test

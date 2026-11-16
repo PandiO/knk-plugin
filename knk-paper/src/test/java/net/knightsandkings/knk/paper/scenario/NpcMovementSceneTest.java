@@ -32,7 +32,7 @@ class NpcMovementSceneTest {
         when(world.getName()).thenReturn("world");
         return new ScenarioScene("movement-test", 0, world, OX, OY, OZ,
             new ScenarioServices(null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> null,
-                () -> null, () -> null, () -> null, () -> null, () -> null));
+                () -> null, () -> null, () -> null, () -> null, () -> null, () -> null));
     }
 
     /**
