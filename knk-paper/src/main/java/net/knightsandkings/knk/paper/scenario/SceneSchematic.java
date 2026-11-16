@@ -251,8 +251,8 @@ public final class SceneSchematic {
                     int sx = bx + x;
                     int sy = by + y;
                     int sz = bz + z;
-                    if (sx < 0 || sy < 0 || sz < 0 || sx >= ScenarioScene.SIZE || sy >= ScenarioScene.HEIGHT
-                        || sz >= ScenarioScene.SIZE) {
+                    if (sx < 0 || sy < 0 || sz < 0 || sx >= scene.box().x() || sy >= scene.box().y()
+                        || sz >= scene.box().z()) {
                         outside++;
                         continue;
                     }

@@ -62,6 +62,10 @@ public final class NpcNavigationModule {
     private org.bukkit.event.Listener tickListener;
     /** Ends the subscription to road navigation's gate and availability events (PandiO/knk-workspace#361). */
     private Runnable ruleEvents;
+    /** The domain cache and the gate manager for {@code /knk npc nav snapshot} (link B1); set after start. */
+    private java.util.function.Supplier<net.knightsandkings.knk.core.regions.RegionDomainResolver> snapshotDomains = () -> null;
+    private java.util.function.Supplier<net.knightsandkings.knk.core.gates.GateManager> snapshotGates = () -> null;
+    private NavSnapshotTaker snapshots;
 
     private NpcNavigationModule(JavaPlugin plugin, NpcNavigationConfig config,
                                 java.util.function.Supplier<RegionIds> regionIds) {
@@ -137,13 +141,24 @@ public final class NpcNavigationModule {
                 "/knk npc <status|audit start|audit stop|audit report|test spawn <n> [radius]|test clear|nav ...>", PERMISSION,
                 List.of("/knk npc status", "/knk npc audit start", "/knk npc test spawn 50 24", "/knk npc audit report",
                     "/knk npc nav from", "/knk npc nav to", "/knk npc nav spawn 50", "/knk npc nav group 20 ranks",
-                    "/knk npc nav stats")),
+                    "/knk npc nav stats", "/knk npc nav snapshot quarry-to-keep")),
             module::execute, module::complete);
         return module;
     }
 
     public NpcNavigationMetrics metrics() {
         return metrics;
+    }
+
+    /**
+     * The plugin's domain cache and gate manager, which {@code /knk npc nav snapshot} reads (link B1,
+     * PandiO/knk-workspace#670); asked for on use, as they may start after this module.
+     */
+    public void setSnapshotSources(
+            java.util.function.Supplier<net.knightsandkings.knk.core.regions.RegionDomainResolver> domains,
+            java.util.function.Supplier<net.knightsandkings.knk.core.gates.GateManager> gates) {
+        this.snapshotDomains = domains == null ? () -> null : domains;
+        this.snapshotGates = gates == null ? () -> null : gates;
     }
 
     public void stop() {
@@ -358,6 +373,9 @@ public final class NpcNavigationModule {
                 && (args[2].equalsIgnoreCase("load") || args[2].equalsIgnoreCase("delete"))) {
                 return filter(runner.routes().names(), args[3]);
             }
+            if (args.length == 3 && args[1].equalsIgnoreCase("snapshot")) {
+                return filter(new NpcRouteStore(plugin.getDataFolder(), logger).names(), args[2]);
+            }
             if (args.length == 4 && args[1].equalsIgnoreCase("spawn")) {
                 return filter(List.copyOf(config.accessProfiles().keySet()), args[3]);
             }
@@ -488,10 +506,10 @@ public final class NpcNavigationModule {
     // ==================== /knk npc nav ====================
 
     static final List<String> NAV_ACTIONS = List.of("from", "to", "route", "baseline", "spawn", "group", "goto", "patrol",
-        "stats", "trace", "clear", "scene");
+        "stats", "trace", "clear", "scene", "snapshot");
     static final String NAV_USAGE = "/knk npc nav <from|to|route list|save|load|delete <name>|baseline|spawn <n> [profile]"
         + "|group <n> [formation] [profile] [finish-trip|follow-leader]|goto|patrol|stats [reset]|trace [npc] [seconds]"
-        + "|clear|scene corners>";
+        + "|clear|scene corners|snapshot <route>>";
     /** The toggle words of {@code /knk npc nav group} (group-followers-finish-trip; implementation plan 4b.3 item 8). */
     static final List<String> TRIP_WORDS = List.of("finish-trip", "follow-leader");
     /** The formations of {@code /knk npc nav group}, by config name. */
@@ -516,12 +534,33 @@ public final class NpcNavigationModule {
      * clear                          remove every route NPC
      * scene corners                  build the corner test scene (4b.2 item 19) at testing.scenarios.origin, only
      *                                while testing.scenarios.enabled, and save the route corner-scene across it
+     * snapshot &lt;route&gt;              write a zip of the saved route's line, stretches, roads, domains, settings and
+     *                                region files to npc-snapshots/ for a scenario replay (link B1, #670); needs
+     *                                road navigation only, not Citizens
      * </pre>
      */
     private void nav(CommandSender sender, String[] args) {
         String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "";
         if (!NAV_ACTIONS.contains(action)) {
             sender.sendMessage(NAV_USAGE);
+            return;
+        }
+        if (action.equals("snapshot")) {
+            // before ensureNav: a snapshot reads the caches and the world and starts no NPC work (works without Citizens)
+            if (args.length < 3) {
+                sender.sendMessage("/knk npc nav snapshot <route> (a route saved with /knk npc nav route save <name>)");
+                return;
+            }
+            if (snapshots == null) {
+                snapshots = new NavSnapshotTaker(plugin, config, new NavSnapshotTaker.Sources(
+                    () -> navigation == null ? null : navigation.get(), snapshotDomains, snapshotGates),
+                    at -> {
+                        org.bukkit.World w = Bukkit.getWorld(at.world());
+                        return w == null ? List.of() : regionsOuterToInner(new org.bukkit.Location(w, at.x(), at.y() + 1,
+                            at.z()));
+                    }, this::rulesWorld);
+            }
+            snapshots.take(sender, args[2]);
             return;
         }
         String reason = ensureNav();

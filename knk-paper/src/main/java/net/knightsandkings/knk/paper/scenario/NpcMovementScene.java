@@ -12,19 +12,31 @@ import net.knightsandkings.knk.core.npc.nav.NavPoint;
  * road line as the road graph would give it, where NPCs start and where they go, and the areas the checks watch.
  * <p>
  * The stair house is the developer's schematic {@value #STAIRHOUSE} (PandiO/knk-workspace#603, copied in the dev
- * world): it covers 1407 49 -549 to 1418 79 -487 and is pasted in the frame box = real - (1400, 46, -515), so its
- * rows north of -515 and its blocks above y 69 fall outside the box. It starts at y 49, one block above the street's
- * floor, so the scene lays a stone floor at real y 48 under its footprint first. The jagged straight, the doorway and
- * the plaza are synthetic by design (4c.5 items 4 to 6).
+ * world): it covers 1407 49 -549 to 1418 79 -487 with both flights and the upper landings. Link B1
+ * (PandiO/knk-workspace#670) pastes all of it in a box of its own, {@link #STAIRHOUSE_BOX}, in the frame box = real -
+ * (1400, 46, -553) ({@link #STAIRHOUSE_FRAME}); link M1's box (real 1400..1431, 46..69, -515..-484) held only its lower
+ * part. It starts at y 49, one block above the street's floor, so the scene lays a stone floor at real y 48 under its
+ * footprint first, and on the street east of it (real 1419..1431, -530..-510), where the real route comes in. The
+ * jagged straight, the doorway and the plaza are synthetic by design (4c.5 items 4 to 6).
  * <p>
- * Coordinates are the box's (x, z 0..31, y 0..23); floor points are the block the NPC stands on.
+ * Coordinates are the box's (x, z 0..31, y 0..23 in the default box; the stair house's box is 32 x 40 x 72); floor
+ * points are the block the NPC stands on.
  */
 public final class NpcMovementScene {
 
     /** The developer's schematic of the stair house (attached to #603, committed on 2026-11-15). */
     public static final String STAIRHOUSE = "knk-stairhouse.schem";
-    /** Where the stair house's schematic goes in the box: its lowest corner (1407 49 -549) in the frame real - (1400, 46, -515). */
-    static final int[] STAIRHOUSE_AT = {7, 3, -34};
+    /** The stair house's box (PandiO/knk-workspace#670): real 1400..1431, 46..85, -553..-482. */
+    public static final ScenarioScene.Box STAIRHOUSE_BOX = new ScenarioScene.Box(32, 40, 72);
+    /** The real position of the stair house box's lowest corner: box = real - this. */
+    public static final int[] STAIRHOUSE_FRAME = {1400, 46, -553};
+    /** Where the stair house's schematic goes in the box: its lowest corner (1407 49 -549). */
+    static final int[] STAIRHOUSE_AT = {7, 3, 4};
+    /**
+     * Link M1's points were given in its frame, real - (1400, 46, -515); in this box they lie this many blocks further
+     * along z.
+     */
+    static final int M1_Z = 38;
 
     private final ScenarioScene scene;
     private final String resource;
@@ -61,7 +73,15 @@ public final class NpcMovementScene {
         if (STAIRHOUSE.equals(resource)) {
             // the street's floor (real y 48) under the schematic's footprint: the copy starts at y 49
             for (int x = at[0]; x < at[0] + schematic.width(); x++) {
-                for (int z = Math.max(0, at[2]); z < Math.min(ScenarioScene.SIZE, at[2] + schematic.length()); z++) {
+                for (int z = Math.max(0, at[2]); z < Math.min(scene.box().z(), at[2] + schematic.length()); z++) {
+                    for (int y = 0; y < at[1]; y++) {
+                        scene.block(x, y, z).setType(org.bukkit.Material.STONE, false);
+                    }
+                }
+            }
+            // the street east of the house, where the real route comes in (link B1): real 1419..1431, -530..-510
+            for (int x = at[0] + schematic.width(); x < scene.box().x(); x++) {
+                for (int z = -530 - STAIRHOUSE_FRAME[2]; z <= -510 - STAIRHOUSE_FRAME[2]; z++) {
                     for (int y = 0; y < at[1]; y++) {
                         scene.block(x, y, z).setType(org.bukkit.Material.STONE, false);
                     }
@@ -99,10 +119,10 @@ public final class NpcMovementScene {
      * run; replace it with the developer's trace when one is posted.
      */
     public List<NavPoint> houseLine() {
-        return List.of(floor(13.5, HOUSE_GROUND, 1.5), floor(13.5, HOUSE_GROUND, 5.5), floor(13.0, HOUSE_GROUND, 7.5),
-            floor(12.5, HOUSE_GROUND, 10.0), floor(12.5, HOUSE_GROUND, 12.5), floor(12.5, HOUSE_GROUND, 14.5),
-            floor(12.5, HOUSE_GROUND, 15.5), floor(12.5, HOUSE_STEP, 16.5), floor(12.5, HOUSE_STEP, 18.5),
-            floor(12.5, HOUSE_HALL, 20.5), floor(12.5, HOUSE_HALL, 23.5), floor(13.5, HOUSE_HALL, 25.5));
+        return List.of(m1Floor(13.5, HOUSE_GROUND, 1.5), m1Floor(13.5, HOUSE_GROUND, 5.5), m1Floor(13.0, HOUSE_GROUND, 7.5),
+            m1Floor(12.5, HOUSE_GROUND, 10.0), m1Floor(12.5, HOUSE_GROUND, 12.5), m1Floor(12.5, HOUSE_GROUND, 14.5),
+            m1Floor(12.5, HOUSE_GROUND, 15.5), m1Floor(12.5, HOUSE_STEP, 16.5), m1Floor(12.5, HOUSE_STEP, 18.5),
+            m1Floor(12.5, HOUSE_HALL, 20.5), m1Floor(12.5, HOUSE_HALL, 23.5), m1Floor(13.5, HOUSE_HALL, 25.5));
     }
 
     /** {@link #houseLine} there and back, the loop the scenario road walks. */
@@ -114,7 +134,7 @@ public final class NpcMovementScene {
     public List<NavPoint> houseBottomSpots() {
         List<NavPoint> spots = new ArrayList<>();
         for (int i = 0; i < 6; i++) {
-            spots.add(feet(10.5 + 1.2 * i, HOUSE_GROUND, 1.5 + (i % 3)));
+            spots.add(feet(10.5 + 1.2 * i, HOUSE_GROUND, M1_Z + 1.5 + (i % 3)));
         }
         return spots;
     }
@@ -124,7 +144,7 @@ public final class NpcMovementScene {
         List<NavPoint> spots = new ArrayList<>();
         for (int z = 24; z <= 25; z++) {
             for (int x = 12; x <= 14; x++) {
-                spots.add(feet(x + 0.5, HOUSE_HALL, z + 0.5));
+                spots.add(feet(x + 0.5, HOUSE_HALL, M1_Z + z + 0.5));
             }
         }
         return spots;
@@ -132,27 +152,181 @@ public final class NpcMovementScene {
 
     /** The group's start: the street north of the entrance (real -515..-511, 1409..1418), leader in front. */
     public NavPoint houseGroupSpot(int i) {
-        return i == 0 ? feet(13.5, HOUSE_GROUND, 4.5)
-            : feet(11.0 + 1.0 * ((i - 1) % 6), HOUSE_GROUND, 3.5 - 0.9 * ((i - 1) / 6));
+        return i == 0 ? feet(13.5, HOUSE_GROUND, M1_Z + 4.5)
+            : feet(11.0 + 1.0 * ((i - 1) % 6), HOUSE_GROUND, M1_Z + 3.5 - 0.9 * ((i - 1) / 6));
     }
 
     /** The group's goal in the hall. */
     public NavPoint houseGoal() {
-        return feet(13.5, HOUSE_HALL, 25.5);
+        return feet(13.5, HOUSE_HALL, M1_Z + 25.5);
     }
 
     /** Whether feet are in or just before or after the entrance (1411..1415, -510..-506). */
     public boolean inHouseEntrance(NavPoint feet) {
         int x = localX(feet);
-        int z = localZ(feet);
+        int z = localZ(feet) - M1_Z;
         return x >= 11 && x <= 15 && z >= 5 && z <= 9 && localY(feet) <= HOUSE_GROUND + 1;
     }
 
     /** Whether feet are on the straight at 1414 49 -503 and the passage after it (-505..-500). */
     public boolean onHouseStraight(NavPoint feet) {
         int x = localX(feet);
-        int z = localZ(feet);
+        int z = localZ(feet) - M1_Z;
         return x >= 9 && x <= 16 && z >= 10 && z <= 15 && localY(feet) <= HOUSE_GROUND + 1;
+    }
+
+    // ==================== the climb through the whole stair house (link B1, PandiO/knk-workspace#670) ====================
+
+    /**
+     * The road line through the whole stair house, in real floor blocks (x, y, z; the line runs through their
+     * centres): from the street east of the house (1430 48 -521) west to 1413, south into M1's line through the
+     * entrance and up the two steps to the hall (floor 50), then up the five flights of the stacked hairpins: north
+     * along x 1409 to the landing at -501 (floor 54), south along x 1415 to the landing at -490 (58), north along x
+     * 1409 to the landing at -503 (62), east and north along x 1415 over the corridor at floor 65 above the street to
+     * -533, north up the flight to the landing at -546 (69), south along x 1409 to the landing at -536 (73), east and
+     * north to the top hall at floor 75 (-545). Every block's floor is the whole block it stands on, as the road
+     * graph stores a line, so the line's height steps at the flights' blocks. Found on the developer's schematic with a
+     * walk search along the middle of each flight (the 3-wide flights' centre columns 1409 and 1415), not from a trace:
+     * the developer's traces of 2026-11-16 were not on their evidence branch when this was built (decision in the B1
+     * report block); replace it with the trace's line when they are.
+     */
+    static final int[][] CLIMB = {
+        {1430, 48, -521}, {1413, 48, -521}, // the street from the east
+        // M1's line (houseLine) runs from 1413 -514 to the hall at 1413 50 -490
+        {1413, 50, -490}, {1409, 50, -490}, {1409, 50, -491}, {1409, 51, -492}, {1409, 51, -493}, {1409, 52, -494},
+        {1409, 52, -497}, {1409, 53, -498}, {1409, 53, -499}, {1409, 54, -500}, {1409, 54, -501}, // flight 1
+        {1415, 54, -501}, {1415, 55, -500}, {1415, 55, -499}, {1415, 56, -498}, {1415, 56, -495}, {1415, 57, -494},
+        {1415, 57, -493}, {1415, 58, -492}, {1415, 58, -490}, // flight 2
+        {1409, 58, -490}, {1409, 58, -491}, {1409, 59, -492}, {1409, 59, -493}, {1409, 60, -494}, {1409, 60, -497},
+        {1409, 61, -498}, {1409, 61, -499}, {1409, 62, -500}, {1409, 62, -503}, // flight 3
+        {1411, 62, -503}, {1412, 63, -503}, {1414, 63, -503}, {1414, 63, -504}, {1415, 63, -504}, {1415, 63, -505},
+        {1415, 64, -506}, {1415, 64, -510}, {1415, 65, -511}, {1415, 65, -530}, {1415, 64, -531}, {1415, 64, -533},
+        // the corridor over the street
+        {1415, 65, -534}, {1415, 65, -535}, {1415, 66, -536}, {1415, 66, -539}, {1415, 67, -540}, {1415, 67, -541},
+        {1415, 68, -542}, {1415, 68, -543}, {1415, 69, -544}, {1415, 69, -546}, // flight 4
+        {1413, 69, -546}, {1412, 70, -546}, {1409, 70, -546}, {1409, 70, -545}, {1409, 71, -544}, {1409, 71, -543},
+        {1409, 72, -542}, {1409, 72, -539}, {1409, 73, -538}, {1409, 73, -536}, // flight 5
+        {1411, 73, -536}, {1412, 74, -536}, {1415, 74, -536}, {1415, 74, -539}, {1415, 75, -540}, {1415, 75, -545},
+        {1414, 75, -545}, // the top hall
+    };
+
+    /**
+     * The flights and landings of the climb, in the order the line passes them (real feet blocks, inclusive): name,
+     * x min, x max, z min, z max, feet y min, feet y max. A body on none of them is between them (a fall shows as the
+     * next place lower than the last).
+     */
+    static final Object[][] CLIMB_PLACES = {
+        {"street and hall", 1400, 1431, -530, -487, 49, 51},
+        {"flight 1 (x 1409, north)", 1408, 1410, -500, -491, 52, 55},
+        {"landing -501", 1408, 1416, -502, -501, 55, 55},
+        {"flight 2 (x 1415, south)", 1414, 1416, -500, -491, 56, 59},
+        {"landing -490", 1408, 1416, -490, -489, 59, 59},
+        {"flight 3 (x 1409, north)", 1408, 1410, -502, -491, 60, 63},
+        {"landing -503", 1408, 1416, -505, -503, 63, 64},
+        {"corridor over the street", 1414, 1416, -533, -506, 65, 66},
+        {"flight 4 (x 1415, north)", 1414, 1416, -545, -534, 66, 70},
+        {"landing -546", 1408, 1416, -547, -546, 70, 71},
+        {"flight 5 (x 1409, south)", 1408, 1410, -545, -537, 71, 74},
+        {"landing -536", 1408, 1416, -536, -536, 74, 75},
+        {"top hall", 1408, 1416, -548, -537, 75, 77},
+    };
+
+    /** The road line from the street east of the house through the entrance and up all five flights (floor points). */
+    public List<NavPoint> climbLine() {
+        List<NavPoint> line = new ArrayList<>();
+        line.add(real(CLIMB[0][0] + 0.5, CLIMB[0][1], CLIMB[0][2] + 0.5));
+        line.add(real(CLIMB[1][0] + 0.5, CLIMB[1][1], CLIMB[1][2] + 0.5));
+        line.addAll(houseLine());
+        for (int i = 3; i < CLIMB.length; i++) {
+            line.add(real(CLIMB[i][0] + 0.5, CLIMB[i][1], CLIMB[i][2] + 0.5));
+        }
+        return line;
+    }
+
+    /** {@link #climbLine} there and back. */
+    public List<NavPoint> climbLoop() {
+        return thereAndBack(climbLine());
+    }
+
+    /** The climb's start on the street east of the house (feet, real 1428.5 49 -520.5), and a group's places behind it. */
+    public NavPoint climbStart(int i) {
+        if (i == 0) {
+            return realFeet(1427.5, 48, -520.5);
+        }
+        // followers in rows of 3 further east on the street (real 1428..1430, -522..-519)
+        return realFeet(1428.5 + 0.9 * ((i - 1) / 4 % 3), 48, -521.75 + 0.85 * ((i - 1) % 4));
+    }
+
+    /**
+     * Singles sent with a group: on the street east of the house beside the group's places, ten south of it (real
+     * 1425..1430, -528..-527) and ten north of it (-516..-515).
+     */
+    public NavPoint climbBeside(int i) {
+        int row = i / 5;
+        double z = row < 2 ? -527.5 + row : -515.5 + (row - 2);
+        return realFeet(1425.5 + 1.2 * (i % 5), 48, z);
+    }
+
+    /** The climb's goal in the top hall (feet, real 1414.5 76 -544.5). */
+    public NavPoint climbGoal() {
+        return realFeet(1414.5, 75, -544.5);
+    }
+
+    /** The place of the climb a body's feet are on ({@link #CLIMB_PLACES} index), or -1 between them. */
+    public int climbPlace(NavPoint feet) {
+        int x = localX(feet) + STAIRHOUSE_FRAME[0];
+        int y = (int) Math.floor(feet.y() - scene.worldY(0) + 0.01) + STAIRHOUSE_FRAME[1];
+        int z = localZ(feet) + STAIRHOUSE_FRAME[2];
+        for (int i = CLIMB_PLACES.length - 1; i >= 0; i--) {
+            Object[] p = CLIMB_PLACES[i];
+            if (x >= (int) p[1] && x <= (int) p[2] && z >= (int) p[3] && z <= (int) p[4] && y >= (int) p[5]
+                && y <= (int) p[6]) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** A place's name. */
+    public static String climbPlaceName(int place) {
+        return place < 0 ? "between places" : (String) CLIMB_PLACES[place][0];
+    }
+
+    /** The number of places on the climb. */
+    public static int climbPlaces() {
+        return CLIMB_PLACES.length;
+    }
+
+    /** A real floor block's centre as a floor point (the stair house's box only). */
+    public NavPoint real(double x, int floorY, double z) {
+        return floor(x - STAIRHOUSE_FRAME[0], floorY - STAIRHOUSE_FRAME[1], z - STAIRHOUSE_FRAME[2]);
+    }
+
+    /** The feet of a body standing on a real floor block (the stair house's box only). */
+    public NavPoint realFeet(double x, int floorY, double z) {
+        return feet(x - STAIRHOUSE_FRAME[0], floorY - STAIRHOUSE_FRAME[1], z - STAIRHOUSE_FRAME[2]);
+    }
+
+    /** "x y z" of a feet position in real coordinates (the stair house's box only). */
+    public String realBlock(NavPoint feet) {
+        return (localX(feet) + STAIRHOUSE_FRAME[0]) + " " + (feet.blockY() - scene.worldY(0) + STAIRHOUSE_FRAME[1]) + " "
+            + (localZ(feet) + STAIRHOUSE_FRAME[2]);
+    }
+
+    /** "name at x y z" with world block coordinates turned into real ones (the stair house's box only). */
+    public String realPosition(String who) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(.*) at (-?\\d+) (-?\\d+) (-?\\d+)$").matcher(who);
+        if (!m.matches()) {
+            return who;
+        }
+        return m.group(1) + " at " + (Integer.parseInt(m.group(2)) - scene.worldX(0) + STAIRHOUSE_FRAME[0]) + " "
+            + (Integer.parseInt(m.group(3)) - scene.worldY(0) + STAIRHOUSE_FRAME[1]) + " "
+            + (Integer.parseInt(m.group(4)) - scene.worldZ(0) + STAIRHOUSE_FRAME[2]);
+    }
+
+    /** A floor point given in link M1's frame (real - (1400, 46, -515)). */
+    private NavPoint m1Floor(double x, int floorY, double z) {
+        return floor(x, floorY, M1_Z + z);
     }
 
     // ==================== the jagged straight ====================

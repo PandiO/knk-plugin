@@ -20,7 +20,13 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * leg without a path (no {@code none}, no {@code recovery_no_path}). Still reports the numbers (arrivals, trips, the
  * longest stand on the straight and in the entrance, the tick cost) in its {@code KNK-NPC-REPORT} line. Needs Citizens.
  */
-public final class NpcStairhouseSinglesScenario implements Scenario<ScenarioScene> {
+public final class NpcStairhouseSinglesScenario implements Scenario<ScenarioScene>, net.knightsandkings.knk.paper.scenario.SizedScene {
+
+    /** The whole stair house (link B1, PandiO/knk-workspace#670). */
+    @Override
+    public ScenarioScene.Box box() {
+        return NpcMovementScene.STAIRHOUSE_BOX;
+    }
 
     static final int MAX_TICKS = 50 * 20;
 

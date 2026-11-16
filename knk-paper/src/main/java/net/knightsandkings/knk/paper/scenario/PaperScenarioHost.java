@@ -20,7 +20,8 @@ import java.util.Map;
  * {@code i} of a run sits at {@code origin + i × }{@value ScenarioSettings#SPACING}{@code  blocks} along
  * x. Opening a scene force-loads its chunks (so blocks and entities tick without a player nearby),
  * clears the box to air and removes the entities in it; closing it does the same and releases the
- * chunks it force-loaded.
+ * chunks it force-loaded. A scenario that implements {@link SizedScene} gets a box of its own size
+ * (PandiO/knk-workspace#670).
  */
 public final class PaperScenarioHost implements ScenarioHost<ScenarioScene> {
 
@@ -39,14 +40,15 @@ public final class PaperScenarioHost implements ScenarioHost<ScenarioScene> {
         int x = settings.originX() + index * ScenarioSettings.SPACING;
         int y = settings.originY();
         int z = settings.originZ();
-        if (y < world.getMinHeight() || y + ScenarioScene.HEIGHT > world.getMaxHeight()) {
+        ScenarioScene.Box box = scenario instanceof SizedScene sized ? sized.box() : ScenarioScene.Box.DEFAULT;
+        if (y < world.getMinHeight() || y + box.y() > world.getMaxHeight()) {
             throw new IllegalStateException("testing.scenarios.origin.y " + y + " puts the scene outside world '"
                 + world.getName() + "' (" + world.getMinHeight() + " to " + world.getMaxHeight() + ")");
         }
-        ScenarioScene scene = new ScenarioScene(scenario.name(), index, world, x, y, z, services);
+        ScenarioScene scene = new ScenarioScene(scenario.name(), index, world, x, y, z, services, box);
         List<long[]> forced = new ArrayList<>();
-        for (int cx = x >> 4; cx <= (x + ScenarioScene.SIZE - 1) >> 4; cx++) {
-            for (int cz = z >> 4; cz <= (z + ScenarioScene.SIZE - 1) >> 4; cz++) {
+        for (int cx = x >> 4; cx <= (x + box.x() - 1) >> 4; cx++) {
+            for (int cz = z >> 4; cz <= (z + box.z() - 1) >> 4; cz++) {
                 if (!world.isChunkForceLoaded(cx, cz)) {
                     world.setChunkForceLoaded(cx, cz, true);
                     forced.add(new long[] {cx, cz});
@@ -86,16 +88,17 @@ public final class PaperScenarioHost implements ScenarioHost<ScenarioScene> {
     /** Clears the box to air (no physics) and removes every entity in it except players. */
     private static void reset(ScenarioScene scene) {
         World world = scene.world();
+        ScenarioScene.Box size = scene.box();
         BoundingBox box = new BoundingBox(scene.originX(), scene.originY(), scene.originZ(),
-            scene.originX() + ScenarioScene.SIZE, scene.originY() + ScenarioScene.HEIGHT, scene.originZ() + ScenarioScene.SIZE);
+            scene.originX() + size.x(), scene.originY() + size.y(), scene.originZ() + size.z());
         for (Entity entity : world.getNearbyEntities(box)) {
             if (!(entity instanceof Player)) {
                 entity.remove();
             }
         }
-        for (int dx = 0; dx < ScenarioScene.SIZE; dx++) {
-            for (int dy = ScenarioScene.HEIGHT - 1; dy >= 0; dy--) {
-                for (int dz = 0; dz < ScenarioScene.SIZE; dz++) {
+        for (int dx = 0; dx < size.x(); dx++) {
+            for (int dy = size.y() - 1; dy >= 0; dy--) {
+                for (int dz = 0; dz < size.z(); dz++) {
                     Block block = scene.block(dx, dy, dz);
                     if (block.getType() != Material.AIR) {
                         block.setType(Material.AIR, false);
