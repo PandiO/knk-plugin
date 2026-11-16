@@ -95,13 +95,22 @@ final class CitizensNpcMover implements NpcMover {
         return entity == null ? Double.NaN : entity.getVelocity().getY();
     }
 
-    /** Puts the body somewhere else at once, through Citizens (a scenario pushing an NPC into a corner). */
-    void teleport(NavPoint feet) {
+    /**
+     * Puts the body somewhere else at once, through Citizens: a pushed NPC's teleport home (link M7), a scenario
+     * pushing an NPC into a corner. The running order stops first.
+     */
+    @Override
+    public boolean teleport(NavPoint feet) {
         World world = Bukkit.getWorld(feet.world());
-        if (npc.isSpawned() && world != null) {
-            npc.teleport(new Location(world, feet.x(), feet.y(), feet.z()),
-                org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+        if (!npc.isSpawned() || world == null) {
+            return false;
         }
+        if (npc.getNavigator().isNavigating()) {
+            npc.getNavigator().cancelNavigation();
+        }
+        npc.teleport(new Location(world, feet.x(), feet.y(), feet.z()),
+            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+        return true;
     }
 
     @Override

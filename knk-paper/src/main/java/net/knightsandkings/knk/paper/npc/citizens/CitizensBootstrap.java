@@ -84,6 +84,14 @@ public final class CitizensBootstrap {
         return false;
     }
 
+    /** The NPC's entity while it is spawned (scenarios and the Paper wiring only). */
+    public static java.util.Optional<org.bukkit.entity.Entity> entity(net.knightsandkings.knk.core.npc.nav.NpcMover mover) {
+        if (mover instanceof CitizensNpcMover citizens && citizens.npc().isSpawned()) {
+            return java.util.Optional.ofNullable(citizens.npc().getEntity());
+        }
+        return java.util.Optional.empty();
+    }
+
     /** Removes the runtime's NPCs and registry; safe with any factory or null. */
     public static void stop(NpcMoverFactory factory) {
         if (factory instanceof CitizensNpcRuntime runtime) {

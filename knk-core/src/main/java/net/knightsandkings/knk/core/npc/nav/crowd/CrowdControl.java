@@ -239,6 +239,16 @@ public final class CrowdControl {
         this.groupMembers = members == null ? id -> new int[0] : members;
     }
 
+    /**
+     * NPCs whose queue spots keep the edge guard (link M7, collision on): a spot on a cell next to a drop is skipped,
+     * so a waiting NPC a push moves has a cell of margin. Default none.
+     */
+    public void setEdgeGuarded(java.util.function.IntPredicate guarded) {
+        this.edgeGuarded = guarded == null ? id -> false : guarded;
+    }
+
+    private java.util.function.IntPredicate edgeGuarded = id -> false;
+
     // ==================== the update ====================
 
     /**
@@ -347,7 +357,7 @@ public final class CrowdControl {
                 yields++;
             }
             int k = queueIndex(t);
-            return new Decision(Kind.YIELD, spot(world, p, t.dir, k, at), k, p, false);
+            return new Decision(Kind.YIELD, spot(world, p, t.dir, k, at, edgeGuarded.test(t.npc)), k, p, false);
         }
         if (mayEnter(t)) {
             enter(t, tick);
@@ -359,7 +369,7 @@ public final class CrowdControl {
             return new Decision(Kind.GO, null, 0, p, true);
         }
         int k = queueIndex(t);
-        return new Decision(Kind.WAIT, spot(world, p, t.dir, k, at), k, p, false);
+        return new Decision(Kind.WAIT, spot(world, p, t.dir, k, at, edgeGuarded.test(t.npc)), k, p, false);
     }
 
     /** The turn rules of the class comment: nobody of the other direction in it, first come, spacing. */
@@ -627,6 +637,11 @@ public final class CrowdControl {
      * walkable line. Null when none of them works (it then waits where it stands).
      */
     NavPoint spot(NavWorld world, Place p, int dir, int k, NavPoint at) {
+        return spot(world, p, dir, k, at, false);
+    }
+
+    /** As {@link #spot(NavWorld, Place, int, int, NavPoint)}; {@code edgeGuard}: never a cell next to a drop (M7). */
+    NavPoint spot(NavWorld world, Place p, int dir, int k, NavPoint at, boolean edgeGuard) {
         double hx = p.ax * dir;
         double hz = p.az * dir;
         double back = p.halfLength + FIRST_GAP + k * QUEUE_SPACING;
@@ -649,6 +664,9 @@ public final class CrowdControl {
             }
             NavPoint feet = new NavPoint(p.world, x, floor.blockY() + 1, z);
             if (p.cells.contains(Occupancy.pack(feet.blockX(), feet.blockY(), feet.blockZ()))) {
+                continue;
+            }
+            if (edgeGuard && net.knightsandkings.knk.core.npc.nav.push.EdgeGuard.nextToDrop(world, feet)) {
                 continue;
             }
             if (NavGeometry.straightWalkable(world, feet, feet) && NavGeometry.straightWalkable(world, at, feet)) {

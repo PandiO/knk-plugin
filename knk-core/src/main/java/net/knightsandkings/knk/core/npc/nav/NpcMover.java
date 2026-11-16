@@ -83,6 +83,14 @@ public interface NpcMover {
     default void setSpeedFactor(double factor) {
     }
 
+    /**
+     * Puts the body at {@code feet} at once (a pushed NPC's teleport home, the last step of its return, 4c.4 item 7);
+     * false when the engine cannot. The running order, if any, is stopped.
+     */
+    default boolean teleport(NavPoint feet) {
+        return false;
+    }
+
     /** Stop moving; fires no {@link MoverListener#stuck}. */
     void stop();
 
@@ -100,6 +108,34 @@ public interface NpcMover {
         STATIONARY,
         /** The engine's path search ended without a path (an unreachable target), before the body moved. */
         NO_PATH
+    }
+
+    /** What touched the body (4c.4 item 7): a player, another NPC, an attack, or something else. */
+    enum ContactKind {
+        /** A player's body pushed it. */
+        PLAYER,
+        /** Another NPC's body pushed it. */
+        NPC,
+        /** An attack knocked it back (on Paper {@code EntityPushedByEntityAttackEvent}); it is not cancelled. */
+        ATTACK,
+        /** Any other entity. */
+        OTHER
+    }
+
+    /**
+     * A contact the engine saw: what pushed the body and who ({@code by}: the engine's id of the other entity, for a
+     * player the id {@link NpcCollisionPolicy#exempt} takes; null when unknown; {@code player}: whether {@code by} is a
+     * player, which an {@link ContactKind#ATTACK} needs to say).
+     */
+    record Contact(ContactKind kind, String by, boolean player) {
+        public Contact {
+            java.util.Objects.requireNonNull(kind, "kind");
+            player = player || kind == ContactKind.PLAYER;
+        }
+
+        public Contact(ContactKind kind, String by) {
+            this(kind, by, kind == ContactKind.PLAYER);
+        }
     }
 
     /** What the engine reports about a mover. Main thread. */
@@ -127,6 +163,13 @@ public interface NpcMover {
 
         /** The entity is back (its chunk loaded again). */
         default void respawned(NpcMover mover) {
+        }
+
+        /**
+         * Something touched or knocked the body (4c.4 item 7): a hint for push detection, which still judges the
+         * displacement itself. Engines may report one contact every tick while bodies overlap.
+         */
+        default void contact(NpcMover mover, Contact contact) {
         }
 
         /** The engine had added block rules of its own to a local search; they were removed. {@code names} for logs. */

@@ -90,7 +90,13 @@ public final class ScenarioNpcs {
             System::nanoTime, logLine, rules), 4);
         groups = new NavGroupService(new NavGroupService.Ports(service, world, rules, metrics,
             System::nanoTime, logLine));
+        // bodies with collision on (link M7), as the plugin wires them
+        collision = new net.knightsandkings.knk.paper.npc.nav.BukkitCollisionPolicy(CitizensBootstrap::entity)
+            .start(scene.services().plugin());
+        service.setCollision(collision, new net.knightsandkings.knk.paper.npc.nav.BukkitNpcSight());
     }
+
+    private final net.knightsandkings.knk.paper.npc.nav.BukkitCollisionPolicy collision;
 
     /**
      * Starts NPC navigation on Citizens for a scene: fails the step when Citizens is not installed or not usable.
@@ -126,6 +132,7 @@ public final class ScenarioNpcs {
             task.cancel();
             task = null;
         }
+        collision.stop();
         for (NavGroup group : groupList) {
             groups.disband(group);
         }

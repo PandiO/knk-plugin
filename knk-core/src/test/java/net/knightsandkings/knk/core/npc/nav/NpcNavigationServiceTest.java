@@ -95,6 +95,21 @@ class NpcNavigationServiceTest {
             moving = false;
         }
 
+        /** Whether {@link #teleport} works (link M7's teleport home). */
+        boolean canTeleport;
+        final List<NavPoint> teleports = new ArrayList<>();
+
+        @Override
+        public boolean teleport(NavPoint feet) {
+            if (!canTeleport) {
+                return false;
+            }
+            teleports.add(feet);
+            position = feet;
+            moving = false;
+            return true;
+        }
+
         @Override
         public boolean isMoving() {
             return moving;
