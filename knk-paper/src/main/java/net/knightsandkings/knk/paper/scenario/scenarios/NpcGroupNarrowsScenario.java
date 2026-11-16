@@ -20,9 +20,12 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
 /**
  * Narrowed formations on a real server (implementation plan 4b.3 item 14.1, PandiO/knk-workspace#493): a group of 9
  * in {@code cluster} walks the corner scene from the north road (3 wide, with a one-block post on its outer lane)
- * down the east side through its 2-wide and 1-wide passages to the south road (3 wide). It walks 3 abreast, narrows
- * to 2 abreast, folds into a column and takes up 3 abreast again, in that order; the post changes nothing; nobody
- * trespasses or falls and no stuck spell is left open. Needs Citizens (CI's {@code paper-boot} server).
+ * down the east side through its 2-wide and 1-wide passages to the south road (3 wide). Since link M3
+ * (PandiO/knk-workspace#624, plan 4c.4 item 3.2) it runs with {@code group-formation-keeping: elastic}, and its
+ * expectations moved to the squeeze: 3 abreast squeezed through the 2-wide passage (no narrowing), the column (or
+ * merged lanes, for a passage shorter than the hysteresis) only at the 1-wide passage, 3 abreast again after; the post
+ * changes nothing; nobody trespasses or falls and no stuck spell is left open. L4's fixed widths ({@code levels}) are
+ * checked by knk-core's {@code NavGroupWidthsTest}. Needs Citizens (CI's {@code paper-boot} server).
  */
 public final class NpcGroupNarrowsScenario implements Scenario<ScenarioScene> {
 
@@ -35,7 +38,8 @@ public final class NpcGroupNarrowsScenario implements Scenario<ScenarioScene> {
 
     @Override
     public String description() {
-        return "A cluster of 9 on 3-, 2- and 1-wide passages: 3 abreast, 2 abreast, column and back, no switch at a post";
+        return "A cluster of 9 (elastic) on 3-, 2- and 1-wide passages: 3 abreast squeezed, column only where 1 wide, "
+            + "back to 3, no switch at a post";
     }
 
     @Override
@@ -53,7 +57,8 @@ public final class NpcGroupNarrowsScenario implements Scenario<ScenarioScene> {
                 scene.block(16, 3, 6).setType(Material.STONE_BRICKS);
             })
             .act("start NPC navigation on Citizens", () -> npcs.set(ScenarioNpcs.start(scene, corners.routeLine(),
-                NavigationSettings.defaults())))
+                NavigationSettings.builder().global(NavigationSettings.Overrides.of(
+                    NavigationSettings.GROUP_FORMATION_KEEPING, "elastic")).build())))
             .cleanup("remove the NPCs", () -> {
                 if (npcs.get() != null) {
                     npcs.get().stop();
@@ -73,19 +78,29 @@ public final class NpcGroupNarrowsScenario implements Scenario<ScenarioScene> {
                     for (var line : npcs.get().log()) {
                         String text = line.text();
                         if (text.startsWith("group ") && (text.contains(" narrows ") || text.contains(" widens ")
-                            || text.contains(" folds ") || text.contains(" takes up "))) {
+                            || text.contains(" folds ") || text.contains(" takes up ")
+                            || text.contains(" merges its lanes "))) {
                             widths.add(text);
                         }
                     }
                 }
                 return widthAtGoal.get() != null;
             })
-            .check("3 abreast, 2 abreast, a column and 3 abreast again, in that order", () -> {
-                int narrow = indexOf(widths, "narrows to 2 abreast");
+            .check("3 abreast squeezed through the 2-wide passage, the column or merged lanes only at the 1-wide one", () -> {
+                if (indexOf(widths, "narrows to") >= 0) {
+                    return "narrowed although 3 abreast fit the 2-wide passage squeezed: " + widths + npcs.get().tail(20);
+                }
                 int fold = indexOf(widths, "folds into a column");
-                int back = Math.max(indexOf(widths, "takes up 3 abreast again"), indexOf(widths, "widens to 3 abreast"));
-                return narrow >= 0 && fold > narrow && back > fold ? null
-                    : "width changes " + widths + npcs.get().tail(20);
+                int merge = indexOf(widths, "merges its lanes");
+                if (fold < 0 && merge < 0) {
+                    return "neither a column nor merged lanes at the 1-wide passage: " + widths + npcs.get().tail(20);
+                }
+                if (fold >= 0 && Math.max(indexOf(widths, "takes up 3 abreast again"),
+                    indexOf(widths, "widens to 3 abreast")) < fold) {
+                    return "folded and never took up 3 abreast again: " + widths + npcs.get().tail(20);
+                }
+                long folds = widths.stream().filter(line -> line.contains("folds into a column")).count();
+                return folds <= 1 ? null : folds + " folds, one 1-wide passage: " + widths;
             })
             .check("the post on the north road changed nothing", () -> {
                 for (String line : widths) {

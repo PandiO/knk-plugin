@@ -40,6 +40,8 @@ public final class NpcNavigationModule {
     private final NpcEventAudit audit;
     private final RegionIds regionIds;
     private NpcMoverFactory factory;
+    /** Players' collision with NPCs (link M7), while route following runs. */
+    private BukkitCollisionPolicy collisionPolicy;
     private String unavailable;
     private NpcTestWalkers walkers;
     private BukkitTask snapshotTask;
@@ -154,6 +156,10 @@ public final class NpcNavigationModule {
             ruleEvents.run();
             ruleEvents = null;
         }
+        if (collisionPolicy != null) {
+            collisionPolicy.stop();
+            collisionPolicy = null;
+        }
         if (runner != null) {
             runner.clear();
             runner = null;
@@ -230,6 +236,10 @@ public final class NpcNavigationModule {
             new NpcLegPreparer(legs, walk.searches(), task -> Bukkit.getScheduler().runTask(plugin, task),
                 Bukkit::getWorld, logger), world, metrics, System::nanoTime, log::event, nav.accessRules()),
             config.maxPlansInFlight(), config.ruleChecksPerTick());
+        // bodies with collision on (link M7): players' collision per NPC through Paper's collidable exemptions, and
+        // whether a player sees a place for the teleport home
+        collisionPolicy = new BukkitCollisionPolicy(CitizensBootstrap::entity).start(plugin);
+        service.setCollision(collisionPolicy, new BukkitNpcSight());
         // gate and availability events reach the NPCs through road navigation's listener port; an event may arrive
         // off the main thread (a cache refresh), the NPC service is main thread only
         NpcNavigationService npcs = service;

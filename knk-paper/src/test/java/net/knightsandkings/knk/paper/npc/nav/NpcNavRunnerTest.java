@@ -27,6 +27,7 @@ import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcMoverFactory;
 import net.knightsandkings.knk.core.npc.nav.NpcNavState;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
+import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.FoldReason;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationService;
 import net.knightsandkings.knk.core.npc.nav.RoadPlanner;
 import net.knightsandkings.knk.core.roads.walk.CellAccess;
@@ -294,6 +295,14 @@ class NpcNavRunnerTest {
             assertTrue(lines.size() > 15 && lines.get(lines.size() - 1).equals("# trace ended"), lines.toString());
             assertTrue(lines.stream().anyMatch(line -> line.matches("# waypoints: -?\\d+ -?\\d+ -?\\d+(; -?\\d+ -?\\d+ -?\\d+)*")),
                 "the trace lists the stretch's waypoints: " + lines);
+            String num = "\\d+\\.\\d\\d";
+            String point = "-?\\d+ -?\\d+ -?\\d+ " + num + " " + num + " " + num;
+            assertTrue(lines.stream().anyMatch(line -> line.matches("# corridor: " + point + "(; " + point + ")*")),
+                "the trace lists the free width at each waypoint (M1): " + lines);
+            int waypoints = lines.stream().filter(line -> line.startsWith("# waypoints:")).findFirst().orElseThrow()
+                .split(";").length;
+            assertEquals(waypoints, lines.stream().filter(line -> line.startsWith("# corridor:")).findFirst()
+                .orElseThrow().split(";").length, "one width per waypoint");
         }
         assertEquals("No test NPC nobody", runner.startTrace(FROM, "nobody", 1));
     }
@@ -307,6 +316,26 @@ class NpcNavRunnerTest {
         assertTrue(rules.startsWith("rules: trespasses 0 (must be 0) | rule checks "), rules);
         assertTrue(rules.contains("replans: recheck 0, event 3"), rules);
         assertTrue(rules.endsWith("walked to the blocking element 0, woken by its event 0, waiting there now 0"), rules);
+    }
+
+    @Test
+    void theFoldReasonsSinceTheLastResetAreListed() {
+        var fold = net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.GROUP_FOLD;
+        var narrow = net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.GROUP_NARROW;
+        metrics.countFoldReason(fold, FoldReason.STAIR); // before the reset
+        runner.resetCounters();
+        assertEquals("", runner.reasons(fold), "nothing since the reset");
+
+        metrics.countFoldReason(fold, FoldReason.STAIR);
+        metrics.countFoldReason(fold, FoldReason.STAIR);
+        metrics.countFoldReason(fold, FoldReason.DOOR);
+        metrics.countFoldReason(narrow, FoldReason.EDGE);
+        var merge = net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event.GROUP_MERGE;
+        metrics.countFoldReason(merge, FoldReason.NARROW);
+
+        assertEquals(" (stair 2, door 1)", runner.reasons(fold));
+        assertEquals(" (edge 1)", runner.reasons(narrow));
+        assertEquals(" (narrow 1)", runner.reasons(merge), "merges carry their reason too (link M3)");
     }
 
     @Test
@@ -354,7 +383,7 @@ class NpcNavRunnerTest {
             assertEquals(NpcNavState.IDLE, service.state(follower.id()), "a follower has no order of its own");
         }
         String line = runner.report(0, 0).stream().filter(l -> l.startsWith("groups ")).findFirst().orElseThrow();
-        assertTrue(line.startsWith("groups 1 (5 NPCs, ranks): trips 0 | widths: narrows 0, widens 0 | folds 0, reforms 0, "
+        assertTrue(line.startsWith("groups 1 (5 NPCs, ranks): trips 0 | widths: narrows 0, widens 0, merges 0 | folds 0, reforms 0, "
             + "folded now 0 | abreast now 2 | finished trips 0 (finishing now 0) | own legs back 0"), line);
         assertTrue(line.endsWith("road plans per group event: max 0 | local legs at once: max 0"),
             "this test's planner answers at once: " + line);

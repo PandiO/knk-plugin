@@ -48,6 +48,44 @@ public final class NavGroupService {
         this.ports = Objects.requireNonNull(ports, "ports");
         // a follower walks its group's waypoints without an order of its own: the engine's stuck reports for it come
         // here (implementation plan 4b.2 item 9)
+        // corridor steering leaves group members on the road line until link M3 fits formations to the corridor:
+        // the group path is built from the leader's route line (plan 4c.4 items 2 and 3)
+        ports.navigation().setUnshapedMembers(moverId -> {
+            for (NavGroup group : groups.values()) {
+                if (group.isMember(moverId)) {
+                    return true;
+                }
+            }
+            return false;
+        });
+        // a leader's plaza lines keep its group's formation half width from wells and walls, as the group path does
+        // (link M5)
+        ports.navigation().setPlazaClearance(moverId -> {
+            for (NavGroup group : groups.values()) {
+                if (group.leader().id() == moverId) {
+                    return group.plazaClearance();
+                }
+            }
+            return Double.NaN;
+        });
+        // crowd awareness (link M4): a leader keeps its turn at a narrow place until its followers are through
+        ports.navigation().setGroupMembers(moverId -> {
+            for (NavGroup group : groups.values()) {
+                if (group.leader().id() == moverId) {
+                    return group.followerIds();
+                }
+            }
+            return new int[0];
+        });
+        // push resistance (link M7): a pushed follower is brought back by its group's slot walks, not by a return
+        ports.navigation().setGroupFollowers(moverId -> {
+            for (NavGroup group : groups.values()) {
+                if (group.isMember(moverId) && group.leader().id() != moverId) {
+                    return true;
+                }
+            }
+            return false;
+        });
         ports.navigation().setIdleStuckListener((moverId, kind) -> {
             for (NavGroup group : groups.values()) {
                 if (group.engineStuck(moverId, kind)) {

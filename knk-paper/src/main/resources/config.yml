@@ -560,11 +560,47 @@ npc:
     # Ticks between two recovery steps of a stuck NPC (back-off, side-step, local leg, replan).
     recovery-wait-ticks: 20
     # Blocks an NPC keeps between itself and a wall on the inside of a turn of its route, as far as the road allows;
-    # straight stretches may run along a wall (0 = off).
+    # straight stretches may run along a wall unless corridor-steering is on (0 = off).
     corner-clearance: 1.0
     # How close an NPC comes to a route waypoint before it heads for the next one; smaller walks turns through the
-    # corner point (Citizens' own default is 1).
+    # corner point (Citizens' own default is 1). A stretch with a doorway that corridor steering lined up uses 0.35.
     waypoint-margin: 0.5
+    # Corridor steering (off until tested): each stretch of the route line is re-placed in the walkable corridor around
+    # it before the NPC walks it: away from walls, posts and drops by wall-clearance where the road is wide enough
+    # (on straights too), straightened where the corridor allows, and through the middle of doorways and entrances on
+    # their axis. Corner clearance and the other safety steps still run on the shaped line. The corridor of a stretch is
+    # built once and shared by every NPC on it.
+    corridor-steering: false
+    # Blocks either side of the route line the corridor looks at (1 to 8).
+    corridor-half-width: 4
+    # Blocks from the NPC's centre to a wall, post or drop that corridor steering keeps where the road allows (the
+    # body's half width is 0.3). Narrower places are walked through their middle, so one-block doors stay open.
+    # 0.35 to 2.
+    wall-clearance: 0.8
+    # Clearance-aware local legs (off until tested): short trips, a group follower's own leg back to its group and the
+    # recovery ladder's local leg are searched by K&K on its own walk grid, with the corridor's clearance per cell (the
+    # body's width as the hard minimum, so one-block doors stay open, and wall-clearance as a preferred margin),
+    # smoothed into a few straight steps and walked as waypoints. When K&K's search finds nothing within its cell
+    # budget, Citizens' own search walks the leg as before. /knk npc nav stats counts "local legs: k&k N, engine N,
+    # none N".
+    local-legs-clearance: false
+    # Plaza lines (off until tested): the road graph collapses a plaza into one junction, so a route across it runs to
+    # its middle and out again. With this on, where a route passes a plaza junction the corridor widens to the plaza
+    # (a designed plaza's radius, or the open floor measured round the junction when it is wider than
+    # corridor-half-width) and the NPC walks the straight line from where the route enters the plaza to where it
+    # leaves, round wells, stalls and trees with wall-clearance, never into a region its line does not pass. Groups
+    # take the same line, kept their formation's half width from obstacles. Works with or without corridor-steering.
+    # The players' trail is unchanged.
+    plaza-lines: false
+    # The largest plaza radius, in blocks, plaza lines widen the corridor to (4 to 32).
+    plaza-corridor-blocks: 16
+    # Crowd awareness (off until tested). Narrow places on an NPC's way (a door, an arch, a passage under 2 blocks wide)
+    # are taken in turns: one direction at a time, an NPC already in it first, then first come. The others wait in a
+    # queue a block apart before it, a block to the side of the line, so the way out stays free. Two NPCs that meet
+    # head-on in a narrow place: the second to enter steps back out and waits. Waiting behind another NPC, in a queue
+    # or stepping aside counts as waiting, not as being stuck, and recovery steps never end on a cell where another
+    # NPC stands. /knk npc nav stats shows "crowd: waits N, yields N, longest queue N".
+    crowd-awareness: false
     # Ticks an NPC waits before asking again while the rules allow no route or the way ahead is not loaded. An NPC
     # waiting at a closed gate or a district edge is woken by the gate or access change itself; this is the fallback.
     no-route-wait-ticks: 100
@@ -574,8 +610,30 @@ npc:
     # The trespass guard logs and counts an NPC that entered a region its current rules deny (it must never happen).
     # true: also stop that NPC and plan its route again. For dev servers.
     stop-on-trespass: false
-    # Whether NPCs push and block each other.
+    # Whether NPCs have bodies: they push and block each other (true), or walk through everything (false). With it on,
+    # players never move an NPC unless players-push-npcs is on (each NPC is exempt from players' collision; nothing
+    # touches scoreboard teams), and push resistance runs: a push the NPC's own walk doesn't explain (a body, an
+    # attack's knockback, water, a piston) is detected, counted and logged with who did it, and the NPC walks back to
+    # its line or post. NPCs never wait, queue or step aside on a cell next to a drop of 3 blocks or more that their
+    # route didn't choose. /knk npc nav stats shows "pushes: N (players N, attacks N), returned N, exempted N,
+    # teleported N".
     collidable: false
+    # With collidable on: whether players' bodies push NPCs too. false: players pass through NPCs (a real client still
+    # feels a slight nudge from the NPC's body; the NPC doesn't move). true: players bump NPCs; a pushed NPC walks back,
+    # and a player who keeps pushing one stops colliding with it for a while (below), at once when the push was towards
+    # a drop.
+    players-push-npcs: false
+    # With collidable on: a pushed or knocked-back NPC walks back to its line or post: along its own footsteps first,
+    # else a local leg (K&K's own search with local-legs-clearance on, else Citizens'), last a teleport home (below).
+    push-return: true
+    # With players-push-npcs on: pushes by one player within push-exempt-window-ticks before that player stops colliding
+    # with that NPC for push-exempt-ticks (1 to 20; 20 to 6000 ticks; 20 to 72000 ticks).
+    push-exempt-after: 3
+    push-exempt-window-ticks: 200
+    push-exempt-ticks: 1200
+    # Ticks a pushed NPC may take to walk back before it teleports home, and only while no player sees it where it
+    # stands or where it goes (0 = never; 0 to 12000).
+    push-teleport-ticks: 600
     # Outside player-loaded areas: load (keep the chunks ahead loaded, the NPC really walks; capped) | simulate.
     chunk-loading: load
     # Groups (a leader plans the route once, the followers walk it in formation slots). These are per-NPC settings
@@ -598,6 +656,20 @@ npc:
     # A group changes to a narrower width (still 2 abreast or more) or a wider one only when it lasts this many
     # blocks along the path; a column at a gate or a stair is taken at once.
     group-width-hysteresis-blocks: 3
+    # How a group keeps its formation (link M3): levels (fixed widths: a narrower width or a column where the
+    # formation does not fit at its spacing, the column at once) or elastic (the width fitted from the free width
+    # across the path; neighbours squeeze to group-lateral-spacing-min and rows close up to group-spacing-min before
+    # the group narrows; it decides group-lookahead-blocks past its depth ahead; every width change, the column too,
+    # needs the tight place to last group-width-hysteresis-blocks, shorter ones are passed by merging lanes; a column
+    # only where 2 abreast squeezed don't fit; stairs as wide as the flight allows with a step per lane; lanes by the
+    # access rules; slots re-assigned by place). Merges are counted in /knk npc nav stats.
+    group-formation-keeping: levels
+    # Blocks between neighbours in a row that an elastic formation squeezes to before it narrows (0.6: shoulders touch).
+    group-lateral-spacing-min: 0.6
+    # Blocks between the rows that an elastic formation closes up to while it is squeezed.
+    group-spacing-min: 1.0
+    # Blocks an elastic formation looks ahead of its leader past its own depth when it decides its width.
+    group-lookahead-blocks: 4
     # When the leader has arrived and the group gets its next order (it turns back), followers still on their way
     # (held at a gate, behind) finish their trip to their place at the goal first and then rejoin the group
     # (couriers). false: they follow the leader at once. /knk npc nav group <n> ... finish-trip|follow-leader.

@@ -75,7 +75,7 @@ class NpcNavigationRulesTest {
     void setUp() {
         metrics.setEnabled(true);
         service = service(NpcNavigationService.DEFAULT_RULE_CHECKS_PER_TICK);
-        mover = register(1, START, Settings.defaults());
+        mover = register(1, START, Settings.defaults().withCollidable(false)); // fake bodies jump: no push resistance here
     }
 
     private NpcNavigationService service(int ruleChecksPerTick) {
@@ -533,6 +533,41 @@ class NpcNavigationRulesTest {
         at(m, 25);
         ticks(NpcNavigationService.TRESPASS_TICKS);
         assertEquals(0, metrics.total(Event.TRESPASS));
+    }
+
+    @Test
+    void anEntryMadeUnderTheOldRulesIsNotATrespassWhenTheEventComesAfterIt() {
+        // PandiO/knk-workspace#593: the NPC walks into the district while entry is still allowed as far as the plugin
+        // knows; the denial arrives a moment later with its availability event (realtime, after the re-warm)
+        regions("district", 20, 60);
+        FakeMover m = walking(2, settings(0, false));
+        ticks(NpcNavigationService.TRESPASS_TICKS);
+        at(m, 25);
+        ticks(1); // inside before the guard's next look
+
+        rules.deniedRegions.add("district");
+        service.onAvailabilityChanged();
+        ticks(NpcNavigationService.TRESPASS_TICKS * 2);
+
+        assertEquals(0, metrics.total(Event.TRESPASS), log.toString());
+        at(m, 45);
+        ticks(NpcNavigationService.TRESPASS_TICKS);
+        assertEquals(0, metrics.total(Event.TRESPASS), "walking on inside is no entry");
+    }
+
+    @Test
+    void theGuardStillCountsAnEntryAfterAnEvent() {
+        regions("keep", 20, 60);
+        FakeMover m = walking(2, settings(0, false));
+        ticks(NpcNavigationService.TRESPASS_TICKS);
+        service.onAvailabilityChanged(); // nothing denied: the fresh look only
+        ticks(NpcNavigationService.TRESPASS_TICKS);
+
+        rules.deniedRegions.add("keep"); // the guard's own view: denied now, without the NPC hearing of it
+        at(m, 25);
+        ticks(NpcNavigationService.TRESPASS_TICKS);
+
+        assertEquals(1, metrics.total(Event.TRESPASS), log.toString());
     }
 
     @Test

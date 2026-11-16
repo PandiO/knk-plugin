@@ -251,6 +251,252 @@ class NpcNavigationConfigTest {
     }
 
     @Test
+    void readsTheCorridorSteeringKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.CORRIDOR_STEERING, anywhere), "off by default");
+        assertEquals(4.0, defaults.value(NavigationSettings.CORRIDOR_HALF_WIDTH, anywhere));
+        assertEquals(0.8, defaults.value(NavigationSettings.WALL_CLEARANCE, anywhere));
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.CORRIDOR_STEERING, anywhere).layer());
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                corridor-steering: true
+                worlds:
+                  w:
+                    wall-clearance: 0.6
+                regions:
+                  stairhouse:
+                    corridor-steering: false
+                    corridor-half-width: 3
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        Scope inside = new Scope("w", List.of("town", "stairhouse"), null, null);
+        assertEquals(true, settings.value(NavigationSettings.CORRIDOR_STEERING, anywhere));
+        assertEquals(0.6, settings.value(NavigationSettings.WALL_CLEARANCE, anywhere));
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, inside);
+        assertEquals(false, resolved.corridorSteering(), "a region turns it off");
+        assertEquals(3.0, resolved.corridorHalfWidth());
+        assertEquals(0.6, resolved.wallClearance(), "from the world layer");
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                corridor-steering: maybe
+                corridor-half-width: 9
+                wall-clearance: 0.3
+            """);
+        assertEquals(3, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
+    void readsThePlazaLinesKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.PLAZA_LINES, anywhere), "off by default");
+        assertEquals(16, defaults.value(NavigationSettings.PLAZA_CORRIDOR_BLOCKS, anywhere));
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.PLAZA_LINES, anywhere).layer(),
+            "the shipped config.yml has the key");
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.PLAZA_CORRIDOR_BLOCKS, anywhere).layer(),
+            "the shipped config.yml has the key");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                plaza-lines: true
+                plaza-corridor-blocks: 12
+                worlds:
+                  w2:
+                    plaza-lines: false
+                regions:
+                  market:
+                    plaza-corridor-blocks: 24
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        assertEquals(true, settings.value(NavigationSettings.PLAZA_LINES, anywhere), "the global layer");
+        assertEquals(false, settings.value(NavigationSettings.PLAZA_LINES, Scope.of("w2")), "a world turns it off");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+                new Scope("w", List.of("town", "market"), null, null));
+        assertEquals(true, resolved.plazaLines());
+        assertEquals(24, resolved.plazaCorridorBlocks(), "a region widens it");
+        assertEquals(12, net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere)
+            .plazaCorridorBlocks());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                plaza-lines: sometimes
+                plaza-corridor-blocks: 2
+            """);
+        assertEquals(2, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
+    void readsThePushResistanceKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        for (NavigationSettings.Key<?> key : List.of(NavigationSettings.COLLIDABLE, NavigationSettings.PLAYERS_PUSH_NPCS,
+            NavigationSettings.PUSH_RETURN, NavigationSettings.PUSH_EXEMPT_AFTER,
+            NavigationSettings.PUSH_EXEMPT_WINDOW_TICKS, NavigationSettings.PUSH_EXEMPT_TICKS,
+            NavigationSettings.PUSH_TELEPORT_TICKS)) {
+            assertEquals(Layer.GLOBAL, defaults.resolve(key, anywhere).layer(), key.name() + " is in config.yml");
+            assertEquals(key.defaultValue(), defaults.value(key, anywhere), key.name() + " ships its code default");
+        }
+        assertEquals(false, defaults.value(NavigationSettings.PLAYERS_PUSH_NPCS, anywhere), "players never push");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                collidable: true
+                players-push-npcs: true
+                push-exempt-after: 5
+                push-teleport-ticks: 0
+                worlds:
+                  w2:
+                    players-push-npcs: false
+                regions:
+                  wallwalk:
+                    push-return: false
+                    push-exempt-ticks: 6000
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings here =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere);
+        assertTrue(here.collidable());
+        assertTrue(here.playersPushNpcs());
+        assertEquals(5, here.pushExemptAfter());
+        assertEquals(0, here.pushTeleportTicks(), "0 = never teleport home");
+        assertFalse(net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, Scope.of("w2"))
+            .playersPushNpcs(), "a world turns it off");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings wall =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+                new Scope("w", List.of("town", "wallwalk"), null, null));
+        assertFalse(wall.pushReturn(), "a region turns the walk back off");
+        assertEquals(6000, wall.pushExemptTicks());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                push-exempt-after: 0
+                push-teleport-ticks: -1
+                players-push-npcs: maybe
+            """);
+        assertEquals(3, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
+    void readsTheCrowdAwarenessKeyInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.CROWD_AWARENESS, anywhere), "off by default");
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.CROWD_AWARENESS, anywhere).layer(),
+            "the shipped config.yml has the key");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                crowd-awareness: true
+                worlds:
+                  w2:
+                    crowd-awareness: false
+                regions:
+                  stairhouse:
+                    crowd-awareness: false
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        assertEquals(true, settings.value(NavigationSettings.CROWD_AWARENESS, anywhere), "the global layer");
+        assertEquals(false, settings.value(NavigationSettings.CROWD_AWARENESS, Scope.of("w2")), "a world turns it off");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+                new Scope("w", List.of("town", "stairhouse"), null, null));
+        assertEquals(false, resolved.crowdAwareness(), "a region turns it off");
+        assertEquals(true, net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere)
+            .crowdAwareness());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                crowd-awareness: sometimes
+            """);
+        assertEquals(1, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
+    void readsTheLocalLegsClearanceKeyInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, anywhere), "off by default");
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.LOCAL_LEGS_CLEARANCE, anywhere).layer(),
+            "the shipped config.yml has the key");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                local-legs-clearance: true
+                worlds:
+                  w2:
+                    local-legs-clearance: false
+                regions:
+                  stairhouse:
+                    local-legs-clearance: false
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        assertEquals(true, settings.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, anywhere), "the global layer");
+        assertEquals(false, settings.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, Scope.of("w2")), "a world turns it off");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+                new Scope("w", List.of("town", "stairhouse"), null, null));
+        assertEquals(false, resolved.localLegsClearance(), "a region turns it off");
+        assertEquals(true, net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere)
+            .localLegsClearance());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                local-legs-clearance: sometimes
+            """);
+        assertEquals(1, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
     void readsTheGroupKeysInEveryConfigLayer() throws Exception {
         NpcNavigationConfig config = parse("""
             npc:
@@ -300,6 +546,64 @@ class NpcNavigationConfigTest {
         assertEquals(6, bad.rejected().size(), bad.rejected().toString());
         assertEquals("column", bad.settings().value(NavigationSettings.GROUP_FORMATION, elsewhere), "the default stays");
         assertEquals(1.3, bad.settings().value(NavigationSettings.GROUP_CATCH_UP_SPEED, elsewhere));
+    }
+
+    @Test
+    void readsTheFormationKeepingKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals("levels", defaults.value(NavigationSettings.GROUP_FORMATION_KEEPING, anywhere), "levels by default");
+        assertEquals(0.6, defaults.value(NavigationSettings.GROUP_LATERAL_SPACING_MIN, anywhere));
+        assertEquals(1.0, defaults.value(NavigationSettings.GROUP_SPACING_MIN, anywhere));
+        assertEquals(4, defaults.value(NavigationSettings.GROUP_LOOKAHEAD_BLOCKS, anywhere));
+        for (NavigationSettings.Key<?> key : List.of(NavigationSettings.GROUP_FORMATION_KEEPING,
+            NavigationSettings.GROUP_LATERAL_SPACING_MIN, NavigationSettings.GROUP_SPACING_MIN,
+            NavigationSettings.GROUP_LOOKAHEAD_BLOCKS)) {
+            assertEquals(Layer.GLOBAL, defaults.resolve(key, anywhere).layer(), "the shipped config.yml has " + key);
+        }
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                group-formation-keeping: elastic
+                group-lateral-spacing-min: 0.75
+                group-spacing-min: 1.25
+                group-lookahead-blocks: 6
+                worlds:
+                  w2:
+                    group-formation-keeping: levels
+                regions:
+                  stairhouse:
+                    group-lookahead-blocks: 2
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        net.knightsandkings.knk.core.npc.nav.group.GroupSettings.Keeping keeping =
+            net.knightsandkings.knk.core.npc.nav.group.GroupSettings.of(config.settings(), anywhere).keeping();
+        assertTrue(keeping.elastic(), "the global layer");
+        assertEquals(0.75, keeping.lateralSpacingMin());
+        assertEquals(1.25, keeping.spacingMin());
+        assertEquals(6, keeping.lookaheadBlocks());
+        assertFalse(net.knightsandkings.knk.core.npc.nav.group.GroupSettings.of(config.settings(), Scope.of("w2"))
+            .keeping().elastic(), "a world keeps levels");
+        assertEquals(2, net.knightsandkings.knk.core.npc.nav.group.GroupSettings.of(config.settings(),
+            new Scope("w", List.of("stairhouse"), null, null)).keeping().lookaheadBlocks(), "a region");
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                group-formation-keeping: wobbly
+                group-lateral-spacing-min: 0.2
+                group-spacing-min: 0.1
+                group-lookahead-blocks: 99
+            """);
+        assertEquals(4, bad.rejected().size(), bad.rejected().toString());
+        assertEquals("levels", bad.settings().value(NavigationSettings.GROUP_FORMATION_KEEPING, anywhere));
     }
 
     @Test

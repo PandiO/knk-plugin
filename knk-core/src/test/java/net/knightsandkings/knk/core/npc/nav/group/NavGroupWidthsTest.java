@@ -100,8 +100,8 @@ class NavGroupWidthsTest {
         }
         List<String> lines = widthLines();
         assertEquals(4, lines.size(), lines.toString());
-        assertTrue(lines.get(0).contains("narrows to 2 abreast: the path is too narrow for 3 abreast at "), lines.get(0));
-        assertTrue(lines.get(1).contains("folds into a column: the path is too narrow for 2 abreast at "), lines.get(1));
+        assertTrue(lines.get(0).contains("narrows to 2 abreast: the path is too narrow for 3 abreast (narrow) at "), lines.get(0));
+        assertTrue(lines.get(1).contains("folds into a column: the path is too narrow for 2 abreast (narrow) at "), lines.get(1));
         assertTrue(lines.get(2).contains("takes up 2 abreast again at "), lines.get(2));
         assertTrue(lines.get(3).contains("widens to 3 abreast at "), lines.get(3));
         assertEquals(1, sim.metrics.total(Event.GROUP_NARROW));

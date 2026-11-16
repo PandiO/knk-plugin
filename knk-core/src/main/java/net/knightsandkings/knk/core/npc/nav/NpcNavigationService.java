@@ -17,6 +17,13 @@ import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
+import net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper;
+import net.knightsandkings.knk.core.npc.nav.corridor.LocalLegSearch;
+import net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl;
+import net.knightsandkings.knk.core.npc.nav.crowd.Occupancy;
+import net.knightsandkings.knk.core.npc.nav.push.EdgeGuard;
+import net.knightsandkings.knk.core.npc.nav.push.PushLedger;
+import net.knightsandkings.knk.core.npc.nav.push.PushWatch;
 
 /**
  * Walks NPCs along K&K routes (implementation plan Phase 2; BEHAVIOR_MODEL NAV-01, 03, 11, 13, 14, 15, 17): a state
@@ -105,7 +112,73 @@ public final class NpcNavigationService {
      */
     public record Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
                            int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
-                           double cornerClearance, double waypointMargin, int recoveryWaitTicks) {
+                           double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                           boolean corridorSteering, double corridorHalfWidth, double wallClearance,
+                           boolean localLegsClearance, boolean plazaLines, int plazaCorridorBlocks,
+                           boolean crowdAwareness, boolean collidable, boolean playersPushNpcs, boolean pushReturn,
+                           int pushExemptAfter, int pushExemptWindowTicks, int pushExemptTicks,
+                           int pushTeleportTicks) {
+
+        /** With collision off and push resistance at its code defaults (plan 4c.4 item 7; link M7). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                        boolean corridorSteering, double corridorHalfWidth, double wallClearance,
+                        boolean localLegsClearance, boolean plazaLines, int plazaCorridorBlocks,
+                        boolean crowdAwareness) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering, corridorHalfWidth,
+                wallClearance, localLegsClearance, plazaLines, plazaCorridorBlocks, crowdAwareness, false,
+                NavigationSettings.PLAYERS_PUSH_NPCS.defaultValue(), NavigationSettings.PUSH_RETURN.defaultValue(),
+                NavigationSettings.PUSH_EXEMPT_AFTER.defaultValue(),
+                NavigationSettings.PUSH_EXEMPT_WINDOW_TICKS.defaultValue(),
+                NavigationSettings.PUSH_EXEMPT_TICKS.defaultValue(),
+                NavigationSettings.PUSH_TELEPORT_TICKS.defaultValue());
+        }
+
+        /** With crowd awareness off (plan 4c.3 decision 3; link M4). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                        boolean corridorSteering, double corridorHalfWidth, double wallClearance,
+                        boolean localLegsClearance, boolean plazaLines, int plazaCorridorBlocks) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering, corridorHalfWidth,
+                wallClearance, localLegsClearance, plazaLines, plazaCorridorBlocks,
+                NavigationSettings.CROWD_AWARENESS.defaultValue());
+        }
+
+        /** With plaza lines off (plan 4c.3 decision 6; link M5). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                        boolean corridorSteering, double corridorHalfWidth, double wallClearance,
+                        boolean localLegsClearance) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering, corridorHalfWidth,
+                wallClearance, localLegsClearance, NavigationSettings.PLAZA_LINES.defaultValue(),
+                NavigationSettings.PLAZA_CORRIDOR_BLOCKS.defaultValue());
+        }
+
+        /** With clearance-aware local legs off (plan 4c.3 decision 8; link M6). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                        boolean corridorSteering, double corridorHalfWidth, double wallClearance) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering, corridorHalfWidth,
+                wallClearance, NavigationSettings.LOCAL_LEGS_CLEARANCE.defaultValue());
+        }
+
+        /** With corridor steering off (plan 4c.3 decision 1; its keys at their code defaults). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks,
+                NavigationSettings.CORRIDOR_STEERING.defaultValue(),
+                NavigationSettings.CORRIDOR_HALF_WIDTH.defaultValue(), NavigationSettings.WALL_CLEARANCE.defaultValue());
+        }
 
         /** With the code defaults for the Phase 3 settings ({@code recheck-ticks}, {@code stop-on-trespass}). */
         public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
@@ -133,11 +206,39 @@ public final class NpcNavigationService {
                 settings.value(NavigationSettings.STOP_ON_TRESPASS, scope),
                 settings.value(NavigationSettings.CORNER_CLEARANCE, scope),
                 settings.value(NavigationSettings.WAYPOINT_MARGIN, scope),
-                settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope));
+                settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope),
+                settings.value(NavigationSettings.CORRIDOR_STEERING, scope),
+                settings.value(NavigationSettings.CORRIDOR_HALF_WIDTH, scope),
+                settings.value(NavigationSettings.WALL_CLEARANCE, scope),
+                settings.value(NavigationSettings.LOCAL_LEGS_CLEARANCE, scope),
+                settings.value(NavigationSettings.PLAZA_LINES, scope),
+                settings.value(NavigationSettings.PLAZA_CORRIDOR_BLOCKS, scope),
+                settings.value(NavigationSettings.CROWD_AWARENESS, scope),
+                settings.value(NavigationSettings.COLLIDABLE, scope),
+                settings.value(NavigationSettings.PLAYERS_PUSH_NPCS, scope),
+                settings.value(NavigationSettings.PUSH_RETURN, scope),
+                settings.value(NavigationSettings.PUSH_EXEMPT_AFTER, scope),
+                settings.value(NavigationSettings.PUSH_EXEMPT_WINDOW_TICKS, scope),
+                settings.value(NavigationSettings.PUSH_EXEMPT_TICKS, scope),
+                settings.value(NavigationSettings.PUSH_TELEPORT_TICKS, scope));
+        }
+
+        /** The waypoint margin for a stretch: {@link CorridorShaper#CHOKE_MARGIN} with an aligned chokepoint. */
+        double marginFor(RouteFollower.Stretch stretch) {
+            return stretch.chokepoints() > 0 ? Math.min(waypointMargin, CorridorShaper.CHOKE_MARGIN) : waypointMargin;
         }
 
         public static Settings defaults() {
             return of(NavigationSettings.defaults(), NavigationSettings.Scope.of(null));
+        }
+
+        /** These settings with bodies on or off ({@code collidable}), the push resistance keys kept. */
+        public Settings withCollidable(boolean on) {
+            return new Settings(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks,
+                recheckTicks, stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering,
+                corridorHalfWidth, wallClearance, localLegsClearance, plazaLines, plazaCorridorBlocks, crowdAwareness,
+                on, playersPushNpcs, pushReturn, pushExemptAfter, pushExemptWindowTicks, pushExemptTicks,
+                pushTeleportTicks);
         }
     }
 
@@ -166,6 +267,12 @@ public final class NpcNavigationService {
         boolean onTrail;
         boolean recovering;
         long lastProgressTick;
+        /** The waypoints of the running local leg K&K's own search found (link M6); null for any other order. */
+        List<NavPoint> knkLeg;
+        /** The rest of {@link #knkLeg} at the last progress, for its watchdog. */
+        double knkLegRest = Double.NaN;
+        /** A local leg handed to the engine's search whose outcome (a path, or none) is not counted yet. */
+        boolean engineLegOpen;
         // ---- stuck spells and the recovery ladder (4b.2 items 6 and 7) ----
         final RecoveryLadder ladder = new RecoveryLadder();
         final RecentSteps steps = new RecentSteps();
@@ -202,6 +309,31 @@ public final class NpcNavigationService {
         boolean roadPlanning;
         /** Elements the recheck saw ahead that the router then still routed through: not asked about again. */
         final Set<String> tolerated = new HashSet<>();
+        // ---- crowd awareness (plan 4c.3 decision 3, link M4) ----
+        /** Held by crowd awareness: waiting for its turn at a narrow place, stepping aside, or behind another NPC. */
+        boolean crowdHeld;
+        /** How a held NPC goes on when it may. */
+        Resume crowdResume = Resume.REPLAN;
+        /** The queue spot a held NPC was sent to, or null. */
+        NavPoint crowdSpot;
+        /** A held NPC behind another (no narrow place) looks again at this tick; MAX_VALUE for a queue. */
+        long crowdRetryTick = Long.MAX_VALUE;
+        /** When this NPC's current wait behind another began (one count per wait), -1 when none. */
+        long behindSince = -1;
+        /** The last tick it was seen behind another NPC. */
+        long lastBehindTick = Long.MIN_VALUE / 2;
+        /** The running engine leg's target and capture, so a held NPC walks it on without a new capture. */
+        NavPoint legTarget;
+        LocalLeg legPrepared;
+        // ---- push resistance (plan 4c.4 item 7, link M7) ----
+        /** Push detection from this NPC's own movement. */
+        final PushWatch push = new PushWatch();
+        /** Where a pushed NPC walks back to (its line or post), or null when it is not returning. */
+        NavPoint returnTo;
+        /** When the running return began. */
+        long returnSince;
+        /** The return is a walk of the body only (the NPC stood: no order, waiting, held), not a step of its order. */
+        boolean bodyReturn;
 
         Nav(NpcMover mover, NpcAccessProfile profile, Settings settings, String world) {
             this.mover = mover;
@@ -213,6 +345,7 @@ public final class NpcNavigationService {
         @Override
         public void arrived(NpcMover m) {
             timed(() -> {
+                settleEngineLeg(this, false);
                 if (state == NpcNavState.MOVING) {
                     if (moveOnly) {
                         // a back-off or side-step of an NPC on a local leg: its hop again from here
@@ -233,6 +366,11 @@ public final class NpcNavigationService {
         @Override
         public void stuck(NpcMover m, NpcMover.StuckKind kind) {
             timed(() -> {
+                if (state == NpcNavState.MOVING && kind == NpcMover.StuckKind.STATIONARY && !ladder.isOpen()
+                    && holdBehind(this)) {
+                    return; // behind another NPC: a wait, not a stuck spell (link M4)
+                }
+                settleEngineLeg(this, kind == NpcMover.StuckKind.NO_PATH);
                 if (state == NpcNavState.MOVING) {
                     onStuck(this, kind == NpcMover.StuckKind.NO_PATH ? RecoveryLadder.Reporter.NO_PATH
                         : RecoveryLadder.Reporter.STATIONARY);
@@ -251,6 +389,7 @@ public final class NpcNavigationService {
                 if (chunkUnload) {
                     ports.metrics().count(Event.PAUSED);
                     spellNotFreed(this, "its chunk unloaded");
+                    clearCrowd(this);
                     ladderPending = false;
                     moveOnly = false;
                     generation++;
@@ -266,6 +405,12 @@ public final class NpcNavigationService {
         @Override
         public void respawned(NpcMover m) {
             timed(() -> {
+                if (settings.collidable()) {
+                    collision.enroll(mover, settings.playersPushNpcs()); // the entity is new: its exemptions are gone
+                }
+                returnTo = null;
+                bodyReturn = false;
+                mover.position().ifPresent(at -> push.reset(at, false));
                 if (state == NpcNavState.PAUSED) {
                     ports.metrics().count(Event.RESUMED);
                     // the entity is new and may stand somewhere else: plan again from where it is
@@ -278,6 +423,11 @@ public final class NpcNavigationService {
         }
 
         @Override
+        public void contact(NpcMover m, NpcMover.Contact contact) {
+            push.contact(contact, tick);
+        }
+
+        @Override
         public void engineRuleRemoved(NpcMover m, String names) {
             ports.metrics().count(Event.EXAMINER_LEAK);
             ports.log().accept(m.name() + " engine block rules removed from a local search: " + names);
@@ -285,6 +435,18 @@ public final class NpcNavigationService {
     }
 
     private record GateOnLine(int doorId, int index) {
+    }
+
+    /** How an NPC held by crowd awareness goes on (link M4). */
+    private enum Resume {
+        /** Its stretch again from where it stands. */
+        TRAIL,
+        /** The rest of its K&K local leg. */
+        KNK_LEG,
+        /** Its engine leg again, with the same capture. */
+        ENGINE_LEG,
+        /** Plan again from where it stands. */
+        REPLAN
     }
 
     private final Ports ports;
@@ -298,6 +460,35 @@ public final class NpcNavigationService {
     private int inFlight;
     private int localInFlight;
     private long tick;
+    /** Corridor steering's shaped stretches, shared by every NPC here (plan 4c.3 decision 1.5). */
+    /** Blocks a K&K local leg must get shorter between two watchdog looks to count as progress. */
+    static final double KNK_LEG_PROGRESS = 0.5;
+    private final CorridorShaper corridors;
+    /** K&K's own local leg search (plan 4c.3 decision 8, link M6). */
+    private final LocalLegSearch localLegs = new LocalLegSearch();
+    /** Who stands where, rebuilt every 5 ticks while an NPC here has crowd awareness on (link M4). */
+    private final Occupancy occupancy = new Occupancy();
+    /** Narrow places taken in turns (link M4). */
+    private final CrowdControl crowd = new CrowdControl(occupancy);
+    /** Main-thread time of crowd awareness's updates (the hash and the turns), for its share of the cost. */
+    private long crowdNanos;
+    private java.util.function.IntPredicate unshaped = id -> false;
+    /** Who pushes whom (link M7); the engine's adapter. */
+    private NpcCollisionPolicy collision = NpcCollisionPolicy.NONE;
+    /** Whether a player sees a place, for the teleport home; nobody is asked without a port: never teleport. */
+    private NpcSight sight = NpcSight.EVERYBODY;
+    /** Repeated pushes per player and NPC, and the exemptions they gave (link M7). */
+    private final PushLedger pushLedger = new PushLedger();
+    /** Group followers (their group's slot walks bring them back after a push). */
+    private java.util.function.IntPredicate groupFollower = id -> false;
+    private long pushes;
+    private long pushesByPlayers;
+    private long pushesByAttacks;
+    private long pushReturns;
+    private long pushTeleports;
+    /** Main-thread time of push resistance's looks, for its share of the cost. */
+    private long pushNanos;
+    private java.util.function.IntToDoubleFunction plazaClearance = id -> Double.NaN;
     private long busyNanos;
     private long lastTickNanos;
     private int depth;
@@ -308,6 +499,10 @@ public final class NpcNavigationService {
 
     /** @param ruleChecksPerTick NPCs whose rules are checked per tick at most (NAV-13: never all at once) */
     public NpcNavigationService(Ports ports, int maxPlansInFlight, int ruleChecksPerTick) {
+        crowd.setBodies(id -> {
+            Nav nav = npcs.get(id);
+            return nav != null && nav.settings.collidable();
+        });
         this.ports = Objects.requireNonNull(ports, "ports");
         if (maxPlansInFlight < 1) {
             throw new IllegalArgumentException("maxPlansInFlight must be at least 1");
@@ -317,6 +512,61 @@ public final class NpcNavigationService {
         }
         this.maxPlansInFlight = maxPlansInFlight;
         this.ruleChecksPerTick = ruleChecksPerTick;
+        this.corridors = new CorridorShaper(() -> tick, ports.nanoTime());
+    }
+
+    /**
+     * Corridor steering's shared shaper (plan 4c.3 decision 1, link M2): its counts and cost, and for later links the
+     * corridors it built.
+     */
+    public CorridorShaper corridors() {
+        return corridors;
+    }
+
+    /**
+     * The movers whose stretches corridor steering leaves alone although their key is on: a group's members, until
+     * link M3 fits formations to the corridor (the group path follows the leader's route line).
+     */
+    public void setUnshapedMembers(java.util.function.IntPredicate unshaped) {
+        this.unshaped = unshaped == null ? id -> false : unshaped;
+    }
+
+    /**
+     * The clearance a group member's plaza lines keep (link M5): the group's formation half width plus
+     * {@code wall-clearance} for its leader, so the formation fits round a well; NaN for {@code wall-clearance}.
+     */
+    public void setPlazaClearance(java.util.function.IntToDoubleFunction clearance) {
+        this.plazaClearance = clearance == null ? id -> Double.NaN : clearance;
+    }
+
+    /**
+     * The corridor steering an NPC's stretches get: null when its {@code corridor-steering} and {@code plaza-lines} are
+     * off. A group member, and an NPC with only {@code plaza-lines} on, get plaza lines only (link M5).
+     */
+    private RouteFollower.Steering steering(Nav nav) {
+        CorridorShaper.Options plazas = plazaOptions(nav.mover.id());
+        if (nav.settings.corridorSteering() && !unshaped.test(nav.mover.id())) {
+            CorridorShaper.Options options = new CorridorShaper.Options(nav.settings.corridorHalfWidth(),
+                nav.settings.wallClearance());
+            return new RouteFollower.Steering(corridors, plazas == null ? options
+                : options.withPlazas(plazas.plazaBlocks(), plazas.plazaClearance()));
+        }
+        return plazas == null ? null : new RouteFollower.Steering(corridors, plazas);
+    }
+
+    /**
+     * Plaza lines only, as a mover's settings ask for them (link M5): null when its {@code plaza-lines} is off or it is
+     * not registered. A group's path asks with its leader's id.
+     */
+    public CorridorShaper.Options plazaOptions(int moverId) {
+        Nav nav = npcs.get(moverId);
+        if (nav == null || !nav.settings.plazaLines()) {
+            return null;
+        }
+        double clearance = plazaClearance.applyAsDouble(moverId);
+        return CorridorShaper.Options.plazasOnly(nav.settings.corridorHalfWidth(), nav.settings.wallClearance(),
+            nav.settings.plazaCorridorBlocks(), Double.isNaN(clearance) ? nav.settings.wallClearance()
+                : Math.max(clearance, nav.settings.wallClearance()));
     }
 
     // ==================== callers ====================
@@ -332,6 +582,9 @@ public final class NpcNavigationService {
         Nav nav = new Nav(mover, profile, settings, mover.position().map(NavPoint::world).orElse(null));
         npcs.put(mover.id(), nav);
         mover.setListener(nav);
+        if (settings.collidable() && mover.isSpawned()) {
+            collision.enroll(mover, settings.playersPushNpcs());
+        }
     }
 
     /**
@@ -352,6 +605,8 @@ public final class NpcNavigationService {
         }
         nav.goal = goalFeet;
         nav.onResult = onResult;
+        nav.returnTo = null;
+        nav.bodyReturn = false;
         nav.retries = 0;
         nav.replans = 0;
         nav.prepareFailures = 0;
@@ -387,6 +642,11 @@ public final class NpcNavigationService {
         }
         nav.generation++;
         queue.remove(nav);
+        crowd.forget(moverId);
+        pushLedger.forget(moverId);
+        if (nav.settings.collidable()) {
+            collision.release(moverId);
+        }
         nav.mover.setListener(null);
     }
 
@@ -487,6 +747,11 @@ public final class NpcNavigationService {
         timed(() -> {
             tick++;
             List<Nav> all = List.copyOf(npcs.values());
+            if (tick % Occupancy.UPDATE_TICKS == 0 && anyCrowdAware(all)) {
+                long crowdStart = ports.nanoTime().getAsLong();
+                crowdUpdate(all);
+                crowdNanos += ports.nanoTime().getAsLong() - crowdStart;
+            }
             for (Nav nav : all) {
                 switch (nav.state) {
                     case WAITING -> {
@@ -508,6 +773,7 @@ public final class NpcNavigationService {
                     default -> { }
                 }
             }
+            pushLooks(all);
             ruleChecks(all);
             while (inFlight < maxPlansInFlight && !queue.isEmpty()) {
                 Nav nav = queue.pollFirst();
@@ -519,6 +785,15 @@ public final class NpcNavigationService {
         ports.metrics().observeMainThread(busyNanos / 1e9);
         lastTickNanos = busyNanos;
         busyNanos = 0;
+    }
+
+    private static boolean anyCrowdAware(List<Nav> all) {
+        for (Nav nav : all) {
+            if (nav.settings.crowdAwareness()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Main-thread time the last tick took, the listener calls since the tick before included. */
@@ -548,6 +823,11 @@ public final class NpcNavigationService {
         if (nav.mover.isSpawned() && (tick + nav.mover.id()) % HANDOVER_TICKS == 0) {
             footstep(nav);
         }
+        if (nav.knkLeg != null && !nav.onTrail && !nav.moveOnly && nav.state == NpcNavState.MOVING
+            && nav.mover.isSpawned()) {
+            watchKnkLeg(nav);
+            return;
+        }
         if (!nav.onTrail || nav.follower == null || !nav.mover.isSpawned()) {
             return;
         }
@@ -566,8 +846,10 @@ public final class NpcNavigationService {
                 nav.lastProgressTick = tick;
             } else if (tick - nav.lastProgressTick >= nav.settings.noProgressTicks()) {
                 nav.lastProgressTick = tick;
-                onStuck(nav, RecoveryLadder.Reporter.NO_PROGRESS);
-                return;
+                if (!(nav.settings.crowdAwareness() && behind(nav, at, wayAhead(nav, at)))) {
+                    onStuck(nav, RecoveryLadder.Reporter.NO_PROGRESS);
+                    return;
+                }
             }
         }
         if (handover) {
@@ -576,6 +858,49 @@ public final class NpcNavigationService {
                 sendStretch(nav, false);
             }
         }
+    }
+
+    /**
+     * The watchdog of a K&K local leg (link M6): the engine reports no stuck for waypoint lists (NAV-17), so progress
+     * along the leg is watched here as on the line; while a recovery try runs, {@link #supervise} judges it instead.
+     */
+    private void watchKnkLeg(Nav nav) {
+        if ((tick + nav.mover.id()) % WATCHDOG_TICKS != 0 || nav.ladder.tryRunning()) {
+            return;
+        }
+        NavPoint at = nav.mover.position().orElse(null);
+        if (at == null) {
+            return;
+        }
+        double rest = restOf(nav.knkLeg, at);
+        if (Double.isNaN(nav.knkLegRest) || rest < nav.knkLegRest - KNK_LEG_PROGRESS) {
+            nav.knkLegRest = rest;
+            nav.lastProgressTick = tick;
+        } else if (tick - nav.lastProgressTick >= nav.settings.noProgressTicks()) {
+            nav.lastProgressTick = tick;
+            if (!(nav.settings.crowdAwareness() && behind(nav, at, wayAhead(nav, at)))) {
+                onStuck(nav, RecoveryLadder.Reporter.NO_PROGRESS);
+            }
+        }
+    }
+
+    /** The length of a waypoint list still to walk from {@code at}: to the nearest point of it, then along it. */
+    static double restOf(List<NavPoint> way, NavPoint at) {
+        double best = Double.MAX_VALUE;
+        double tail = 0;
+        double bestRest = 0;
+        for (int i = way.size() - 1; i >= 0; i--) {
+            NavPoint p = way.get(i);
+            if (i < way.size() - 1) {
+                tail += p.horizontalDistance(way.get(i + 1));
+            }
+            double d = Math.sqrt(sq(p.x() - at.x()) + sq(p.y() - at.y()) + sq(p.z() - at.z()));
+            if (d + tail < best) {
+                best = d + tail;
+                bestRest = best;
+            }
+        }
+        return bestRest;
     }
 
     // ==================== planning ====================
@@ -707,7 +1032,7 @@ public final class NpcNavigationService {
                 }
                 nav.blockedReported = false;
                 nav.reportedElement = null;
-                startRoute(nav, generation, at, plan.line(), plan.gates(), from, to);
+                startRoute(nav, generation, at, plan.line(), plan.gates(), plan.plazas(), from, to);
             }
             case BLOCKED -> {
                 // a route exists without the current rules (a closed gate, a denied region): walk as far as the rules
@@ -719,7 +1044,7 @@ public final class NpcNavigationService {
                 if (!partial.isEmpty()
                     && partial.get(partial.size() - 1).horizontalDistance(from) > ROAD_JOIN_DISTANCE) {
                     ports.metrics().count(Event.BLOCKED_WALK);
-                    startRoute(nav, generation, at, partial, plan.gates(), from, null);
+                    startRoute(nav, generation, at, partial, plan.gates(), plan.plazas(), from, null);
                 } else {
                     waitAtBlock(nav);
                 }
@@ -760,8 +1085,9 @@ public final class NpcNavigationService {
      * a blocking element and ends there.
      */
     private void startRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
-                            List<RoadPlanner.GateCrossing> gates, NavPoint from, NavPoint to) {
-        nav.follower = new RouteFollower(line);
+                            List<RoadPlanner.GateCrossing> gates, List<RoadPlanner.PlazaCrossing> plazas,
+                            NavPoint from, NavPoint to) {
+        nav.follower = new RouteFollower(line, plazas);
         nav.onTrail = false;
         List<GateOnLine> onLine = new java.util.ArrayList<>();
         for (RoadPlanner.GateCrossing gate : gates) {
@@ -859,8 +1185,24 @@ public final class NpcNavigationService {
                 case READY -> {
                     nav.prepareFailures = 0;
                     nav.onTrail = false;
+                    settleEngineLeg(nav, false);
+                    nav.knkLeg = null;
+                    List<NavPoint> way = nav.settings.localLegsClearance() ? knkLeg(nav, at, target, prepared.leg())
+                        : null;
                     nav.state = NpcNavState.MOVING;
-                    nav.mover.walkTo(HopPlanner.feet(target), prepared.leg());
+                    if (way != null) {
+                        // K&K's own leg with the corridor's clearance (plan 4c.3 decision 8, link M6)
+                        ports.metrics().count(Event.LOCAL_LEG_KNK);
+                        nav.knkLeg = way;
+                        nav.knkLegRest = Double.NaN;
+                        nav.lastProgressTick = tick;
+                        nav.mover.follow(way, nav.settings.waypointMargin());
+                    } else {
+                        nav.engineLegOpen = true; // counted engine or none once the engine's search answered
+                        nav.legTarget = target;
+                        nav.legPrepared = prepared.leg();
+                        nav.mover.walkTo(HopPlanner.feet(target), prepared.leg());
+                    }
                 }
                 case UNLOADED -> {
                     // never load chunks for a capture: wait at the edge of the loaded area (NAV-12, Phase 7b)
@@ -881,9 +1223,708 @@ public final class NpcNavigationService {
     }
 
     /**
+     * K&K's own search for a local leg (link M6): the waypoints from {@code at} to the hop {@code target}, or null when
+     * it found none within its budget (the engine's search takes the leg then). The NPC's position at the time the leg
+     * is handed over is used, since the preparation took a while.
+     */
+    private List<NavPoint> knkLeg(Nav nav, NavPoint planned, NavPoint target, LocalLeg leg) {
+        NavPoint at = nav.mover.position().orElse(planned);
+        LocalLegSearch.Result result;
+        try {
+            int self = nav.mover.id();
+            result = localLegs.find(ports.world(), at, target, leg, nav.settings.wallClearance(),
+                nav.settings.crowdAwareness() ? (x, y, z) -> occupancy.occupied(at.world(), x, y, z, self)
+                    ? LocalLegSearch.OCCUPIED_COST : 0 : null);
+        } catch (RuntimeException e) {
+            ports.log().accept(nav.mover.name() + " K&K local leg search failed: " + e);
+            return null;
+        }
+        if (!result.found()) {
+            ports.log().accept(String.format(Locale.ROOT, "%s local leg from %s to %s: K&K found no path (%s, %d cells),"
+                    + " the engine searches", nav.mover.name(), NavGeometry.block(at),
+                NavGeometry.block(HopPlanner.feet(target)), result.reason(), result.expansions()));
+            return null;
+        }
+        return result.waypoints();
+    }
+
+    /** The outcome of the open engine leg, counted once: no path when the engine found none, else engine. */
+    private void settleEngineLeg(Nav nav, boolean noPath) {
+        if (!nav.engineLegOpen) {
+            return;
+        }
+        nav.engineLegOpen = false;
+        ports.metrics().count(noPath ? Event.LOCAL_LEG_NONE : Event.LOCAL_LEG_ENGINE);
+    }
+
+    /** K&K's local legs (link M6): their search counters. */
+    public LocalLegSearch localLegs() {
+        return localLegs;
+    }
+
+    // ==================== crowd awareness (plan 4c.3 decision 3, link M4) ====================
+
+    /** A held NPC behind another looks again after this many ticks. */
+    static final int BEHIND_RETRY_TICKS = 20;
+    /** Blocks ahead along its way in which another NPC's cell makes an NPC "behind" it. */
+    static final double BEHIND_BLOCKS = 1.5;
+
+    /** The narrow places and their queues (link M4). */
+    public CrowdControl crowd() {
+        return crowd;
+    }
+
+    /** Who stands where (link M4), as of the last rebuild. */
+    public Occupancy occupancy() {
+        return occupancy;
+    }
+
+    /** Main-thread time crowd awareness's updates took so far (the hash, the turns, the holds), in nanoseconds. */
+    public long crowdNanos() {
+        return crowdNanos;
+    }
+
+    /** Whether a registered mover has {@code crowd-awareness} on. */
+    public boolean crowdAwareness(int moverId) {
+        Nav nav = npcs.get(moverId);
+        return nav != null && nav.settings.crowdAwareness();
+    }
+
+    /** Whether crowd awareness holds a mover now (it waits for its turn, steps aside, or stands behind another). */
+    public boolean crowdHeld(int moverId) {
+        Nav nav = npcs.get(moverId);
+        return nav != null && nav.crowdHeld;
+    }
+
+    /**
+     * A group leader's followers, by the leader's mover id (empty for anyone else): the leader keeps its turn at a
+     * narrow place until its followers are through.
+     */
+    public void setGroupMembers(java.util.function.IntFunction<int[]> members) {
+        crowd.setGroupMembers(members);
+    }
+
+    /**
+     * Whether a mover with {@code crowd-awareness} on stands behind another NPC: a cell within
+     * {@link #BEHIND_BLOCKS} along {@code wayAhead} (feet points from the mover on) has another NPC in it. When it does,
+     * the wait is counted once per wait ({@code crowd_wait}) and the caller does not count it as stuck (decision 3.4:
+     * a group's follower behind a waiting one). False with the key off, and after {@link CrowdControl#MAX_WAIT_TICKS}
+     * of waiting behind the same jam (it is stuck then).
+     */
+    public boolean waitsBehind(int moverId, NavPoint at, List<NavPoint> wayAhead) {
+        Nav nav = npcs.get(moverId);
+        if (nav == null || !nav.settings.crowdAwareness() || at == null) {
+            return false;
+        }
+        return behind(nav, at, wayAhead);
+    }
+
+    private boolean behind(Nav nav, NavPoint at, List<NavPoint> wayAhead) {
+        if (!occupiedAhead(nav, at, wayAhead)) {
+            return false;
+        }
+        boolean newWait = tick - nav.lastBehindTick > nav.settings.noProgressTicks() + WATCHDOG_TICKS;
+        if (newWait) {
+            nav.behindSince = tick;
+            countCrowdWait();
+            ports.log().accept(String.format(Locale.ROOT, "%s waits behind another NPC at %s (not stuck)",
+                nav.mover.name(), NavGeometry.block(at)));
+        } else if (nav.behindSince >= 0 && tick - nav.behindSince > CrowdControl.MAX_WAIT_TICKS) {
+            return false; // the same jam for 30 s: stuck after all
+        }
+        nav.lastBehindTick = tick;
+        return true;
+    }
+
+    private void countCrowdWait() {
+        crowd.countWait();
+        ports.metrics().count(Event.CROWD_WAIT);
+    }
+
+    /** Whether another NPC stands in a cell within {@link #BEHIND_BLOCKS} along the way (from 0.5 on). */
+    private boolean occupiedAhead(Nav nav, NavPoint at, List<NavPoint> way) {
+        int self = nav.mover.id();
+        NavPoint prev = at;
+        double walked = 0;
+        double next = 0.5;
+        for (NavPoint p : way) {
+            if (!p.world().equals(at.world())) {
+                break;
+            }
+            double len = Math.hypot(p.x() - prev.x(), p.z() - prev.z());
+            while (len > 1e-6 && next <= walked + len && next <= BEHIND_BLOCKS) {
+                double t = (next - walked) / len;
+                double x = prev.x() + (p.x() - prev.x()) * t;
+                double z = prev.z() + (p.z() - prev.z()) * t;
+                int y = (int) Math.floor(prev.y() + (p.y() - prev.y()) * t + 1e-6);
+                if (occupancy.occupied(at.world(), (int) Math.floor(x), y, (int) Math.floor(z), self)
+                    && !(Math.floor(x) == at.blockX() && Math.floor(z) == at.blockZ())) {
+                    return true;
+                }
+                next += 0.5;
+            }
+            walked += len;
+            prev = p;
+            if (next > BEHIND_BLOCKS) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /** Whether crowd awareness keeps a recovery step of this NPC off a feet cell: another NPC stands there. */
+    private boolean crowdOccupied(Nav nav, NavPoint feet) {
+        return nav.settings.crowdAwareness() && occupancy.occupied(feet, nav.mover.id());
+    }
+
+    /** The feet points of an NPC's way ahead (about 8 blocks): its route line, its K&K leg or the engine's path. */
+    private List<NavPoint> wayAhead(Nav nav, NavPoint at) {
+        List<NavPoint> out = new java.util.ArrayList<>();
+        if (nav.onTrail && nav.follower != null) {
+            List<NavPoint> line = nav.follower.line();
+            double walked = 0;
+            NavPoint prev = at;
+            for (int i = nav.follower.nearestIndex(at) + 1; i < line.size() && walked < 8; i++) {
+                NavPoint feet = HopPlanner.feet(line.get(i));
+                walked += prev.horizontalDistance(feet);
+                out.add(feet);
+                prev = feet;
+            }
+            return out;
+        }
+        List<NavPoint> way = nav.knkLeg != null ? nav.knkLeg : nav.mover.pathAhead();
+        if (nav.knkLeg != null) {
+            int start = nearestOf(way, at);
+            return way.subList(Math.min(way.size(), start + 1), way.size());
+        }
+        return way;
+    }
+
+    private static int nearestOf(List<NavPoint> way, NavPoint at) {
+        int best = 0;
+        double bestD = Double.MAX_VALUE;
+        for (int i = 0; i < way.size(); i++) {
+            double d = way.get(i).horizontalDistance(at);
+            if (d < bestD) {
+                bestD = d;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /** Rebuilds the occupancy and lets each walking NPC with the key on ask about the narrow place ahead. */
+    private void crowdUpdate(List<Nav> all) {
+        long start = ports.nanoTime().getAsLong();
+        occupancy.begin();
+        for (Nav nav : all) {
+            if (nav.mover.isSpawned()) {
+                NavPoint at = nav.mover.position().orElse(null);
+                if (at != null) {
+                    occupancy.add(nav.mover.id(), at);
+                }
+            }
+        }
+        occupancy.finish(ports.nanoTime().getAsLong() - start);
+        crowd.housekeeping(tick);
+        for (Nav nav : all) {
+            if (!nav.settings.crowdAwareness() || nav.goal == null || !nav.mover.isSpawned()
+                || npcs.get(nav.mover.id()) != nav) {
+                continue;
+            }
+            NavPoint at = nav.mover.position().orElse(null);
+            if (at == null) {
+                continue;
+            }
+            if (nav.crowdHeld) {
+                heldLook(nav, at);
+                continue;
+            }
+            if (nav.state != NpcNavState.MOVING || nav.ladder.isOpen() || nav.moveOnly) {
+                continue;
+            }
+            List<NavPoint> way = wayAhead(nav, at);
+            if (way.isEmpty()) {
+                continue;
+            }
+            CrowdControl.Decision d = crowd.decide(ports.world(), nav.mover.id(), at, way, tick);
+            switch (d.kind()) {
+                case GO -> {
+                    if (d.overdue()) {
+                        ports.log().accept(nav.mover.name() + " waited " + CrowdControl.MAX_WAIT_TICKS / 20
+                            + " s at a narrow place: goes");
+                    }
+                }
+                case WAIT, YIELD -> hold(nav, at, d);
+            }
+        }
+    }
+
+    /** Holds an NPC for its turn at a narrow place: it stops and walks to its queue spot (decision 3.2, 3.3). */
+    private void hold(Nav nav, NavPoint at, CrowdControl.Decision d) {
+        nav.crowdHeld = true;
+        nav.crowdResume = nav.onTrail && nav.follower != null ? Resume.TRAIL
+            : nav.knkLeg != null ? Resume.KNK_LEG
+            : nav.legTarget != null && nav.legPrepared != null ? Resume.ENGINE_LEG : Resume.REPLAN;
+        nav.crowdRetryTick = Long.MAX_VALUE;
+        nav.crowdSpot = null;
+        countCrowdWait();
+        NavPoint middle = d.place().centre();
+        if (d.kind() == CrowdControl.Kind.YIELD) {
+            ports.metrics().count(Event.CROWD_YIELD);
+            ports.log().accept(String.format(Locale.ROOT, "%s meets an oncoming NPC in the narrow place at %s: steps "
+                + "back out and waits (yield)", nav.mover.name(), NavGeometry.block(middle)));
+        } else {
+            ports.log().accept(String.format(Locale.ROOT, "%s waits for its turn at the narrow place at %s (queue %d)",
+                nav.mover.name(), NavGeometry.block(middle), d.queueIndex() + 1));
+        }
+        nav.state = NpcNavState.WAITING; // before the stop: a held NPC is neither moving nor stuck
+        nav.waitUntil = Long.MAX_VALUE;
+        nav.mover.stop();
+        toSpot(nav, at, d.spot());
+    }
+
+    private void toSpot(Nav nav, NavPoint at, NavPoint spot) {
+        if (spot == null || (nav.crowdSpot != null && nav.crowdSpot.horizontalDistance(spot) < 0.4)) {
+            return;
+        }
+        nav.crowdSpot = spot;
+        if (at.horizontalDistance(spot) > 0.4) {
+            nav.mover.follow(List.of(spot), 0.3);
+        }
+    }
+
+    /** A held NPC looks again: its turn, or (behind another) the way ahead is free. */
+    private void heldLook(Nav nav, NavPoint at) {
+        if (nav.crowdRetryTick != Long.MAX_VALUE) {
+            if (tick >= nav.crowdRetryTick) {
+                resume(nav, at);
+            }
+            return;
+        }
+        CrowdControl.Decision d = crowd.decideHeld(ports.world(), nav.mover.id(), at, tick);
+        if (d.kind() == CrowdControl.Kind.GO) {
+            if (d.overdue()) {
+                ports.log().accept(nav.mover.name() + " waited " + CrowdControl.MAX_WAIT_TICKS / 20
+                    + " s at a narrow place: goes");
+            }
+            resume(nav, at);
+        } else {
+            toSpot(nav, at, d.spot());
+        }
+    }
+
+    /** A held NPC goes on the way it was going. */
+    private void resume(Nav nav, NavPoint at) {
+        Resume how = nav.crowdResume;
+        nav.crowdHeld = false;
+        nav.crowdSpot = null;
+        nav.crowdRetryTick = Long.MAX_VALUE;
+        nav.lastProgressTick = tick;
+        nav.state = NpcNavState.MOVING;
+        switch (how) {
+            case TRAIL -> {
+                if (nav.follower == null) {
+                    enqueue(nav);
+                    return;
+                }
+                nav.follower.restartAtNpc(at);
+                sendStretch(nav, true);
+            }
+            case KNK_LEG -> {
+                if (nav.knkLeg == null) {
+                    enqueue(nav);
+                    return;
+                }
+                List<NavPoint> rest = nav.knkLeg.subList(Math.min(nav.knkLeg.size() - 1, nearestOf(nav.knkLeg, at)),
+                    nav.knkLeg.size());
+                nav.knkLegRest = Double.NaN;
+                nav.mover.follow(List.copyOf(rest), nav.settings.waypointMargin());
+            }
+            case ENGINE_LEG -> {
+                if (nav.legTarget == null || nav.legPrepared == null) {
+                    enqueue(nav);
+                    return;
+                }
+                nav.mover.walkTo(HopPlanner.feet(nav.legTarget), nav.legPrepared);
+            }
+            case REPLAN -> enqueue(nav);
+        }
+    }
+
+    /** Ends crowd awareness's hold and claims for an NPC (its route was dropped, its order ended). */
+    private void clearCrowd(Nav nav) {
+        crowd.forget(nav.mover.id());
+        nav.crowdHeld = false;
+        nav.crowdSpot = null;
+        nav.crowdRetryTick = Long.MAX_VALUE;
+        nav.behindSince = -1;
+    }
+
+    /**
+     * The engine reported a local-leg NPC stuck in one block while another NPC stands just ahead of it (collision on):
+     * it waits a moment and walks its leg again instead of opening a stuck spell (decision 3.4).
+     */
+    private boolean holdBehind(Nav nav) {
+        if (!nav.settings.crowdAwareness() || nav.knkLeg != null || nav.onTrail) {
+            return false;
+        }
+        NavPoint at = nav.mover.position().orElse(null);
+        if (at == null || !behind(nav, at, wayAhead(nav, at))) {
+            return false;
+        }
+        nav.crowdHeld = true;
+        nav.crowdResume = nav.legTarget != null && nav.legPrepared != null ? Resume.ENGINE_LEG : Resume.REPLAN;
+        nav.crowdRetryTick = tick + BEHIND_RETRY_TICKS;
+        nav.state = NpcNavState.WAITING;
+        nav.waitUntil = Long.MAX_VALUE;
+        return true;
+    }
+
+    /**
      * Hands the mover the next stretch of the line. {@code required}: the NPC needs it now; otherwise it is the early
      * hand-over, which is skipped when the stretch is not loaded yet.
      */
+    // ==================== push resistance (plan 4c.4 item 7, link M7) ====================
+
+    /**
+     * A pushed NPC within this many blocks of where it returns to is back: under {@link PushWatch#STANDING_PUSH}, so
+     * a push it noticed always walks it back, and the walk back's own margin (0.3) ends within it.
+     */
+    static final double RETURNED_BLOCKS = 0.35;
+    /** An NPC with no order of its own, pushed this far from its post by another NPC, walks back (a guard). */
+    static final double NPC_SHOVE_BLOCKS = 1.0;
+    /** An unexplained push with another NPC this near is that NPC's body (two bodies 0.6 wide, and a step). */
+    static final double NPC_NEAR_BLOCKS = 1.5;
+    /** A teleport home only when the NPC is further than this from home. */
+    static final double TELEPORT_MIN_BLOCKS = 1.5;
+    /** Ticks between two looks at the per-player exemptions whose time is up. */
+    static final int EXEMPT_EXPIRY_TICKS = 20;
+
+    /**
+     * The engine's side of bodies (link M7): who pushes whom, and whether a player sees a place (the teleport home).
+     * Call before registering NPCs; without it bodies collide as the engine's settings say and nothing teleports.
+     */
+    public void setCollision(NpcCollisionPolicy policy, NpcSight sight) {
+        this.collision = policy == null ? NpcCollisionPolicy.NONE : policy;
+        this.sight = sight == null ? NpcSight.EVERYBODY : sight;
+    }
+
+    /** Registered NPCs that follow a group's leader: a push leaves their return to the group's slot walks. */
+    public void setGroupFollowers(java.util.function.IntPredicate followers) {
+        this.groupFollower = followers == null ? id -> false : followers;
+    }
+
+    /** Pushes seen (all, by players, by attacks), returns, exemptions given and in force, teleports home. */
+    public long[] pushCounts() {
+        return new long[] {pushes, pushesByPlayers, pushesByAttacks, pushReturns, pushLedger.given(),
+            pushLedger.active(), pushTeleports};
+    }
+
+    /** Main-thread time push resistance's looks took so far, in nanoseconds. */
+    public long pushNanos() {
+        return pushNanos;
+    }
+
+    /** Whether a mover is walking back after a push now (diagnostics, scenarios). */
+    public boolean returning(int moverId) {
+        Nav nav = npcs.get(moverId);
+        return nav != null && nav.returnTo != null;
+    }
+
+    /** Every {@link PushWatch#LOOK_TICKS}: each spawned NPC with collision on is looked at; exemptions expire. */
+    private void pushLooks(List<Nav> all) {
+        if (tick % EXEMPT_EXPIRY_TICKS == 0) {
+            for (PushLedger.Exemption e : pushLedger.expire(tick)) {
+                collision.exempt(e.moverId(), e.playerId(), false);
+                Nav nav = npcs.get(e.moverId());
+                ports.log().accept((nav == null ? "NPC " + e.moverId() : nav.mover.name()) + " collides with player "
+                    + e.playerId() + " again");
+            }
+        }
+        long start = -1;
+        for (Nav nav : all) {
+            if (!nav.settings.collidable() || (tick + nav.mover.id()) % PushWatch.LOOK_TICKS != 0
+                || !nav.mover.isSpawned()) {
+                continue;
+            }
+            if (start < 0) {
+                start = ports.nanoTime().getAsLong();
+            }
+            pushLook(nav);
+        }
+        if (start >= 0) {
+            pushNanos += ports.nanoTime().getAsLong() - start;
+        }
+    }
+
+    private void pushLook(Nav nav) {
+        NavPoint at = nav.mover.position().orElse(null);
+        if (at == null) {
+            return;
+        }
+        boolean walking = nav.mover.isMoving();
+        // the walking direction is known only on the road line; a back-off, a walk to a queue spot, a return or a
+        // winding local leg may go any way, so only its speed is judged then
+        boolean lineWalk = walking && nav.state == NpcNavState.MOVING && nav.onTrail && nav.follower != null
+            && nav.returnTo == null && !nav.crowdHeld && !nav.moveOnly && !nav.ladder.isOpen();
+        double[] dir = lineWalk ? walkingDirection(nav, at) : new double[] {0, 0};
+        PushWatch.Push p = nav.push.look(at, tick, walking, dir[0], dir[1]);
+        if (p != null) {
+            onPushed(nav, p, at);
+        }
+        if (nav.returnTo != null && (p == null || p.continued())) {
+            watchReturn(nav, at);
+        }
+    }
+
+    /** A push: counted, logged with who did it, the pusher maybe exempted, and the walk back started. */
+    private void onPushed(Nav nav, PushWatch.Push p, NavPoint at) {
+        if (p.kind() == null && npcNear(nav, at)) {
+            // a body's push without a contact report (the engine reports only the pushed side of some pushes): another
+            // NPC within reach did it
+            p = new PushWatch.Push(p.from(), p.to(), NpcMover.ContactKind.NPC, null, p.walking(), false, p.continued());
+        }
+        if (p.continued()) {
+            onStillPushed(nav, p, at);
+            return;
+        }
+        pushes++;
+        if (p.byPlayer()) {
+            pushesByPlayers++;
+        }
+        if (p.kind() == NpcMover.ContactKind.ATTACK) {
+            pushesByAttacks++;
+        }
+        ports.metrics().count(Event.PUSHED);
+        boolean nearDrop = EdgeGuard.nextToDrop(ports.world(), at);
+        boolean towardsDrop = nearDrop && EdgeGuard.towardsDrop(ports.world(), p.from(), at);
+        String who = p.kind() == null ? "something unknown"
+            : p.kind().name().toLowerCase(Locale.ROOT) + (p.by() == null ? "" : " " + p.by());
+        ports.log().accept(String.format(Locale.ROOT, "%s pushed %.1f blocks from %s to %s by %s%s", nav.mover.name(),
+            p.blocks(), NavGeometry.block(p.from()), NavGeometry.block(at), who,
+            towardsDrop ? " (towards a drop)" : nearDrop ? " (next to a drop)" : ""));
+        int id = nav.mover.id();
+        if (nav.settings.playersPushNpcs() && p.byPlayer() && p.kind() == NpcMover.ContactKind.PLAYER
+            && !pushLedger.isExempt(id, p.by())) {
+            boolean exempt = pushLedger.record(id, p.by(), tick, nav.settings.pushExemptAfter(),
+                nav.settings.pushExemptWindowTicks()) || towardsDrop;
+            if (exempt) {
+                pushLedger.exempted(id, p.by(), tick + nav.settings.pushExemptTicks());
+                collision.exempt(id, p.by(), true);
+                ports.metrics().count(Event.PUSH_EXEMPT);
+                ports.log().accept(String.format(Locale.ROOT, "%s: player %s %s; collision between them off for %d s",
+                    nav.mover.name(), p.by(), towardsDrop ? "pushed it towards a drop"
+                        : "pushed it " + nav.settings.pushExemptAfter() + " times", nav.settings.pushExemptTicks() / 20));
+            }
+        }
+        if (!nav.settings.pushReturn()) {
+            return;
+        }
+        if (wantsReturn(nav, p, at, towardsDrop)) {
+            startReturn(nav, nav.returnTo != null ? nav.returnTo : p.from(), at);
+        }
+    }
+
+    /**
+     * Whether a push makes the NPC walk back: always after a player, an attack or something unknown; after another
+     * NPC's body only towards a drop, or for an NPC standing at its post (no order) moved {@link #NPC_SHOVE_BLOCKS} or
+     * more (crowds jostle; on its way, in a queue or at its goal it is the crowd's business). Never for a group
+     * follower (its group's slot walks bring it back).
+     */
+    private boolean wantsReturn(Nav nav, PushWatch.Push p, NavPoint at, boolean towardsDrop) {
+        if (!nav.settings.pushReturn() || (nav.goal == null && groupFollower.test(nav.mover.id()))) {
+            return false;
+        }
+        if (p.kind() != NpcMover.ContactKind.NPC || towardsDrop) {
+            return true;
+        }
+        return nav.goal == null && !p.walking() && at.horizontalDistance(p.from()) >= NPC_SHOVE_BLOCKS;
+    }
+
+    /**
+     * A look in an open push (the body is still being moved): an NPC found back too soon walks back again; when the
+     * push now goes towards a drop, the edge guard acts at once: a player pushing is exempted (with
+     * {@code players-push-npcs} on), and an NPC that was let walk on (jostled by another NPC) walks back after all.
+     */
+    private void onStillPushed(Nav nav, PushWatch.Push p, NavPoint at) {
+        boolean towardsDrop = EdgeGuard.towardsDrop(ports.world(), p.from(), at);
+        if (nav.returnTo == null && at.horizontalDistance(p.from()) > RETURNED_BLOCKS
+            && wantsReturn(nav, p, at, towardsDrop)) {
+            startReturn(nav, p.from(), at); // it was back too soon: the push carried it on
+        }
+        if (!towardsDrop) {
+            return;
+        }
+        int id = nav.mover.id();
+        if (nav.settings.playersPushNpcs() && p.byPlayer() && p.kind() == NpcMover.ContactKind.PLAYER
+            && !pushLedger.isExempt(id, p.by())) {
+            pushLedger.exempted(id, p.by(), tick + nav.settings.pushExemptTicks());
+            collision.exempt(id, p.by(), true);
+            ports.metrics().count(Event.PUSH_EXEMPT);
+            ports.log().accept(String.format(Locale.ROOT, "%s: player %s pushed it towards a drop at %s; collision "
+                + "between them off for %d s", nav.mover.name(), p.by(), NavGeometry.block(at),
+                nav.settings.pushExemptTicks() / 20));
+        }
+        if (nav.returnTo == null && wantsReturn(nav, p, at, true)) {
+            startReturn(nav, p.from(), at);
+        }
+    }
+
+    /** Another spawned NPC here stands within {@link #NPC_NEAR_BLOCKS} of {@code at} (looked at only on a push). */
+    private boolean npcNear(Nav nav, NavPoint at) {
+        for (Nav other : npcs.values()) {
+            if (other == nav || !other.mover.isSpawned()) {
+                continue;
+            }
+            NavPoint o = other.mover.position().orElse(null);
+            if (o != null && o.world().equals(at.world()) && Math.abs(o.y() - at.y()) < 2
+                && o.horizontalDistance(at) <= NPC_NEAR_BLOCKS) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Starts the walk back to {@code home}: a step of the order for a walking NPC, else a walk of the body only. */
+    private void startReturn(Nav nav, NavPoint home, NavPoint at) {
+        if (nav.returnTo == null) {
+            nav.returnSince = tick;
+        }
+        nav.returnTo = home;
+        if (at.horizontalDistance(home) <= RETURNED_BLOCKS) {
+            returned(nav, at, "walked");
+            return;
+        }
+        if (nav.goal != null && nav.state == NpcNavState.MOVING && !nav.crowdHeld) {
+            nav.bodyReturn = false;
+            returnOnOrder(nav, home, at);
+        } else if (NavGeometry.straightWalkable(ports.world(), at, home)) {
+            nav.bodyReturn = true;
+            nav.mover.follow(List.of(home), 0.3);
+        } else if (nav.goal == null) {
+            // no straight way back to its post: an order home, under K&K's rules (NAV-02), whose result nobody needs
+            long since = nav.returnSince;
+            navigate(nav.mover.id(), home, result -> { });
+            nav.returnTo = home;
+            nav.returnSince = since;
+            nav.bodyReturn = false;
+        } else {
+            // waiting or held, no straight way back: it plans on from where it stands when its wait ends
+            nav.bodyReturn = true;
+        }
+    }
+
+    /**
+     * The return order of an NPC with an order (research report § 6.5 item 2): straight back where it was pushed from
+     * when that is a straight walk, else back along its own footsteps, else a local leg (K&K's search with
+     * {@code local-legs-clearance} on, else the engine's); then on along its route from there.
+     */
+    private void returnOnOrder(Nav nav, NavPoint home, NavPoint at) {
+        if (nav.ladder.isOpen()) {
+            spellNotFreed(nav, "pushed");
+        }
+        List<NavPoint> back = null;
+        String how;
+        if (NavGeometry.straightWalkable(ports.world(), at, home)) {
+            back = new java.util.ArrayList<>(List.of(home));
+            how = "straight back";
+        } else {
+            List<NavPoint> steps = nav.steps.wayBack(at, at.horizontalDistance(home) + 0.5);
+            if (!steps.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, steps.get(0))
+                && steps.get(steps.size() - 1).horizontalDistance(home) <= 1.0) {
+                back = new java.util.ArrayList<>(steps);
+                how = "back along its footsteps";
+            } else {
+                how = "a local leg back";
+            }
+        }
+        ports.log().accept(String.format(Locale.ROOT, "%s returns %s to %s", nav.mover.name(), how,
+            NavGeometry.block(home)));
+        boolean onLine = nav.follower != null && (nav.onTrail || nav.recovering || nav.hops.isEmpty());
+        nav.lastProgressTick = tick;
+        nav.lastStepTick = tick;
+        if (back != null) {
+            if (onLine) {
+                nav.follower.restartAtNpc(home);
+                RouteFollower.Stretch rest = nav.follower.next(ports.world(), nav.settings.stretchBlocks(),
+                    home.blockY() - 1, nav.settings.cornerClearance(), steering(nav));
+                if (rest.kind() == RouteFollower.Kind.WAYPOINTS) {
+                    back.addAll(rest.waypoints());
+                }
+                nav.hops.clear();
+                nav.recovering = false;
+                nav.onTrail = true;
+                nav.moveOnly = false;
+            } else {
+                nav.onTrail = false;
+                nav.moveOnly = true; // then its hop again from there
+            }
+            nav.knkLeg = null;
+            nav.state = NpcNavState.MOVING;
+            nav.mover.follow(back, nav.settings.waypointMargin());
+            return;
+        }
+        NavPoint floor = HopPlanner.floor(home);
+        if (onLine) {
+            nav.follower.restartAtNpc(home);
+            nav.hops.clear();
+            nav.hops.add(floor);
+            nav.onTrail = false;
+            nav.recovering = true;
+        } else {
+            nav.hops.addFirst(floor);
+        }
+        nav.moveOnly = false;
+        nav.knkLeg = null;
+        nav.state = NpcNavState.WAITING; // before the stop, so its cancel is not taken for a stuck NPC
+        nav.mover.stop();
+        enqueue(nav);
+    }
+
+    /** A returning NPC: back when near home; the teleport home, out of sight, when it took too long. */
+    private void watchReturn(Nav nav, NavPoint at) {
+        NavPoint home = nav.returnTo;
+        double off = at.horizontalDistance(home);
+        if (off <= RETURNED_BLOCKS && Math.abs(at.y() - home.y()) < 1.5) {
+            returned(nav, at, "walked");
+            return;
+        }
+        int limit = nav.settings.pushTeleportTicks();
+        if (limit <= 0 || tick - nav.returnSince < limit || off < TELEPORT_MIN_BLOCKS
+            || (tick + nav.mover.id()) % EXEMPT_EXPIRY_TICKS != 0) {
+            return;
+        }
+        if (sight.seen(at) || sight.seen(home)) {
+            return; // seen: it keeps walking (or waiting); looked at again in a second
+        }
+        if (!nav.mover.teleport(home)) {
+            return;
+        }
+        pushTeleports++;
+        ports.metrics().count(Event.PUSH_TELEPORT);
+        ports.log().accept(String.format(Locale.ROOT, "%s could not walk back in %d s: teleported home to %s, out of "
+            + "every player's sight", nav.mover.name(), (tick - nav.returnSince) / 20, NavGeometry.block(home)));
+        nav.steps.clear();
+        nav.push.reset(home, false);
+        boolean body = nav.bodyReturn;
+        returned(nav, home, "teleported");
+        if (!body && nav.goal != null) {
+            replan(nav); // its order goes on from home
+        }
+    }
+
+    private void returned(Nav nav, NavPoint at, String how) {
+        long ticks = tick - nav.returnSince;
+        nav.push.settle(nav.returnTo); // a post stays where it was, it does not creep with each return
+        nav.returnTo = null;
+        nav.bodyReturn = false;
+        pushReturns++;
+        ports.metrics().count(Event.PUSH_RETURNED);
+        ports.log().accept(String.format(Locale.ROOT, "%s is back at %s (%s, %.1f s)", nav.mover.name(),
+            NavGeometry.block(at), how, ticks / 20.0));
+    }
+
     private void sendStretch(Nav nav, boolean required) {
         NavPoint at = nav.mover.position().orElse(null);
         if (at == null) {
@@ -891,7 +1932,7 @@ public final class NpcNavigationService {
             return;
         }
         RouteFollower.Stretch stretch = nav.follower.next(ports.world(), nav.settings.stretchBlocks(),
-            at.blockY() - 1, nav.settings.cornerClearance());
+            at.blockY() - 1, nav.settings.cornerClearance(), steering(nav));
         switch (stretch.kind()) {
             case UNLOADED -> {
                 if (required) {
@@ -908,13 +1949,14 @@ public final class NpcNavigationService {
                 }
             }
             case WAYPOINTS -> {
+                nav.knkLeg = null;
                 if (!nav.onTrail || nav.follower.bestIndex() < 0) {
                     nav.lastProgressTick = tick;
                 }
                 nav.onTrail = true;
                 nav.state = NpcNavState.MOVING;
                 ports.metrics().count(Event.STRETCH);
-                nav.mover.follow(stretch.waypoints(), nav.settings.waypointMargin());
+                nav.mover.follow(stretch.waypoints(), nav.settings.marginFor(stretch));
             }
             default -> { }
         }
@@ -923,6 +1965,7 @@ public final class NpcNavigationService {
     /** A stretch or a local leg was walked: the next hop, the next stretch, the tail, or the end of the order. */
     private void legDone(Nav nav) {
         nav.retries = 0;
+        nav.knkLeg = null;
         if (!nav.onTrail && !nav.hops.isEmpty()) {
             nav.hops.pollFirst();
             if (nav.ladder.isOpen()) {
@@ -953,6 +1996,7 @@ public final class NpcNavigationService {
      */
     public void onGateChanged(int doorId) {
         timed(() -> {
+            crowd.forgetWidths(); // a door changed: narrow places may have opened or closed
             for (Nav nav : npcs.values()) {
                 if (nav.goal == null) {
                     continue;
@@ -984,6 +2028,11 @@ public final class NpcNavigationService {
                 if (nav.goal != null) {
                     nav.tolerated.clear();
                     nav.eventAvailability = true;
+                    // PandiO/knk-workspace#593: the trespass guard takes a fresh look now, so an entry made under the
+                    // old rules (before this event told of the change) is not judged by the new ones
+                    if (nav.regions != null) {
+                        nav.mover.position().ifPresent(feet -> nav.regions = regionsAtFeet(feet));
+                    }
                 }
             }
         });
@@ -1112,8 +2161,9 @@ public final class NpcNavigationService {
 
     /**
      * The trespass guard: a region the NPC stands in now and did not stand in at its last check was entered; the
-     * entry is judged by the current rules from the regions it came from. Independent of the planner and of the
-     * engine's block rules: it watches where NPCs really are. Must stay 0.
+     * entry is judged by the current rules from the regions it came from. An availability event takes a fresh look
+     * first ({@link #onAvailabilityChanged}), so entries made before the plugin knew of a change are not counted.
+     * Independent of the planner and of the engine's block rules: it watches where NPCs really are. Must stay 0.
      */
     private boolean trespassed(Nav nav, NavPoint at, Set<String> here) {
         Set<String> before = nav.regions;
@@ -1165,7 +2215,8 @@ public final class NpcNavigationService {
         Map<String, Boolean> verdicts = new HashMap<>();
         List<Set<String>> ahead = new java.util.ArrayList<>();
         if (!nav.onTrail) {
-            for (NavPoint feet : nav.mover.pathAhead()) {
+            // a K&K local leg's own waypoints (link M6), else the engine's path
+            for (NavPoint feet : nav.knkLeg != null ? nav.knkLeg : nav.mover.pathAhead()) {
                 ahead.add(regionsAtFeet(feet));
             }
         }
@@ -1317,6 +2368,7 @@ public final class NpcNavigationService {
 
     /** Takes the next step of the open spell's ladder: back-off, side-step, local leg ahead, or the replan. */
     private void nextTry(Nav nav) {
+        nav.knkLeg = null;
         NavPoint at = nav.mover.position().orElse(null);
         if (at == null) {
             nav.state = NpcNavState.PAUSED;
@@ -1333,10 +2385,12 @@ public final class NpcNavigationService {
                 List<NavPoint> back = nav.steps.wayBack(at, 2);
                 move.set(back);
                 // only a way back it can walk straight (a pushed body's footsteps may lie behind a wall)
-                yield !back.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, back.get(0));
+                yield !back.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, back.get(0))
+                    && !crowdOccupied(nav, back.get(back.size() - 1));
             }
             case SIDE_STEP -> {
-                NavPoint side = RecoveryMoves.sideStep(ports.world(), at, wall, null, feet -> mayStand(nav, at, feet));
+                NavPoint side = RecoveryMoves.sideStep(ports.world(), at, wall, null,
+                    feet -> mayStand(nav, at, feet) && !crowdOccupied(nav, feet));
                 move.set(side == null ? List.of() : List.of(side));
                 yield side != null;
             }
@@ -1345,7 +2399,7 @@ public final class NpcNavigationService {
                     yield !nav.hops.isEmpty(); // a local leg's own hop is the point ahead
                 }
                 legTarget[0] = nav.follower.recoveryTarget(ports.world(), at, nav.settings.hopBlocks(),
-                    feet -> mayStand(nav, at, feet));
+                    feet -> mayStand(nav, at, feet) && !crowdOccupied(nav, feet));
                 yield legTarget[0] != null;
             }
             case REPLAN -> true;
@@ -1370,7 +2424,7 @@ public final class NpcNavigationService {
                     NavPoint end = waypoints.get(waypoints.size() - 1);
                     nav.follower.restartAtNpc(end);
                     RouteFollower.Stretch rest = nav.follower.next(ports.world(), nav.settings.stretchBlocks(),
-                        end.blockY() - 1, nav.settings.cornerClearance());
+                        end.blockY() - 1, nav.settings.cornerClearance(), steering(nav));
                     if (rest.kind() == RouteFollower.Kind.WAYPOINTS) {
                         waypoints.addAll(rest.waypoints());
                     }
@@ -1480,6 +2534,11 @@ public final class NpcNavigationService {
     }
 
     private void dropRoute(Nav nav) {
+        settleEngineLeg(nav, false);
+        clearCrowd(nav);
+        nav.legTarget = null;
+        nav.legPrepared = null;
+        nav.knkLeg = null;
         nav.hops.clear();
         nav.tail.clear();
         nav.follower = null;
