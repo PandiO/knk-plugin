@@ -2006,6 +2006,9 @@ public final class NpcNavigationService {
                 // appended to the waypoints not yet walked, not replacing them (link B2, decision 34.1)
                 boolean append = !required && nav.onTrail && nav.trail != null;
                 List<NavPoint> way = append ? nav.trail.appended(stretch.waypoints()) : stretch.waypoints();
+                if (append && nav.mover.onGround()) {
+                    way = Trail.fromFeet(ports.world(), at, way); // not back to a waypoint it is already past
+                }
                 // bridged from the feet, not from the last waypoint; a step the bridge cannot make is a local leg
                 WaypointChain.Split split = WaypointChain.split(ports.world(), nav.mover.onGround() ? at : null, way);
                 nav.onTrail = true;

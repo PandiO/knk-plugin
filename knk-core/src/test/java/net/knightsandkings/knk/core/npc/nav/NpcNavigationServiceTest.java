@@ -292,9 +292,11 @@ class NpcNavigationServiceTest {
 
         assertEquals(2, mover.follows.size());
         List<NavPoint> second = mover.follows.get(1);
-        assertEquals(first.subList(first.size() - 2, first.size()), second.subList(0, 2),
-            "the two waypoints it has not walked yet come first");
-        assertTrue(second.size() > 2, "then the new stretch");
+        NavPoint end = first.get(first.size() - 1);
+        int kept = second.indexOf(end);
+        assertTrue(kept >= 0, "the stretch end it has not reached stays: " + second);
+        assertTrue(first.contains(second.get(0)), "it starts on the waypoints it had, not on the new stretch");
+        assertTrue(second.size() > kept + 1, "then the new stretch");
         assertEquals(second, service.trailOf(mover.id()));
     }
 

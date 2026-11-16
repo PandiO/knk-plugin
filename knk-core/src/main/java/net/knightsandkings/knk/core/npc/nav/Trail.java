@@ -105,6 +105,33 @@ public final class Trail {
         return out;
     }
 
+    /** How far ahead (horizontally) the join may start from a waypoint the feet reach in a straight walk. */
+    static final double PULL_BLOCKS = 3;
+
+    /**
+     * The list from the furthest of its first waypoints the feet reach in a straight walk on their own level
+     * (within {@value #PULL_BLOCKS} blocks horizontally, less than a block up or down, {@link NavGeometry#straightWalkable}),
+     * so the NPC does not turn back to a waypoint it is already past when the next stretch is appended. A waypoint on
+     * another level or across a drop is never skipped: the look stops at the first one off the feet's level.
+     */
+    public static List<NavPoint> fromFeet(NavWorld world, NavPoint feet, List<NavPoint> way) {
+        if (feet == null || way.size() < 2) {
+            return way;
+        }
+        int from = 0;
+        for (int k = 1; k < way.size(); k++) {
+            NavPoint p = way.get(k);
+            if (p.horizontalDistance(feet) > PULL_BLOCKS || Math.abs(p.y() - feet.y()) >= 1
+                || Math.abs(way.get(k - 1).y() - feet.y()) >= 1) {
+                break;
+            }
+            if (NavGeometry.straightWalkable(world, feet, p)) {
+                from = k;
+            }
+        }
+        return from == 0 ? way : way.subList(from, way.size());
+    }
+
     private static boolean same(NavPoint a, NavPoint b) {
         return a.world().equals(b.world()) && a.blockX() == b.blockX() && a.blockZ() == b.blockZ()
             && Math.abs(a.y() - b.y()) < 0.5;

@@ -106,4 +106,29 @@ class TrailTest {
         assertEquals(FLIGHT.size() + 1, out.size());
         assertEquals(NEXT.get(0), out.get(out.size() - 1));
     }
+
+    @Test
+    void theJoinStartsFromTheFurthestWaypointTheFeetReachOnTheirLevel() {
+        // a flat road (floor 64): the zig to x 16.5 the NPC is already past is not walked back to
+        FakeNavWorld world = new FakeNavWorld();
+        List<NavPoint> way = List.of(feet(16.5, 65, 25.5), feet(15.5, 65, 26.5), feet(15.5, 65, 27.5),
+            feet(15.5, 65, 29.5));
+
+        List<NavPoint> out = Trail.fromFeet(world, feet(15.7, 65, 25.1), way);
+
+        assertEquals(way.subList(2, 4), out, "on to 27.5 (2.4 blocks), not 29.5 (4.4)");
+    }
+
+    @Test
+    void aWaypointOnAnotherLevelOrAcrossADropIsNeverSkipped() {
+        FakeNavWorld world = new FakeNavWorld();
+        // the next waypoints climb: the first one up ends the look
+        List<NavPoint> up = List.of(feet(0.5, 65, 1.5), feet(0.5, 66, 2.5), feet(0.5, 66, 3.5));
+        assertEquals(up, Trail.fromFeet(world, feet(0.5, 65, 0.5), up));
+
+        // a drop between the feet and the second waypoint: not a straight walk, nothing skipped
+        world.floor = (x, z) -> z == 2 ? 57 : 64;
+        List<NavPoint> across = List.of(feet(0.5, 65, 1.5), feet(0.5, 65, 3.5));
+        assertEquals(across, Trail.fromFeet(world, feet(0.5, 65, 0.5), across));
+    }
 }
