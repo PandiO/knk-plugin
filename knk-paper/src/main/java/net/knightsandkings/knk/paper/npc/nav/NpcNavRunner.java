@@ -14,6 +14,7 @@ import java.util.function.Function;
 import net.knightsandkings.knk.core.npc.nav.NavGeometry;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavWorld;
+import net.knightsandkings.knk.core.npc.nav.corridor.FreeWidth;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
@@ -103,6 +104,8 @@ public final class NpcNavRunner {
     private final Map<Integer, Walker> walkers = new LinkedHashMap<>();
     private final Map<String, Integer> failures = new TreeMap<>();
     private final Map<Event, Long> totalsAtReset = new EnumMap<>(Event.class);
+    /** Fold-reason totals at the last reset, keyed by change and reason name (decision 2.8). */
+    private final Map<String, Long> reasonsAtReset = new java.util.HashMap<>();
     private long tick;
     private int nextName = 1;
     private NavPoint from;
@@ -595,7 +598,9 @@ public final class NpcNavRunner {
         traceFile = log.newFile("trace_" + pick.mover.name());
         log.append(traceFile, "# trace " + pick.mover.name() + " for " + seconds
             + " s; columns: tick x y z onGround dx dy dz | state bestIndex nearestIndex | JUMP when it leaves the ground upwards;"
-            + " '# waypoints:' lines list each stretch's waypoints (feet blocks) when it is handed out");
+            + " '# waypoints:' lines list each stretch's waypoints (feet blocks) when it is handed out;"
+            + " '# corridor:' lines follow with each waypoint's free width across the line: x y z total left right"
+            + " (blocks, to a wall, post or drop, at most " + (int) FreeWidth.MAX_HALF + " per side)");
         log.fileOnly("trace " + pick.mover.name() + " -> " + traceFile.getFileName());
         return "Tracing " + pick.mover.name() + " for " + seconds + " s -> npc-logs/" + traceFile.getFileName();
     }
@@ -623,6 +628,14 @@ public final class NpcNavRunner {
                 line.append(' ').append(NavGeometry.block(p)).append(';');
             }
             log.append(traceFile, line.substring(0, line.length() - 1));
+            // the free width across the line at each waypoint (plan 4c.4 item 1, link M1): total, left, right
+            StringBuilder corridor = new StringBuilder("# corridor:");
+            List<FreeWidth> widths = FreeWidth.along(world, traceSent);
+            for (int i = 0; i < traceSent.size(); i++) {
+                corridor.append(' ').append(NavGeometry.block(traceSent.get(i))).append(' ')
+                    .append(widths.get(i).describe()).append(';');
+            }
+            log.append(traceFile, corridor.substring(0, corridor.length() - 1));
         }
         boolean jump = tracePrev != null && tracePrevGround && dy > 0.2;
         log.append(traceFile, String.format(Locale.ROOT, "%d %.2f %.2f %.2f %s %.3f %.3f %.3f | %s %d %d%s", tick,
@@ -640,6 +653,11 @@ public final class NpcNavRunner {
         for (Event event : Event.values()) {
             totalsAtReset.put(event, metrics.total(event));
         }
+        for (Event change : NpcNavigationMetrics.WIDTH_CHANGES) {
+            for (NpcNavigationMetrics.FoldReason reason : NpcNavigationMetrics.FoldReason.values()) {
+                reasonsAtReset.put(change.name() + reason.name(), metrics.foldReasonTotal(change, reason));
+            }
+        }
         failures.clear();
         trips = 0;
         tripSecondsSum = 0;
@@ -648,6 +666,8 @@ public final class NpcNavRunner {
         mostGroupRoadPlans = 0;
         mostLocalLegs = 0;
         metrics.spells().reset();
+        service.crowd().resetCounts();
+        service.occupancy().resetCounts();
         straySamples = 0;
         strayOver2 = 0;
         strayMax = 0;
@@ -656,6 +676,21 @@ public final class NpcNavRunner {
 
     private long since(Event event) {
         return metrics.total(event) - totalsAtReset.getOrDefault(event, 0L);
+    }
+
+    /**
+     * The reasons of a width change since the last reset (implementation plan 4c.3 decision 2.8), for example
+     * {@code " (stair 3, door 1)"}; empty when there were none.
+     */
+    String reasons(Event change) {
+        StringBuilder out = new StringBuilder();
+        for (NpcNavigationMetrics.FoldReason reason : NpcNavigationMetrics.FoldReason.values()) {
+            long n = metrics.foldReasonTotal(change, reason) - reasonsAtReset.getOrDefault(change.name() + reason.name(), 0L);
+            if (n > 0) {
+                out.append(out.isEmpty() ? " (" : ", ").append(reason.label()).append(' ').append(n);
+            }
+        }
+        return out.isEmpty() ? "" : out.append(')').toString();
     }
 
     /**
@@ -684,6 +719,12 @@ public final class NpcNavRunner {
             trips == 0 ? 0.0 : tripSecondsSum / trips, since(Event.STRETCH), since(Event.FAILED)));
         // stuck spells (implementation plan 4b.2 item 14): one per spell, split by where, how each ended
         lines.add(metrics.spells().describe(since(Event.RECOVERY_NO_PATH), since(Event.FELL)));
+        // local legs (link M6): found by K&K's own search, walked with the engine's, or no path either way
+        lines.add(NpcNavigationMetrics.localLegsLine(since(Event.LOCAL_LEG_KNK), since(Event.LOCAL_LEG_ENGINE),
+            since(Event.LOCAL_LEG_NONE)));
+        // crowd awareness (link M4): waits for a turn, behind others or yielding; yields; the longest queue
+        lines.add(net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.statsLine(since(Event.CROWD_WAIT),
+            since(Event.CROWD_YIELD), service.crowd().longestQueue()));
         lines.add(String.format(Locale.ROOT,
             "waits: no allowed route %d (reported blocked %d), way ahead not loaded %d | chunk-unload pauses %d, resumes %d",
             since(Event.NO_ROUTE_WAIT), blockedReports, since(Event.UNLOADED_WAIT), since(Event.PAUSED),
@@ -736,12 +777,13 @@ public final class NpcNavRunner {
             formations.add(run.group.settings().formation().type().configName());
         }
         return String.format(Locale.ROOT,
-            "groups %d (%d NPCs%s): trips %d | widths: narrows %d, widens %d | folds %d, reforms %d, folded now %d | "
+            "groups %d (%d NPCs%s): trips %d | widths: narrows %d%s, widens %d, merges %d%s | folds %d%s, reforms %d, folded now %d | "
                 + "abreast now %s | finished trips %d (finishing now %d) | own legs back %d (now %d), "
                 + "left behind %d (now %d), leader waited %d (now %d), furthest behind its slot %.1f blocks | road plans "
                 + "per group event: max %d | local legs at once: max %d", groupCount(), members, formations.isEmpty() ? "" : ", " + String.join("/", formations),
-            groupTrips, since(Event.GROUP_NARROW), since(Event.GROUP_WIDEN), since(Event.GROUP_FOLD),
-            since(Event.GROUP_REFORM), folded, abreast.isEmpty() ? "-" : String.join("/", abreast),
+            groupTrips, since(Event.GROUP_NARROW), reasons(Event.GROUP_NARROW), since(Event.GROUP_WIDEN),
+            since(Event.GROUP_MERGE), reasons(Event.GROUP_MERGE),
+            since(Event.GROUP_FOLD), reasons(Event.GROUP_FOLD), since(Event.GROUP_REFORM), folded, abreast.isEmpty() ? "-" : String.join("/", abreast),
             since(Event.GROUP_FINISH_TRIP), finishing, since(Event.GROUP_REJOIN), ownLegs,
             since(Event.GROUP_LOST), leftBehind, since(Event.GROUP_REGROUP), waiting, lag, mostGroupRoadPlans,
             mostLocalLegs);

@@ -19,12 +19,18 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenar
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersLineScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupRealtimeEntryScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupGateFinishTripScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupNarrowsScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcLandingRanksScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcLedgeCornerScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStuckLadderScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupSpacingScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcPlazaLineScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcDoorwayCrowdScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcJaggedStraightScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseGroupScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseSinglesScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcWalksRoadRouteScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.PlayerChatGroupColoursScenario;
@@ -73,6 +79,8 @@ public final class PaperScenarios {
             .register(new NpcGroupNarrowsScenario())
             .register(new NpcGroupGateFinishTripScenario())
             .register(new NpcGroupAccessChangeScenario())
+            // entry removed through realtime under a gate region (PandiO/knk-workspace#593)
+            .register(new NpcGroupRealtimeEntryScenario())
             // the two spots of the developer's L3 retest in their real geometry (PandiO/knk-workspace#592)
             .register(new NpcLedgeCornerScenario())
             .register(new NpcLandingRanksScenario())
@@ -80,6 +88,17 @@ public final class PaperScenarios {
             .register(new NpcWalksRoadRouteScenario())
             .register(new NpcKeepsToRoadScenario())
             .register(new NpcGroupSpacingScenario())
+            // NPC movement evidence in report mode, collision off and on (plan 4c.5, link M1, PandiO/knk-workspace#621)
+            .register(new NpcStairhouseSinglesScenario(false))
+            .register(new NpcStairhouseSinglesScenario(true))
+            .register(new NpcStairhouseGroupScenario(false))
+            .register(new NpcStairhouseGroupScenario(true))
+            .register(new NpcJaggedStraightScenario(false))
+            .register(new NpcJaggedStraightScenario(true))
+            .register(new NpcDoorwayCrowdScenario(false))
+            .register(new NpcDoorwayCrowdScenario(true))
+            .register(new NpcPlazaLineScenario(false))
+            .register(new NpcPlazaLineScenario(true))
             // Scripted players: commands, chat, joins, menus and teleports (PandiO/knk-workspace#540)
             .register(new PlayerCommandNeedsGrantScenario())
             // KnK takes the plain /heal over from WorldGuard (PandiO/knk-workspace#580). Not last: the run's end would

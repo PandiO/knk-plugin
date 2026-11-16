@@ -53,6 +53,7 @@ import net.knightsandkings.knk.core.roads.route.Maneuver;
 import net.knightsandkings.knk.core.roads.route.ManeuverBuilder;
 import net.knightsandkings.knk.core.roads.route.RegionClosestPoint;
 import net.knightsandkings.knk.core.roads.route.RegionShape;
+import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.Route;
 import net.knightsandkings.knk.core.roads.route.RouteRequest;
@@ -575,8 +576,9 @@ public final class NavigationService implements SiegeMatchObserver {
         deps.routing().execute(() -> {
             net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan plan;
             try {
-                plan = roadPlanOf(world, new AStarRouter(snapshot).routeOrExplain(request),
-                    edge -> asker -> deps.policies().edgeBlocked(asker, snapshot, edge));
+                RouteResult routed = new AStarRouter(snapshot).routeOrExplain(request);
+                plan = roadPlanOf(world, routed, edge -> asker -> deps.policies().edgeBlocked(asker, snapshot, edge))
+                    .withPlazas(plazaCrossingsOf(world, routed, snapshot));
             } catch (RuntimeException e) {
                 deps.logger().log(Level.WARNING, "[NPC] road routing failed for " + subject.name(), e);
                 plan = net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
@@ -629,6 +631,28 @@ public final class NavigationService implements SiegeMatchObserver {
             case NO_ROUTE -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
                 net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.NO_ROUTE, "no route on the road network");
         };
+    }
+
+    /**
+     * The junctions a route passes that may be plazas (implementation plan 4c.3 decision 6, link M5): a designed
+     * plaza's centre with its radius, and every other junction with radius 0, whose open floor the NPC side measures
+     * (the road data does not mark automatic plazas). Empty without a route.
+     */
+    static List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing> plazaCrossingsOf(String world,
+            RouteResult result, RoadNetworkSnapshot snapshot) {
+        List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing> out = new ArrayList<>();
+        result.routeToGuide().ifPresent(route -> {
+            for (int id : route.nodeIds()) {
+                snapshot.node(id).ifPresent(node -> {
+                    if (node.isPlazaCentre() || node.kind() == RoadNodeKind.JUNCTION) {
+                        out.add(new net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing(
+                            new net.knightsandkings.knk.core.npc.nav.NavPoint(world, node.x(), node.y(), node.z()),
+                            node.plazaRadius())); // as the polyline gives the node: its floor block
+                    }
+                });
+            }
+        });
+        return out;
     }
 
     /** The router's explanation as the element NPC behavior hears about: the cause, with the blocked edge's gates and regions. */

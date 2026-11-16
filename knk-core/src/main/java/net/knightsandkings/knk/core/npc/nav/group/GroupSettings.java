@@ -23,14 +23,60 @@ import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
  *                         this many blocks along the path (4b.3 item 5)
  * @param followersFinishTrip followers still on their way when the leader has arrived finish their trip to their
  *                         slot at the goal before they follow the group's next order (4b.3 items 8 to 11)
+ * @param keeping          how the formation is kept: today's fixed widths or the elastic fit (4c.3 decision 2)
  */
 public record GroupSettings(Formation formation, double rejoinBlocks, double regroupBlocks, double catchUpSpeed,
                             double hopBlocks, int noProgressTicks, int noRouteWaitTicks, int recheckTicks,
                             int maxRetries, int recoveryWaitTicks, double waypointMargin,
-                            int widthHysteresisBlocks, boolean followersFinishTrip) {
+                            int widthHysteresisBlocks, boolean followersFinishTrip, Keeping keeping) {
+
+    /**
+     * How a group keeps its formation (implementation plan 4c.3 decision 2, link M3; {@code group-formation-keeping}).
+     *
+     * @param elastic           false: today's fixed widths ({@code levels}); true: the elastic fit
+     * @param lateralSpacingMin the squeezed spacing between neighbours in a row ({@code group-lateral-spacing-min})
+     * @param spacingMin        the squeezed gap between rows ({@code group-spacing-min})
+     * @param lookaheadBlocks   blocks looked ahead past the formation's depth ({@code group-lookahead-blocks})
+     * @param wallClearance     the preferred margin of the outer lanes to a wall or drop ({@code wall-clearance})
+     */
+    public record Keeping(boolean elastic, double lateralSpacingMin, double spacingMin, int lookaheadBlocks,
+                          double wallClearance) {
+        /** {@code levels}, the keys at their code defaults. */
+        public static Keeping levels() {
+            return new Keeping(false, NavigationSettings.GROUP_LATERAL_SPACING_MIN.defaultValue(),
+                NavigationSettings.GROUP_SPACING_MIN.defaultValue(),
+                NavigationSettings.GROUP_LOOKAHEAD_BLOCKS.defaultValue(),
+                NavigationSettings.WALL_CLEARANCE.defaultValue());
+        }
+
+        /** {@code elastic}, the keys at their code defaults. */
+        public static Keeping elasticDefaults() {
+            Keeping l = levels();
+            return new Keeping(true, l.lateralSpacingMin, l.spacingMin, l.lookaheadBlocks, l.wallClearance);
+        }
+
+        static Keeping of(NavigationSettings settings, NavigationSettings.Scope scope) {
+            return new Keeping("elastic".equals(settings.value(NavigationSettings.GROUP_FORMATION_KEEPING, scope)),
+                settings.value(NavigationSettings.GROUP_LATERAL_SPACING_MIN, scope),
+                settings.value(NavigationSettings.GROUP_SPACING_MIN, scope),
+                settings.value(NavigationSettings.GROUP_LOOKAHEAD_BLOCKS, scope),
+                settings.value(NavigationSettings.WALL_CLEARANCE, scope));
+        }
+    }
 
     public GroupSettings {
         Objects.requireNonNull(formation, "formation");
+        keeping = keeping == null ? Keeping.levels() : keeping;
+    }
+
+    /** With today's fixed widths ({@code group-formation-keeping: levels}). */
+    public GroupSettings(Formation formation, double rejoinBlocks, double regroupBlocks, double catchUpSpeed,
+                         double hopBlocks, int noProgressTicks, int noRouteWaitTicks, int recheckTicks,
+                         int maxRetries, int recoveryWaitTicks, double waypointMargin,
+                         int widthHysteresisBlocks, boolean followersFinishTrip) {
+        this(formation, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks, noRouteWaitTicks,
+            recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin, widthHysteresisBlocks, followersFinishTrip,
+            Keeping.levels());
     }
 
     /** With the code defaults for the 4b.3 settings (width hysteresis, followers finish their trip). */
@@ -68,7 +114,8 @@ public record GroupSettings(Formation formation, double rejoinBlocks, double reg
             settings.value(NavigationSettings.RECOVERY_WAIT_TICKS, scope),
             settings.value(NavigationSettings.WAYPOINT_MARGIN, scope),
             settings.value(NavigationSettings.GROUP_WIDTH_HYSTERESIS_BLOCKS, scope),
-            settings.value(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, scope));
+            settings.value(NavigationSettings.GROUP_FOLLOWERS_FINISH_TRIP, scope),
+            Keeping.of(settings, scope));
     }
 
     public static GroupSettings defaults() {
@@ -78,13 +125,20 @@ public record GroupSettings(Formation formation, double rejoinBlocks, double reg
     public GroupSettings withFormation(Formation other) {
         return new GroupSettings(other, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks,
             noRouteWaitTicks, recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin, widthHysteresisBlocks,
-            followersFinishTrip);
+            followersFinishTrip, keeping);
     }
 
     /** The same settings with the toggle of 4b.3 item 8 set (the group command's {@code finish-trip}). */
     public GroupSettings withFollowersFinishTrip(boolean finish) {
         return new GroupSettings(formation, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks,
             noRouteWaitTicks, recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin, widthHysteresisBlocks,
-            finish);
+            finish, keeping);
+    }
+
+    /** The same settings with another way of keeping the formation (link M3; scenarios and tests). */
+    public GroupSettings withKeeping(Keeping other) {
+        return new GroupSettings(formation, rejoinBlocks, regroupBlocks, catchUpSpeed, hopBlocks, noProgressTicks,
+            noRouteWaitTicks, recheckTicks, maxRetries, recoveryWaitTicks, waypointMargin, widthHysteresisBlocks,
+            followersFinishTrip, other);
     }
 }
