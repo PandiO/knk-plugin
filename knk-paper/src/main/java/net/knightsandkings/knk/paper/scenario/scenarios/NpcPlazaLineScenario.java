@@ -27,7 +27,8 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * clearance (less the engine's own walking slack) and never near the junction. Then a group of 7 in ranks of 3
  * ({@code group-formation-keeping: elastic}) crosses the same way: the leader arrives within 10 % of the shortest line
  * round the well with the group's clearance (its formation's half width plus {@code wall-clearance}), not through the
- * junction, the group keeps its width on the open plaza (0 folds) and passes the well with the clearance, and corridor
+ * junction, the group keeps its width on the open plaza (0 folds), no member comes nearer the well than the hard
+ * minimum 0.35 (its outer lanes keep 0.8 nominally; with collision on bodies push), and corridor
  * shaping in that phase stays within 0.03 ms per NPC per tick (the singles' phase, the server's first plaza shaping,
  * is reported, not judged). Reports the walked lengths against the plain chord too
  * (M1 measured +40 %). Needs Citizens.
@@ -49,6 +50,11 @@ public final class NpcPlazaLineScenario implements Scenario<ScenarioScene> {
     static final double GROUP_FROM_JUNCTION = 1.0;
     /** A group's leader within this share over the shortest line round the well with the group's clearance. */
     static final double GROUP_OVER = 0.10;
+    /**
+     * A group member never nearer the well than this ({@code wall-clearance}'s hard minimum): the group's line keeps
+     * 1.8 from it, its outer lanes 0.8 nominally, and with collision on bodies push each other aside.
+     */
+    static final double GROUP_FROM_WELL = 0.35;
     /** K&K's corridor shaping over the whole run, ms per NPC per tick (NAV-28's budget). */
     static final double BUDGET_MS = 0.03;
 
@@ -239,7 +245,7 @@ public final class NpcPlazaLineScenario implements Scenario<ScenarioScene> {
                     failed.add(String.format(Locale.ROOT, "corridor shaping %.4f ms per NPC per tick in the group phase",
                         cost));
                 }
-                if (closestWell < clearance - WALK_SLACK) {
+                if (closestWell < GROUP_FROM_WELL) {
                     failed.add(String.format(Locale.ROOT, "a member came %.2f from the well", closestWell));
                 }
                 report.add("formation keeping", "elastic")

@@ -85,12 +85,6 @@ public final class NavGroup {
     static final int SETTLE_TICKS = 400;
     /** The leader waits for followers at most this long; who is still behind then is left to catch up alone. */
     static final int MAX_HOLD_TICKS = 600;
-    /**
-     * A slot this close past its last path point gets no waypoint of its own ({@link #send}); a follower whose walk
-     * ended that close to its slot counts as there (link M5: with 0.1 there, a follower 0.1 to 0.2 short of its slot
-     * was sent the same walk again every look and the group never settled).
-     */
-    static final double SLOT_POINT_SKIP = 0.2;
     /** Waypoints handed to a follower at once at most. */
     static final int MAX_WAYPOINTS = 32;
     /**
@@ -1508,7 +1502,7 @@ public final class NavGroup {
             f.progressTick = now;
             return;
         }
-        if (!f.mover.isMoving() && targetArc - a <= 1 && Math.abs(f.sentEndArc - targetArc) <= SLOT_POINT_SKIP + 1e-9) {
+        if (!f.mover.isMoving() && targetArc - a <= 1 && Math.abs(f.sentEndArc - targetArc) < 0.1) {
             // as near its slot as its lane lets it stand: not sent there again
             f.settled = true;
             f.progressTick = now;
@@ -1792,7 +1786,7 @@ public final class NavGroup {
         if (!cut && k > end) {
             // the slot itself: between two path points, or past the path's end (a slot ahead of the leader)
             double along = targetArc - path.arc(end);
-            if (along > SLOT_POINT_SKIP && mayWalk(f, here, end)) {
+            if (along > 0.2 && mayWalk(f, here, end)) {
                 NavPoint p = lanePoint(end, along, slot.side());
                 if (!intoDoor(doors, inDoor, p)) {
                     add(waypoints, p);
