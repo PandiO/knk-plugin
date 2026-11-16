@@ -220,8 +220,11 @@ class UserManagerTest {
             assertEquals("TestPlayer", result.username());
             assertEquals(testUUID, result.uuid());
             
-            // Verify error was logged
-            verify(mockLogger, atLeastOnce()).severe(anyString());
+            // Verify the error was logged with its exception attached, so the cause chain is part of the
+            // log entry and not printed to System.err on its own (PandiO/knk-workspace#586)
+            verify(mockLogger).log(eq(java.util.logging.Level.SEVERE),
+                argThat((String message) -> message.startsWith("Failed to sync user data for TestPlayer")),
+                argThat((Throwable thrown) -> thrown != null && thrown.getMessage().contains("Network error")));
         }
 
         @Test
