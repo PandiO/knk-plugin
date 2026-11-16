@@ -84,6 +84,26 @@ public final class CitizensBootstrap {
         return false;
     }
 
+    /** The NPC's entity while it is spawned (scenarios and the Paper wiring only). */
+    public static java.util.Optional<org.bukkit.entity.Entity> entity(net.knightsandkings.knk.core.npc.nav.NpcMover mover) {
+        if (mover instanceof CitizensNpcMover citizens && citizens.npc().isSpawned()) {
+            return java.util.Optional.ofNullable(citizens.npc().getEntity());
+        }
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * Citizens' protection of an NPC (scenarios only): a protected NPC takes no damage, so an attack knocks it back
+     * only when it is not protected. K&K's NPCs keep Citizens' default (protected).
+     */
+    public static boolean setProtected(net.knightsandkings.knk.core.npc.nav.NpcMover mover, boolean on) {
+        if (mover instanceof CitizensNpcMover citizens) {
+            citizens.npc().setProtected(on);
+            return true;
+        }
+        return false;
+    }
+
     /** Removes the runtime's NPCs and registry; safe with any factory or null. */
     public static void stop(NpcMoverFactory factory) {
         if (factory instanceof CitizensNpcRuntime runtime) {

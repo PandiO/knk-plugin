@@ -152,8 +152,9 @@ jobs:
         # --bot-tests (only with BOT_TESTS_ENABLED): the Mineflayer bot tests after the scenarios (#540).
         # --expect-timeout 1200 and the job's 30 minutes: the ten NPC movement runs of #621 (five scenarios, collision
         # off and on) add about 3.5 minutes to the run (a local run: 9 min 40 s for 45, 6 min 40 s for the 35 before).
+        # The three collision scenarios of #627 (link M7) add about 30 s (a local run: 10 min 5 s for 48).
         env:
-          MIN_SCENARIOS: 45
+          MIN_SCENARIOS: 48
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"

@@ -77,6 +77,15 @@ public final class NavGroupService {
             }
             return new int[0];
         });
+        // push resistance (link M7): a pushed follower is brought back by its group's slot walks, not by a return
+        ports.navigation().setGroupFollowers(moverId -> {
+            for (NavGroup group : groups.values()) {
+                if (group.isMember(moverId) && group.leader().id() != moverId) {
+                    return true;
+                }
+            }
+            return false;
+        });
         ports.navigation().setIdleStuckListener((moverId, kind) -> {
             for (NavGroup group : groups.values()) {
                 if (group.engineStuck(moverId, kind)) {

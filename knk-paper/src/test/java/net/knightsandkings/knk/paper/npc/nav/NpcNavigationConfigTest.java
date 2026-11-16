@@ -349,6 +349,66 @@ class NpcNavigationConfigTest {
     }
 
     @Test
+    void readsThePushResistanceKeysInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        for (NavigationSettings.Key<?> key : List.of(NavigationSettings.COLLIDABLE, NavigationSettings.PLAYERS_PUSH_NPCS,
+            NavigationSettings.PUSH_RETURN, NavigationSettings.PUSH_EXEMPT_AFTER,
+            NavigationSettings.PUSH_EXEMPT_WINDOW_TICKS, NavigationSettings.PUSH_EXEMPT_TICKS,
+            NavigationSettings.PUSH_TELEPORT_TICKS)) {
+            assertEquals(Layer.GLOBAL, defaults.resolve(key, anywhere).layer(), key.name() + " is in config.yml");
+            assertEquals(key.defaultValue(), defaults.value(key, anywhere), key.name() + " ships its code default");
+        }
+        assertEquals(false, defaults.value(NavigationSettings.PLAYERS_PUSH_NPCS, anywhere), "players never push");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                collidable: true
+                players-push-npcs: true
+                push-exempt-after: 5
+                push-teleport-ticks: 0
+                worlds:
+                  w2:
+                    players-push-npcs: false
+                regions:
+                  wallwalk:
+                    push-return: false
+                    push-exempt-ticks: 6000
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings here =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere);
+        assertTrue(here.collidable());
+        assertTrue(here.playersPushNpcs());
+        assertEquals(5, here.pushExemptAfter());
+        assertEquals(0, here.pushTeleportTicks(), "0 = never teleport home");
+        assertFalse(net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, Scope.of("w2"))
+            .playersPushNpcs(), "a world turns it off");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings wall =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+                new Scope("w", List.of("town", "wallwalk"), null, null));
+        assertFalse(wall.pushReturn(), "a region turns the walk back off");
+        assertEquals(6000, wall.pushExemptTicks());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                push-exempt-after: 0
+                push-teleport-ticks: -1
+                players-push-npcs: maybe
+            """);
+        assertEquals(3, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
     void readsTheCrowdAwarenessKeyInEveryConfigLayer() throws Exception {
         YamlConfiguration shipped = new YamlConfiguration();
         try (InputStreamReader reader = new InputStreamReader(

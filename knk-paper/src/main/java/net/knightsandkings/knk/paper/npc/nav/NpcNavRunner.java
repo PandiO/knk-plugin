@@ -725,6 +725,10 @@ public final class NpcNavRunner {
         // crowd awareness (link M4): waits for a turn, behind others or yielding; yields; the longest queue
         lines.add(net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.statsLine(since(Event.CROWD_WAIT),
             since(Event.CROWD_YIELD), service.crowd().longestQueue()));
+        // push resistance (link M7): pushes with collision on, who did them, returns, exemptions, teleports home
+        long[] push = service.pushCounts();
+        lines.add(String.format(Locale.ROOT, "pushes: %d (players %d, attacks %d), returned %d, exempted %d (now %d), "
+            + "teleported %d", push[0], push[1], push[2], push[3], push[4], push[5], push[6]));
         lines.add(String.format(Locale.ROOT,
             "waits: no allowed route %d (reported blocked %d), way ahead not loaded %d | chunk-unload pauses %d, resumes %d",
             since(Event.NO_ROUTE_WAIT), blockedReports, since(Event.UNLOADED_WAIT), since(Event.PAUSED),

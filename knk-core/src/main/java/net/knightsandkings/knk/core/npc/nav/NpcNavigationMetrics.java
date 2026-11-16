@@ -55,6 +55,17 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         CROWD_WAIT,
         /** An NPC met an oncoming one in a narrow place it entered second and stepped back out (link M4). */
         CROWD_YIELD,
+        /**
+         * With collision on: a displacement the NPC's own movement did not explain (a body, an attack's knockback,
+         * water, a piston; link M7). One per push episode.
+         */
+        PUSHED,
+        /** A pushed NPC walked (or was teleported) back to its line or post. */
+        PUSH_RETURNED,
+        /** A player who kept pushing an NPC (or pushed it towards a drop) stopped colliding with it for a while. */
+        PUSH_EXEMPT,
+        /** A pushed NPC that could not walk back teleported home, out of every player's sight (the last step). */
+        PUSH_TELEPORT,
         /** A navigating NPC's feet dropped 3 or more blocks between two looks while it was off the ground. */
         FELL,
         /** Recovery steps used up (DESIGN §6): the route is planned again. */

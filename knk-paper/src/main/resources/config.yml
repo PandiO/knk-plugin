@@ -610,8 +610,30 @@ npc:
     # The trespass guard logs and counts an NPC that entered a region its current rules deny (it must never happen).
     # true: also stop that NPC and plan its route again. For dev servers.
     stop-on-trespass: false
-    # Whether NPCs push and block each other.
+    # Whether NPCs have bodies: they push and block each other (true), or walk through everything (false). With it on,
+    # players never move an NPC unless players-push-npcs is on (each NPC is exempt from players' collision; nothing
+    # touches scoreboard teams), and push resistance runs: a push the NPC's own walk doesn't explain (a body, an
+    # attack's knockback, water, a piston) is detected, counted and logged with who did it, and the NPC walks back to
+    # its line or post. NPCs never wait, queue or step aside on a cell next to a drop of 3 blocks or more that their
+    # route didn't choose. /knk npc nav stats shows "pushes: N (players N, attacks N), returned N, exempted N,
+    # teleported N".
     collidable: false
+    # With collidable on: whether players' bodies push NPCs too. false: players pass through NPCs (a real client still
+    # feels a slight nudge from the NPC's body; the NPC doesn't move). true: players bump NPCs; a pushed NPC walks back,
+    # and a player who keeps pushing one stops colliding with it for a while (below), at once when the push was towards
+    # a drop.
+    players-push-npcs: false
+    # With collidable on: a pushed or knocked-back NPC walks back to its line or post: along its own footsteps first,
+    # else a local leg (K&K's own search with local-legs-clearance on, else Citizens'), last a teleport home (below).
+    push-return: true
+    # With players-push-npcs on: pushes by one player within push-exempt-window-ticks before that player stops colliding
+    # with that NPC for push-exempt-ticks (1 to 20; 20 to 6000 ticks; 20 to 72000 ticks).
+    push-exempt-after: 3
+    push-exempt-window-ticks: 200
+    push-exempt-ticks: 1200
+    # Ticks a pushed NPC may take to walk back before it teleports home, and only while no player sees it where it
+    # stands or where it goes (0 = never; 0 to 12000).
+    push-teleport-ticks: 600
     # Outside player-loaded areas: load (keep the chunks ahead loaded, the NPC really walks; capped) | simulate.
     chunk-loading: load
     # Groups (a leader plans the route once, the followers walk it in formation slots). These are per-NPC settings

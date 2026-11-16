@@ -59,6 +59,32 @@ public final class NavigationSettings {
     public static final Key<Boolean> COLLIDABLE = new Key<>("collidable", false, bool(),
         "whether NPCs push and block each other");
     /**
+     * With {@code collidable} on: whether players' bodies push NPCs too (implementation plan 4c.4 item 7, link M7). Off:
+     * every player is exempt from every NPC's collision, so players never move an NPC (push resistance first,
+     * developer 2026-11-16); on: players bump NPCs, a pushed NPC walks back and a player who keeps pushing is exempted
+     * for a while ({@code push-exempt-*}).
+     */
+    public static final Key<Boolean> PLAYERS_PUSH_NPCS = new Key<>("players-push-npcs", false, bool(),
+        "with collidable on: whether players' bodies push NPCs too (off: players never move an NPC)");
+    /** With {@code collidable} on: a pushed NPC walks back to its line or post (4c.4 item 7). */
+    public static final Key<Boolean> PUSH_RETURN = new Key<>("push-return", true, bool(),
+        "with collidable on: a pushed or knocked-back NPC walks back to its line or post");
+    /** Pushes by one player within {@code push-exempt-window-ticks} before that player stops colliding with the NPC. */
+    public static final Key<Integer> PUSH_EXEMPT_AFTER = new Key<>("push-exempt-after", 3, integer(1, 20),
+        "pushes by one player within push-exempt-window-ticks before that player stops colliding with the NPC");
+    /** The window in which {@code push-exempt-after} pushes by one player count. */
+    public static final Key<Integer> PUSH_EXEMPT_WINDOW_TICKS = new Key<>("push-exempt-window-ticks", 200,
+        integer(20, 6000), "ticks in which push-exempt-after pushes by one player count");
+    /** How long a player who kept pushing an NPC stops colliding with it. */
+    public static final Key<Integer> PUSH_EXEMPT_TICKS = new Key<>("push-exempt-ticks", 1200, integer(20, 72000),
+        "ticks a player who kept pushing an NPC stops colliding with it");
+    /**
+     * Ticks a pushed NPC may take to walk back before it teleports home, only where no player sees it leave or arrive
+     * (the last step, 4c.4 item 7); 0 = never.
+     */
+    public static final Key<Integer> PUSH_TELEPORT_TICKS = new Key<>("push-teleport-ticks", 600, integer(0, 12000),
+        "ticks a pushed NPC may take to walk back before it teleports home out of every player's sight (0 = never)");
+    /**
      * Outside player-loaded areas (NAV-12, developer decision 2026-11-12): {@code load} keeps the chunks ahead
      * loaded so the NPC really walks (the travel bubble, capped), {@code simulate} travels without an entity.
      */
@@ -228,7 +254,8 @@ public final class NavigationSettings {
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
         CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, LOCAL_LEGS_CLEARANCE, PLAZA_LINES,
         PLAZA_CORRIDOR_BLOCKS, CROWD_AWARENESS, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
-        COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
+        COLLIDABLE, PLAYERS_PUSH_NPCS, PUSH_RETURN, PUSH_EXEMPT_AFTER, PUSH_EXEMPT_WINDOW_TICKS, PUSH_EXEMPT_TICKS,
+        PUSH_TELEPORT_TICKS, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
         GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FORMATION_KEEPING, GROUP_LATERAL_SPACING_MIN, GROUP_SPACING_MIN,
         GROUP_LOOKAHEAD_BLOCKS, GROUP_FOLLOWERS_FINISH_TRIP, GROUP_REJOIN_BLOCKS, GROUP_REGROUP_BLOCKS,
         GROUP_CATCH_UP_SPEED);

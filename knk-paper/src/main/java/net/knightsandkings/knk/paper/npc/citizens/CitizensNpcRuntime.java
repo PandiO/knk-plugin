@@ -9,7 +9,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
@@ -25,6 +27,7 @@ import net.citizensnpcs.api.ai.event.NavigationCancelEvent;
 import net.citizensnpcs.api.ai.event.NavigationCompleteEvent;
 import net.citizensnpcs.api.astar.pathfinder.MinecraftBlockExaminer;
 import net.citizensnpcs.api.event.DespawnReason;
+import net.citizensnpcs.api.event.NPCCollisionEvent;
 import net.citizensnpcs.api.event.NPCDespawnEvent;
 import net.citizensnpcs.api.event.NPCSpawnEvent;
 import net.citizensnpcs.api.npc.NPC;
@@ -132,6 +135,45 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
         if (mover != null && event.getCancelReason() == CancelReason.STUCK) {
             mover.listener().stuck(mover, mover.stuckKind());
         }
+    }
+
+    /**
+     * Citizens calls this for every push of an NPC's body by another entity (every tick while they overlap): a contact
+     * for K&K's push detection (link M7). A player exempt from the NPC's collision never pushes it, so never shows here.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onCollision(NPCCollisionEvent event) {
+        CitizensNpcMover mover = ours(event.getNPC());
+        Entity other = event.getCollidedWith();
+        if (mover != null && other != null) {
+            mover.listener().contact(mover, contactOf(other, NpcMover.ContactKind.OTHER));
+        }
+    }
+
+    /** An attack's knockback (Paper's event, not cancelled: it stays, link M7); the NPC walks back after it. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onAttackPush(io.papermc.paper.event.entity.EntityPushedByEntityAttackEvent event) {
+        CitizensNpcMover mover = registry == null ? null : ours(registry.getNPC(event.getEntity()));
+        if (mover != null) {
+            Entity by = event.getPushedBy();
+            mover.listener().contact(mover, new NpcMover.Contact(NpcMover.ContactKind.ATTACK,
+                by == null ? null : contactId(by), by instanceof Player && !by.hasMetadata("NPC")));
+        }
+    }
+
+    /** A body's contact: a player (not a Citizens NPC), an NPC (any Citizens NPC), or any other entity. */
+    static NpcMover.Contact contactOf(Entity other, NpcMover.ContactKind otherwise) {
+        if (other.hasMetadata("NPC")) {
+            return new NpcMover.Contact(NpcMover.ContactKind.NPC, contactId(other));
+        }
+        if (other instanceof Player) {
+            return new NpcMover.Contact(NpcMover.ContactKind.PLAYER, contactId(other));
+        }
+        return new NpcMover.Contact(otherwise, contactId(other));
+    }
+
+    private static String contactId(Entity e) {
+        return e.getUniqueId().toString();
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

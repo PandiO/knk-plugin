@@ -95,6 +95,21 @@ class NpcNavigationServiceTest {
             moving = false;
         }
 
+        /** Whether {@link #teleport} works (link M7's teleport home). */
+        boolean canTeleport;
+        final List<NavPoint> teleports = new ArrayList<>();
+
+        @Override
+        public boolean teleport(NavPoint feet) {
+            if (!canTeleport) {
+                return false;
+            }
+            teleports.add(feet);
+            position = feet;
+            moving = false;
+            return true;
+        }
+
         @Override
         public boolean isMoving() {
             return moving;
@@ -157,7 +172,7 @@ class NpcNavigationServiceTest {
     void setUp() {
         metrics.setEnabled(true);
         service = service(4);
-        mover = register(1, START, Settings.defaults());
+        mover = register(1, START, Settings.defaults().withCollidable(false)); // fake bodies jump: no push resistance here
     }
 
     private NpcNavigationService service(int maxPlansInFlight) {
@@ -678,7 +693,7 @@ class NpcNavigationServiceTest {
         roadAsks.clear();
         List<FakeMover> movers = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
-            FakeMover m = register(10 + i, START, Settings.defaults());
+            FakeMover m = register(10 + i, START, Settings.defaults().withCollidable(false)); // fake bodies jump: no push resistance here
             movers.add(m);
             service.navigate(m.id(), FAR, results::add);
         }
@@ -723,7 +738,7 @@ class NpcNavigationServiceTest {
         };
         service = new NpcNavigationService(new NpcNavigationService.Ports(broken, (s, f, t) -> new CompletableFuture<>(),
             world, metrics, null, null), 1);
-        mover = register(3, START, Settings.defaults());
+        mover = register(3, START, Settings.defaults().withCollidable(false)); // fake bodies jump: no push resistance here
         service.navigate(mover.id(), FAR, results::add);
 
         for (int i = 0; i < NpcNavigationService.MAX_PREPARE_FAILURES; i++) {
@@ -836,7 +851,7 @@ class NpcNavigationServiceTest {
         service.unregister(mover.id());
         NpcAccessProfile guard = new NpcAccessProfile("guard", false, false, Set.of(), Set.of("throne_room"));
         FakeMover m = new FakeMover(7, START);
-        service.register(m, guard, Settings.defaults());
+        service.register(m, guard, Settings.defaults().withCollidable(false)); // fake bodies jump: no push resistance here
         service.navigate(m.id(), FAR, results::add);
         service.tick();
 

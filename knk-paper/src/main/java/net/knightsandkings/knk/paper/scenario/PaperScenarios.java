@@ -27,7 +27,10 @@ import net.knightsandkings.knk.paper.scenario.scenarios.NpcLedgeCornerScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStuckLadderScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupSpacingScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcPlazaLineScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcCollisionPolicyScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcDoorColumnScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcDoorwayCrowdScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGuardLedgePushScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcJaggedStraightScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseGroupScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseSinglesScenario;
@@ -99,6 +102,11 @@ public final class PaperScenarios {
             .register(new NpcDoorwayCrowdScenario(true))
             .register(new NpcPlazaLineScenario(false))
             .register(new NpcPlazaLineScenario(true))
+            // collision on: who pushes whom, players pushing a guard on a wall walk, a column through a door (plan 4c.4
+            // item 7, link M7, PandiO/knk-workspace#627); they use scripted players (#540)
+            .register(new NpcCollisionPolicyScenario())
+            .register(new NpcGuardLedgePushScenario())
+            .register(new NpcDoorColumnScenario())
             // Scripted players: commands, chat, joins, menus and teleports (PandiO/knk-workspace#540)
             .register(new PlayerCommandNeedsGrantScenario())
             // KnK takes the plain /heal over from WorldGuard (PandiO/knk-workspace#580). Not last: the run's end would
