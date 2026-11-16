@@ -112,17 +112,16 @@ class NavGroupElasticTest {
         road(x -> 2);
         NavGroup group = sim.group(10, ranks(3));
         SimMover leader = sim.movers.get(0);
-        double[] closest = {9};
+        java.util.TreeSet<Double> lanes = new java.util.TreeSet<>();
         walk(group, 90.5, t -> {
             if (leader.position.x() > 30 && leader.position.x() < 80) {
                 assertEquals(3, group.width().abreast(), "3 abreast squeezed on the 2-wide road");
+            }
+            if (leader.position.x() > 70 && leader.position.x() < 72) {
                 for (int i = 1; i < sim.movers.size(); i++) {
-                    SimMover a = sim.movers.get(i);
-                    for (int j = i + 1; j < sim.movers.size(); j++) {
-                        SimMover b = sim.movers.get(j);
-                        if (Math.abs(a.position.x() - b.position.x()) < 0.2 && a.position.x() > 12) {
-                            closest[0] = Math.min(closest[0], Math.abs(a.position.z() - b.position.z()));
-                        }
+                    SimMover f = sim.movers.get(i);
+                    if (f.position.x() > 40) {
+                        lanes.add(Math.round(f.position.z() * 20) / 20.0);
                     }
                 }
             }
@@ -130,8 +129,10 @@ class NavGroupElasticTest {
         });
         assertEquals(0, folds());
         assertEquals(0, narrows());
-        assertTrue(closest[0] >= 0.55, "neighbours in a row at the squeezed 0.6, not closer: " + closest[0]);
-        assertTrue(closest[0] <= 0.65, "squeezed to 0.6 on a 2-wide road: " + closest[0]);
+        assertEquals(3, lanes.size(), "three lanes on the 2-wide road: " + lanes);
+        // squeezed only as far as the road needs: (2 - 2 × 0.35) / 2 = 0.65 between neighbours, never under 0.6
+        assertEquals(1.3, lanes.last() - lanes.first(), 0.06, "lanes 0.65 apart, the outer ones at 0.35: " + lanes);
+        assertTrue(lanes.first() >= 0.35 - 1e-9 && lanes.last() <= 2 - 0.35 + 1e-9, "within the hard margin: " + lanes);
     }
 
     @Test

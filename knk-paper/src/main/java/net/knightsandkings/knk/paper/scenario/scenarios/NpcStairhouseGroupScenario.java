@@ -22,14 +22,15 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * reasons and places (decision 2.8), the longest a follower stood in one block in the entrance, stuck spells, lag and
  * the tick cost. Link M3 (PandiO/knk-workspace#624) runs it with {@code group-formation-keeping: elastic} (and the
  * corridor and local-leg keys on) and checks plan 4c.4 item 3.3: the leader arrives, folds at most the number of
- * 1-wide places on the line, no stuck spell left open or not freed, nobody stuck near a wall. "No follower still in
- * the entrance for more than 10 s" is M4's check (turn-taking at the chokepoint) and is reported only. Needs
- * Citizens.
+ * 1-wide places on the line, no stuck spell left open or not freed, nobody stuck near a wall, and (plan 4c.5 item 3)
+ * no follower still in the entrance for more than 10 s. Needs Citizens.
  */
 public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene> {
 
     static final int MAX_TICKS = 75 * 20;
     static final int MEMBERS = 20;
+    /** Plan 4c.5 item 3: no follower still in the entrance for more than 10 s. */
+    static final int MAX_ENTRANCE_TICKS = 10 * 20;
 
     private final boolean collisionOn;
 
@@ -92,10 +93,14 @@ public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>
             })
             .await("the group's trip ends or the time is up", MAX_TICKS + 20,
                 () -> result.get() != null || npcs.get().ticks() - started[0] >= MAX_TICKS)
-            .check("folds only at 1-wide places, no stuck spell open, none near a wall (M3)", () -> {
+            .check("folds only at 1-wide places, no stuck spell open, none near a wall, the entrance clear (M3)", () -> {
                 int oneWide = NpcMovementReport.oneWidePlaces(
                     new net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld(null), house.houseLine());
                 String failed = report.groupFailures(npcs.get(), result.get(), oneWide);
+                if (entrance.longestTicks() > MAX_ENTRANCE_TICKS) {
+                    failed = (failed == null ? "" : failed + "; ") + "a follower still in the entrance for "
+                        + entrance.describe();
+                }
                 report.add("scene", built.get())
                     .add("formation keeping", "elastic")
                     .add("1-wide places", oneWide)

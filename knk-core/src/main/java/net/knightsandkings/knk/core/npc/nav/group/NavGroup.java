@@ -222,6 +222,9 @@ public final class NavGroup {
     private final Set<Long> merges = new java.util.HashSet<>();
     /** The group's access verdict for a lane in other regions than the path (decision 2.6). */
     private final GroupPath.LaneRules laneRules = this::laneAllowed;
+    /** The leader's route line the shaped chunks are of, and the shaped chunks by their first line index. */
+    private RouteFollower shapedOf;
+    private final Map<Integer, List<NavPoint>> shapedChunks = new HashMap<>();
     private MemberListener memberListener;
 
     private final GroupPath path = new GroupPath();
@@ -730,7 +733,11 @@ public final class NavGroup {
                 }
                 while (lineStart + lineAdded < points.size() && (lineBase + lineAdded <= index
                     || path.endArc() - path.arc(index) < wanted)) {
-                    path.addSnapped(ports.world(), points.get(lineStart + lineAdded), leaderFloorY);
+                    NavPoint linePoint = points.get(lineStart + lineAdded);
+                    if (elastic) {
+                        linePoint = shapedLinePoint(follower, lineStart + lineAdded, leaderFloorY);
+                    }
+                    path.addSnapped(ports.world(), linePoint, leaderFloorY);
                     lineAdded++;
                 }
                 leaderIdx = Math.max(Math.min(index, path.size() - 1), Math.min(leaderIdx, path.size() - 1));
@@ -925,6 +932,88 @@ public final class NavGroup {
     }
 
     // ==================== elastic formation keeping (implementation plan 4c.3 decision 2, link M3) ====================
+
+    /** Route line points shaped at once for the group path (about the 32 blocks of a stretch at 1.5 apart). */
+    static final int SHAPE_CHUNK = 20;
+
+    /**
+     * A point of the leader's route line moved onto its corridor-shaped line (link M3, plan 4c.3 decision 1.5: the
+     * group path uses the corridor too): the line is shaped a chunk at a time by the navigation service's shared
+     * corridor shaper ({@code corridor-half-width}'s decided 4, {@code wall-clearance}), and each route point is
+     * replaced by the nearest point of its chunk's shaped line, so the path keeps one point per route point and the
+     * leader's place on it is found as before. Without a shaped chunk (no floor to start from) the route point as it is.
+     */
+    private NavPoint shapedLinePoint(RouteFollower follower, int index, int floorY) {
+        List<NavPoint> line = follower.line();
+        if (follower != shapedOf) {
+            shapedOf = follower;
+            shapedChunks.clear();
+        }
+        int first = index / SHAPE_CHUNK * SHAPE_CHUNK;
+        List<NavPoint> shaped = shapedChunks.computeIfAbsent(first, f -> shapeChunk(line, f, floorY));
+        NavPoint p = line.get(index);
+        if (shaped.size() < 2) {
+            return p;
+        }
+        NavPoint best = p;
+        double bestD = Double.MAX_VALUE;
+        for (int k = 0; k + 1 < shaped.size(); k++) {
+            NavPoint a = shaped.get(k);
+            NavPoint b = shaped.get(k + 1);
+            double dx = b.x() - a.x();
+            double dz = b.z() - a.z();
+            double len2 = dx * dx + dz * dz;
+            double t = len2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((p.x() - a.x()) * dx + (p.z() - a.z()) * dz) / len2));
+            double x = a.x() + dx * t;
+            double z = a.z() + dz * t;
+            double d = (x - p.x()) * (x - p.x()) + (z - p.z()) * (z - p.z()) + (a.y() - 1 - p.y()) * (a.y() - 1 - p.y());
+            if (d < bestD) {
+                bestD = d;
+                best = new NavPoint(p.world(), x, p.y(), z);
+            }
+        }
+        return best;
+    }
+
+    /** One chunk of the route line (with a point of overlap either side) shaped in its corridor; empty without. */
+    private List<NavPoint> shapeChunk(List<NavPoint> line, int first, int floorY) {
+        int from = Math.max(0, first - 1);
+        int to = Math.min(line.size(), first + SHAPE_CHUNK + 1);
+        List<NavPoint> feet = new ArrayList<>();
+        List<Integer> indexes = new ArrayList<>();
+        int refY = floorY;
+        for (int i = from; i < to; i++) {
+            NavPoint floor = HopPlanner.surfaceNear(ports.world(), line.get(i), refY);
+            if (floor == null) {
+                return List.of();
+            }
+            refY = floor.blockY();
+            NavPoint f = HopPlanner.feet(floor);
+            if (!feet.isEmpty() && feet.get(feet.size() - 1).horizontalDistance(f) < 1e-6
+                && feet.get(feet.size() - 1).y() == f.y()) {
+                continue;
+            }
+            feet.add(f);
+            indexes.add(i);
+        }
+        if (feet.size() < 2) {
+            return List.of();
+        }
+        try {
+            return ports.navigation().corridors().shape(ports.world(), feet, indexes,
+                new net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options(
+                    NavigationSettingsDefaults.HALF_WIDTH, settings.keeping().wallClearance()),
+                to == line.size()).waypoints();
+        } catch (RuntimeException e) {
+            return List.of(); // a line the shaper cannot take (no corridor): the route line as it is
+        }
+    }
+
+    /** The corridor's decided half width (plan 4c.6 question 3). */
+    private static final class NavigationSettingsDefaults {
+        static final double HALF_WIDTH = net.knightsandkings.knk.core.npc.nav.NavigationSettings.CORRIDOR_HALF_WIDTH
+            .defaultValue();
+    }
 
     /** The widest width that fits at a path point squeezed (decision 2.2). */
     private int elasticWidest(int index) {
@@ -1187,43 +1276,56 @@ public final class NavGroup {
         } else {
             lateral = GroupPath.centre(fit, 0, settings.keeping().wallClearance()) + units * lateralMin();
         }
-        // the narrowest band ahead (and a path step behind), on points heading the same way
-        double lo = -fit.left() + GroupPath.HARD_MARGIN;
-        double hi = fit.right() - GroupPath.HARD_MARGIN;
+        // a lane keeps within the bands of the points from a path step behind to LANE_RETURN ahead (on points heading
+        // the same way): the preferred margin first, so a notch on one side does not pull it in for one point and out
+        // again (its wall corner is in the way: found by npc-jagged-straight), else the hard margin
         double[] h = path.heading(index);
         double arc = path.arc(index);
-        for (int k = index - 1; k >= 0 && path.arc(k) >= arc - RouteFollower.STEP - 1e-6; k--) {
-            double[] band = band(k, h);
-            if (band != null) {
-                lo = Math.max(lo, band[0]);
-                hi = Math.min(hi, band[1]);
+        for (boolean preferred : new boolean[] {true, false}) {
+            double[] own = band(index, h, preferred);
+            double lo = own[0];
+            double hi = own[1];
+            for (int k = index - 1; k >= 0 && path.arc(k) >= arc - RouteFollower.STEP - 1e-6; k--) {
+                double[] band = band(k, h, preferred);
+                if (band != null) {
+                    lo = Math.max(lo, band[0]);
+                    hi = Math.min(hi, band[1]);
+                }
+            }
+            for (int k = index + 1; k < path.size() && path.arc(k) <= arc + LANE_RETURN; k++) {
+                double[] band = band(k, h, preferred);
+                if (band != null) {
+                    lo = Math.max(lo, band[0]);
+                    hi = Math.min(hi, band[1]);
+                }
+            }
+            if (lo <= hi) {
+                return Math.max(lo, Math.min(hi, lateral));
             }
         }
-        for (int k = index + 1; k < path.size() && path.arc(k) <= arc + LANE_RETURN; k++) {
-            double[] band = band(k, h);
-            if (band != null) {
-                lo = Math.max(lo, band[0]);
-                hi = Math.min(hi, band[1]);
-            }
-        }
-        if (lo > hi) {
-            lo = -fit.left() + GroupPath.HARD_MARGIN;
-            hi = fit.right() - GroupPath.HARD_MARGIN;
-            if (lo > hi) {
-                return (fit.right() - fit.left()) / 2;
-            }
-        }
-        return Math.max(lo, Math.min(hi, lateral));
+        double lo = -fit.left() + GroupPath.HARD_MARGIN;
+        double hi = fit.right() - GroupPath.HARD_MARGIN;
+        return lo > hi ? (fit.right() - fit.left()) / 2 : Math.max(lo, Math.min(hi, lateral));
     }
 
-    /** A point's band for a lane centre (hard margin), when it heads within 30° of {@code h}; null otherwise. */
-    private double[] band(int k, double[] h) {
+    /**
+     * A point's band for a lane centre, when it heads within 30° of {@code h} (null otherwise): the margin the
+     * formation keeps there ({@code preferred}: its spare room up to {@code wall-clearance}, at least the hard 0.35)
+     * or the hard margin.
+     */
+    private double[] band(int k, double[] h, boolean preferred) {
         double[] hk = path.heading(k);
         if (hk[0] * h[0] + hk[1] * h[1] < 0.866) {
             return null;
         }
         GroupPath.Fit fit = path.fit(ports.world(), k, laneRules);
-        return new double[] {-fit.left() + GroupPath.HARD_MARGIN, fit.right() - GroupPath.HARD_MARGIN};
+        double margin = GroupPath.HARD_MARGIN;
+        if (preferred && elasticWidest(k) <= level) {
+            double s = GroupPath.squeezed(fit, levelUnits[level], settings.formation().lateralSpacing(), lateralMin());
+            double spare = (fit.total() - 2 * levelUnits[level] * s) / 2;
+            margin = Math.max(GroupPath.HARD_MARGIN, Math.min(settings.keeping().wallClearance(), spare));
+        }
+        return new double[] {-fit.left() + margin, fit.right() - margin};
     }
 
     /** The group's access verdict for a lane in other regions than the path's (decision 2.6, the cached verdicts). */

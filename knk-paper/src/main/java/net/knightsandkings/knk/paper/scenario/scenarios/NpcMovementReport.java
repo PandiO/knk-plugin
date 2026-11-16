@@ -126,7 +126,21 @@ public final class NpcMovementReport {
         if (nearWall != 0) {
             failed.add(nearWall + " stuck spells near a wall");
         }
-        return failed.isEmpty() ? null : String.join("; ", failed);
+        if (failed.isEmpty()) {
+            return null;
+        }
+        // the spells' own lines, so a CI failure says where and why without the run log
+        StringBuilder lines = new StringBuilder();
+        int shown = 0;
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            String text = line.text();
+            if (line.tick() >= phaseTick && shown < 16 && (text.contains("stuck") || text.contains("freed")
+                || text.contains("goes on without") || text.contains("own leg"))) {
+                lines.append("\n  ").append(line.tick() - phaseTick).append(": ").append(text);
+                shown++;
+            }
+        }
+        return String.join("; ", failed) + lines;
     }
 
     /** The local legs of this phase (link M6): found by K&K, walked with the engine's search, no path either way. */
