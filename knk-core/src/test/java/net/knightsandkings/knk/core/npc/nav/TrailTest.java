@@ -108,15 +108,25 @@ class TrailTest {
     }
 
     @Test
-    void theJoinStartsFromTheFurthestWaypointTheFeetReachOnTheirLevel() {
-        // a flat road (floor 64): the zig to x 16.5 the NPC is already past is not walked back to
+    void theJoinDropsTheWaypointsTheNpcIsAlreadyPast() {
+        // a flat road (floor 64): the zig to x 16.5 the NPC is already past is not walked back to; nothing ahead of
+        // it is skipped
         FakeNavWorld world = new FakeNavWorld();
         List<NavPoint> way = List.of(feet(16.5, 65, 25.5), feet(15.5, 65, 26.5), feet(15.5, 65, 27.5),
             feet(15.5, 65, 29.5));
 
         List<NavPoint> out = Trail.fromFeet(world, feet(15.7, 65, 25.1), way);
 
-        assertEquals(way.subList(2, 4), out, "on to 27.5 (2.4 blocks), not 29.5 (4.4)");
+        assertEquals(way.subList(1, 4), out);
+    }
+
+    @Test
+    void aWaypointAheadIsNeverSkipped() {
+        // a corner kept clear: the NPC before the corner waypoint keeps it although the next one is a straight walk
+        FakeNavWorld world = new FakeNavWorld();
+        List<NavPoint> way = List.of(feet(2.5, 65, 0.5), feet(2.5, 65, 2.5));
+
+        assertEquals(way, Trail.fromFeet(world, feet(0.5, 65, 0.5), way));
     }
 
     @Test

@@ -105,29 +105,26 @@ public final class Trail {
         return out;
     }
 
-    /** How far ahead (horizontally) the join may start from a waypoint the feet reach in a straight walk. */
-    static final double PULL_BLOCKS = 3;
-
     /**
-     * The list from the furthest of its first waypoints the feet reach in a straight walk on their own level
-     * (within {@value #PULL_BLOCKS} blocks horizontally, less than a block up or down, {@link NavGeometry#straightWalkable}),
-     * so the NPC does not turn back to a waypoint it is already past when the next stretch is appended. A waypoint on
-     * another level or across a drop is never skipped: the look stops at the first one off the feet's level.
+     * The list without its first waypoints the NPC is already past (link B2): a waypoint is dropped while the feet are
+     * beyond it along the step to the next one, on its level (less than a block up or down), and the next one is a
+     * straight walk from the feet ({@link NavGeometry#straightWalkable}). So the NPC does not turn back to a waypoint
+     * behind it when the next stretch is appended. Nothing ahead of the NPC is skipped: corners kept clear
+     * ({@link CornerClearance}), landings and waypoints on another level stay.
      */
     public static List<NavPoint> fromFeet(NavWorld world, NavPoint feet, List<NavPoint> way) {
         if (feet == null || way.size() < 2) {
             return way;
         }
         int from = 0;
-        for (int k = 1; k < way.size(); k++) {
-            NavPoint p = way.get(k);
-            if (p.horizontalDistance(feet) > PULL_BLOCKS || Math.abs(p.y() - feet.y()) >= 1
-                || Math.abs(way.get(k - 1).y() - feet.y()) >= 1) {
+        while (from + 1 < way.size()) {
+            NavPoint p = way.get(from);
+            NavPoint q = way.get(from + 1);
+            if (Math.abs(p.y() - feet.y()) >= 1 || Math.abs(q.y() - feet.y()) >= 1 || beyond(p, q, feet) < 0.1
+                || !NavGeometry.straightWalkable(world, feet, q)) {
                 break;
             }
-            if (NavGeometry.straightWalkable(world, feet, p)) {
-                from = k;
-            }
+            from++;
         }
         return from == 0 ? way : way.subList(from, way.size());
     }
