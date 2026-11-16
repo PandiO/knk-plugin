@@ -17,6 +17,10 @@ This is the Paper plugin (Java 25, Minecraft 26.3, Gradle modules `knk-core`,
 configured dev server; use `./gradlew build -x deployToDevServer` to build
 without that copy.
 
+Skills for common tasks are in knk-workspace `.claude/skills/`: `knk-plugin-command`
+(a command or `/knk` subcommand), `knk-test-writer` (JUnit, MockBukkit and scenario
+tests) and `knk-entity-scaffold` (a new entity across API, web app and plugin).
+
 ## Shipping a change
 
 All documentation lives in `knk-workspace/docs/`; this repo keeps only its README, `AGENTS.md`,

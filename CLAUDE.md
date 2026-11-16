@@ -26,11 +26,11 @@ installed (a JDK 25 Gradle doesn't detect can be passed with
 - Build all modules without copying the jar to the configured dev server:
   `./gradlew build -x deployToDevServer`. The normal `./gradlew build`
   depends on `deployToDevServer` in `knk-paper/build.gradle.kts`.
-- Test all modules: `./gradlew test` (on `next` since 2026-11-14 every test runs; none is tagged
-  out, PandiO/knk-workspace#499; trunk before that promotion still excludes `requires-bukkit`). knk-paper tests that need Bukkit statics (`Registry`,
+- Test all modules: `./gradlew test` (every test runs; the old `integration`/`requires-bukkit`
+  tags are no longer excluded since PandiO/knk-workspace#499). knk-paper tests that need Bukkit statics (`Registry`,
   `Material.isSolid()`, `Bukkit.getScheduler()`) start a MockBukkit server
   (`MockBukkit.mock()`/`unmock()`, test-only; use a `WorldMock`, not a mocked `World`)
-- World behaviour over ticks (on `next` since 2026-11-14): an in-plugin scenario (`knk-core/.../core/scenario/`,
+- World behaviour over ticks: an in-plugin scenario (`knk-core/.../core/scenario/`,
   `knk-paper/.../paper/scenario/`, PandiO/knk-workspace#421), run by CI's `paper-boot` job;
   locally `tools/paper-boot/boot-test.sh ... --scenarios`. Guide:
   `docs/guides/developer/plugin-scenarios.md` in knk-workspace
