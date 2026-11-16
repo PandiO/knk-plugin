@@ -193,6 +193,8 @@ class CrowdControlTest {
         where.put(2, feet(12.5, 5.5));
         update();
         assertTrue(crowd.hasTurn(1), "kept for its follower");
+        assertEquals(Kind.GO, decide(world, 1, feet(18.5, 5.5)).kind());
+        assertTrue(crowd.hasTurn(1), "the leader's own look does not end it either");
         assertEquals(Kind.WAIT, decide(world, 2, feet(4.5, 5.5)).kind(), "nobody cuts into the column");
         where.put(5, feet(12.5, 5.5));
         update();

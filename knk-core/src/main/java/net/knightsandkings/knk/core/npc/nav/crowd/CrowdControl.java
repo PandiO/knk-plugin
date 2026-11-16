@@ -281,10 +281,10 @@ public final class CrowdControl {
         if (t != null) {
             t.seen = tick;
             if (t.entered) {
-                if (!passed(t.place, t.dir, at)) {
-                    return Decision.GO; // in it, or before it with its turn: carry on
+                if (!passed(t.place, t.dir, at) || !membersClear(t)) {
+                    return Decision.GO; // in it, before it with its turn, or its followers not through yet
                 }
-                release(t); // its turn ends; its followers are watched by the housekeeping no more
+                release(t); // its turn ends
                 t = null;
             }
         }
