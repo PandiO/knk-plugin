@@ -546,7 +546,12 @@ public final class NpcNavigationModule {
             return;
         }
         if (action.equals("snapshot")) {
-            // before ensureNav: a snapshot reads the caches and the world and starts no NPC work (works without Citizens)
+            // before ensureNav: a snapshot reads the caches and the world and starts no NPC work (works without
+            // Citizens); with npc.navigation.enabled off it is refused like every nav action, so nothing runs
+            if (!config.enabled()) {
+                sender.sendMessage("NPC navigation unavailable: " + unavailable);
+                return;
+            }
             if (args.length < 3) {
                 sender.sendMessage("/knk npc nav snapshot <route> (a route saved with /knk npc nav route save <name>)");
                 return;

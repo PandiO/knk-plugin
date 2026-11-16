@@ -158,7 +158,11 @@ public final class NavSnapshotZip {
             SETTINGS + "  the NPC navigation settings at the route's start and the layer each came from",
             WORLD + "         the region files (.mca) the box touches, at their path in the world folder, after a save",
             "",
+<<<<<<< HEAD
             "Replay: knk-plugin's scenario helper SnapshotReplay (docs/guides/developer/plugin-scenarios.md).",
+=======
+            "Replay: a scenario helper loads this zip in CI (PandiO/knk-workspace#670, link B1b).",
+>>>>>>> claude/npc-movement-b1
             "");
     }
 }
