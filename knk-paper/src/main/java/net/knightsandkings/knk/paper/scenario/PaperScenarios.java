@@ -32,6 +32,8 @@ import net.knightsandkings.knk.paper.scenario.scenarios.NpcDoorColumnScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcDoorwayCrowdScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGuardLedgePushScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcJaggedStraightScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcSnapshotReplayScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseClimbScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseGroupScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseSinglesScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepsToRoadScenario;
@@ -96,6 +98,8 @@ public final class PaperScenarios {
             .register(new NpcStairhouseSinglesScenario(true))
             .register(new NpcStairhouseGroupScenario(false))
             .register(new NpcStairhouseGroupScenario(true))
+            .register(new NpcStairhouseClimbScenario())
+            .register(new NpcSnapshotReplayScenario())
             .register(new NpcJaggedStraightScenario(false))
             .register(new NpcJaggedStraightScenario(true))
             .register(new NpcDoorwayCrowdScenario(false))

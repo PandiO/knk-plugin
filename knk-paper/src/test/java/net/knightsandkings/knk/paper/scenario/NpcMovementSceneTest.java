@@ -45,7 +45,10 @@ class NpcMovementSceneTest {
         int lz = z - at[2];
         boolean inFootprint = lx >= 0 && lx < s.width() && lz >= 0 && lz < s.length();
         if (!inFootprint) {
-            return "minecraft:air";
+            // the stair house's street east of it (link B1): real 1419..1431, -530..-510, stone up to real y 48
+            boolean eastStreet = at[1] > 0 && lx >= s.width() && x < NpcMovementScene.STAIRHOUSE_BOX.x()
+                && z >= -530 - NpcMovementScene.STAIRHOUSE_FRAME[2] && z <= -510 - NpcMovementScene.STAIRHOUSE_FRAME[2];
+            return eastStreet && ly < 0 ? "minecraft:stone" : "minecraft:air";
         }
         if (ly < 0) {
             return at[1] > 0 ? "minecraft:stone" : "minecraft:air";
@@ -118,16 +121,76 @@ class NpcMovementSceneTest {
         SceneSchematic s = SceneSchematic.fromResource(house.resource());
         int[] at = house.pasteAt();
 
-        // box = real - (1400, 46, -515), as the stand-in was
+        // box = real - (1400, 46, -553), the whole schematic in a 32 x 40 x 72 box (link B1, PandiO/knk-workspace#670)
         assertEquals(s.worldMin()[0] - 1400, at[0]);
         assertEquals(s.worldMin()[1] - 46, at[1]);
-        assertEquals(s.worldMin()[2] + 515, at[2]);
-        assertTrue(house.inHouseEntrance(house.feet(13.5, NpcMovementScene.HOUSE_GROUND, 7.5)), "1413 49 -508");
-        assertTrue(house.onHouseStraight(house.feet(14.5, NpcMovementScene.HOUSE_GROUND, 12.5)), "1414 49 -503");
-        assertFalse(house.inHouseEntrance(house.feet(13.5, NpcMovementScene.HOUSE_GROUND, 1.5)), "the street");
-        assertEquals("13 2 7", house.local(house.feet(13.5, 2, 7.5)), "box block, floor height");
-        assertEquals(null, standable(s, at, house.floor(14.5, NpcMovementScene.HOUSE_GROUND, 12.5)),
-            "1414 49 -503 is walkable");
+        assertEquals(s.worldMin()[2] + 553, at[2]);
+        assertTrue(at[0] + s.width() <= NpcMovementScene.STAIRHOUSE_BOX.x());
+        assertTrue(at[1] + s.height() <= NpcMovementScene.STAIRHOUSE_BOX.y(), "up to the roof");
+        assertTrue(at[2] + s.length() <= NpcMovementScene.STAIRHOUSE_BOX.z(), "both flights and the upper landings");
+        assertTrue(house.inHouseEntrance(house.realFeet(1413.5, 48, -507.5)), "1413 49 -508");
+        assertTrue(house.onHouseStraight(house.realFeet(1414.5, 48, -502.5)), "1414 49 -503");
+        assertFalse(house.inHouseEntrance(house.realFeet(1413.5, 48, -513.5)), "the street");
+        assertEquals("13 2 45", house.local(house.realFeet(1413.5, 48, -507.5)), "box block, floor height");
+        assertEquals("1413 49 -508", house.realBlock(house.realFeet(1413.5, 48, -507.5)));
+        assertEquals(null, standable(s, at, house.real(1414.5, 48, -502.5)), "1414 49 -503 is walkable");
+        assertEquals("knk-sc-1 at 1413 49 -508", house.realPosition("knk-sc-1 at " + (OX + 13) + " " + (OY + 3) + " "
+            + (OZ + 45)));
+    }
+
+    @Test
+    void theClimbLineIsTheRealLineOfTheDevelopersTraces() throws Exception {
+        // every point but the scene's own street (the first) was handed out on the dev server on 2026-11-16
+        java.util.Set<String> handedOut = new java.util.HashSet<>();
+        java.nio.file.Path folder = java.nio.file.Path.of(getClass().getResource("/scenario/evidence/2026-11-16").toURI());
+        try (var files = java.nio.file.Files.list(folder)) {
+            for (java.nio.file.Path file : files.filter(f -> f.toString().endsWith(".log")).toList()) {
+                for (String line : java.nio.file.Files.readAllLines(file)) {
+                    if (line.startsWith("# waypoints: ")) {
+                        for (String point : line.substring("# waypoints: ".length()).split("; ")) {
+                            handedOut.add(point.trim());
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(handedOut.size() > 50, "the traces are in the test resources: " + handedOut.size());
+        for (int i = 1; i < NpcMovementScene.CLIMB.length; i++) {
+            int[] p = NpcMovementScene.CLIMB[i];
+            String point = p[0] + " " + p[1] + " " + p[2];
+            assertTrue(handedOut.contains(point), point + " is not in a # waypoints: line of the traces");
+        }
+    }
+
+    @Test
+    void theClimbLineStandsOnTheStairsAndPassesEveryFlightInOrder() {
+        NpcMovementScene house = NpcMovementScene.stairHouse(scene());
+        SceneSchematic s = SceneSchematic.fromResource(house.resource());
+        int[] at = house.pasteAt();
+        List<NavPoint> line = house.climbLine();
+
+        assertStandable(s, at, line, "the climb line");
+        assertEquals("1430 49 -521", house.realBlock(house.realFeet(1430.5, 48, -520.5)));
+        assertEquals(null, standable(s, at, floorOf(house.climbGoal())), "the goal in the top hall");
+        for (int i = 0; i < 20; i++) {
+            assertEquals(null, standable(s, at, floorOf(house.climbStart(i))), "start " + i);
+            assertEquals(null, standable(s, at, floorOf(house.climbBeside(i))), "single " + i);
+        }
+        // the line visits the places of the climb in order, each one
+        int last = -1;
+        java.util.Set<Integer> seen = new java.util.TreeSet<>();
+        for (NavPoint floor : net.knightsandkings.knk.core.npc.nav.HopPlanner.resampleKeepingCorners(line, 0.5)) {
+            NavPoint feet = new NavPoint(floor.world(), floor.x(), floor.y() + 1, floor.z());
+            int place = house.climbPlace(feet);
+            if (place < 0) {
+                continue;
+            }
+            assertTrue(place >= last, "back from " + NpcMovementScene.climbPlaceName(last) + " to "
+                + NpcMovementScene.climbPlaceName(place) + " at " + house.realBlock(feet));
+            last = place;
+            seen.add(place);
+        }
+        assertEquals(NpcMovementScene.climbPlaces(), seen.size(), "places on the line: " + seen);
     }
 
     @Test

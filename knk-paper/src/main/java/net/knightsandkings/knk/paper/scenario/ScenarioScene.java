@@ -23,6 +23,10 @@ import java.util.function.Consumer;
  * <p>
  * All coordinates a scenario passes are relative to the box's lowest corner: x and z from 0 to
  * {@value #SIZE} - 1, y from 0 to {@value #HEIGHT} - 1.
+ * <p>
+ * A scenario that needs a bigger box (the whole stair house of PandiO/knk-workspace#670) implements
+ * {@link SizedScene}: its box is {@link Box#x()} × {@link Box#y()} × {@link Box#z()} blocks, at most
+ * {@value ScenarioSettings#SPACING} along x so it never reaches the next scene.
  */
 public final class ScenarioScene {
 
@@ -31,6 +35,25 @@ public final class ScenarioScene {
     /** Height of the box, in blocks. */
     public static final int HEIGHT = 24;
 
+    /**
+     * A scene box's size in blocks (PandiO/knk-workspace#670).
+     *
+     * @param x width, along the row of scenes (1 to {@value ScenarioSettings#SPACING})
+     * @param y height (1 to 384)
+     * @param z depth (1 to 256)
+     */
+    public record Box(int x, int y, int z) {
+        /** The box every scenario gets unless it asks for another ({@value #SIZE} × {@value #HEIGHT} × {@value #SIZE}). */
+        public static final Box DEFAULT = new Box(SIZE, HEIGHT, SIZE);
+
+        public Box {
+            if (x < 1 || x > ScenarioSettings.SPACING || y < 1 || y > 384 || z < 1 || z > 256) {
+                throw new IllegalArgumentException("a scene box is 1 to " + ScenarioSettings.SPACING
+                    + " wide, 1 to 384 high and 1 to 256 deep, was " + x + " x " + y + " x " + z);
+            }
+        }
+    }
+
     private final String scenarioName;
     private final int index;
     private final World world;
@@ -38,12 +61,20 @@ public final class ScenarioScene {
     private final int originY;
     private final int originZ;
     private final ScenarioServices services;
+    private final Box box;
     private final List<Entity> spawned = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();
     private final List<ScenarioPlayer> players = new ArrayList<>();
 
     public ScenarioScene(String scenarioName, int index, World world, int originX, int originY, int originZ,
                          ScenarioServices services) {
+        this(scenarioName, index, world, originX, originY, originZ, services, Box.DEFAULT);
+    }
+
+    /** A scene with a box of its own size ({@link SizedScene}, PandiO/knk-workspace#670). */
+    public ScenarioScene(String scenarioName, int index, World world, int originX, int originY, int originZ,
+                         ScenarioServices services, Box box) {
+        this.box = Objects.requireNonNull(box, "box");
         this.scenarioName = Objects.requireNonNull(scenarioName, "scenarioName");
         this.index = index;
         this.world = Objects.requireNonNull(world, "world");
@@ -59,6 +90,11 @@ public final class ScenarioScene {
 
     public World world() {
         return world;
+    }
+
+    /** The box's size ({@link Box#DEFAULT} unless the scenario asked for another). */
+    public Box box() {
+        return box;
     }
 
     /** The plugin services a scenario may use (the live gate manager, the gate loader, ...). */

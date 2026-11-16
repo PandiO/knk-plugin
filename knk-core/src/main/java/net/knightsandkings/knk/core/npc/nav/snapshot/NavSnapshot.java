@@ -151,8 +151,9 @@ public record NavSnapshot(Manifest manifest, RouteLine route, Roads roads, List<
             gateDoors = gateDoors == null ? List.of() : List.copyOf(gateDoors);
         }
 
+        /** A gate's domain: type {@code gate} or {@code GateStructure} (as the dev server names them). */
         public boolean isGate() {
-            return "gate".equalsIgnoreCase(type);
+            return type != null && type.toLowerCase(java.util.Locale.ROOT).contains("gate");
         }
     }
 

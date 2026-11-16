@@ -28,7 +28,13 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * needed, and reports the crowd's waits and the cells NPCs shared (M3's note on lane merges with collision on). Needs
  * Citizens.
  */
-public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene> {
+public final class NpcStairhouseGroupScenario implements Scenario<ScenarioScene>, net.knightsandkings.knk.paper.scenario.SizedScene {
+
+    /** The whole stair house (link B1, PandiO/knk-workspace#670). */
+    @Override
+    public ScenarioScene.Box box() {
+        return NpcMovementScene.STAIRHOUSE_BOX;
+    }
 
     static final int MAX_TICKS = 75 * 20;
     static final int MEMBERS = 20;
