@@ -14,7 +14,8 @@ Passes when:
 An entry is a timestamped line plus the untimestamped lines after it (a stack trace). A trace printed with
 printStackTrace() arrives one timestamped line per frame ("[..] [thread/WARN]: \tat ..."); such a trace joins the
 latest WARN or ERROR of the same thread name and second that has no trace yet, also when other lines came in between (PandiO/knk-workspace#540: the plugin's join handling logs its "API
-unreachable" error that way, and the scenarios' fake players join). It belongs to KnK, WorldGuard,
+unreachable" error that way, and the scenarios' fake players join); one whose message quotes the trace's exception
+is preferred over a later one that does not (PandiO/knk-workspace#586). It belongs to KnK, WorldGuard,
 WorldEdit or Citizens when its text mentions them (logger name, plugin name or a stack frame). Prints GitHub
 annotations and a summary; exits 1 on failure.
 
@@ -74,7 +75,8 @@ def parse_entries(lines):
             thread, message = match.group("thread"), match.group("message")
             target = trace_target.get(thread)
             if target is None or TRACE_HEADER.search(message):
-                target = trace_owner(recent.get(thread, []), match.group("time"))
+                header = message if TRACE_HEADER.search(message) else None
+                target = trace_owner(recent.get(thread, []), match.group("time"), header)
             if target is not None:
                 target.lines.append(message)
                 target.printed_trace = True
@@ -100,15 +102,33 @@ def is_trace_frame(match):
     return match.group("level") in ("WARN", "ERROR") and STACK_LINE.search(match.group("message")) is not None
 
 
-def trace_owner(candidates, time):
+def trace_owner(candidates, time, header=None):
     """The entry a new printStackTrace() trace belongs to: the thread's latest WARN or ERROR of the same second that has
     no trace of its own yet. Several pool threads share one name, so a logger's own exception (with its untimestamped
-    trace) can come in between; it is skipped."""
-    for entry in reversed(candidates):
-        if entry.time == time and entry.level in ("WARN", "ERROR") and not entry.inline_trace \
-                and not entry.printed_trace:
-            return entry
-    return None
+    trace) can come in between; it is skipped.
+
+    When the trace's first line names its exception ("java.util.concurrent.CompletionException: java.lang.Runtime
+    Exception: Failed to check duplicate"), an entry whose message quotes that exception wins over a later one that
+    does not: another pool thread of the same name can log a plain WARN between the ERROR and its trace
+    (PandiO/knk-workspace#586, an AdminFreezeManager WARN took the trace of UserManager's "Failed to sync user data").
+    """
+    eligible = [entry for entry in candidates if entry.time == time and entry.level in ("WARN", "ERROR")
+                and not entry.inline_trace and not entry.printed_trace]
+    detail = trace_detail(header)
+    if detail:
+        for entry in reversed(eligible):
+            if detail in entry.lines[0]:
+                return entry
+    return eligible[-1] if eligible else None
+
+
+def trace_detail(header):
+    """What a trace's first line says after the outermost exception's class name, e.g. "java.lang.RuntimeException:
+    Failed to check duplicate" for a CompletionException that wraps it; None when it says nothing."""
+    if not header:
+        return None
+    _, _, detail = header.strip().partition(": ")
+    return detail.strip() or None
 
 
 def api_down_pattern(address):

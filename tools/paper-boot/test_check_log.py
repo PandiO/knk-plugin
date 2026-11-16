@@ -212,6 +212,41 @@ class CheckLogTest(unittest.TestCase):
         self.assertEqual([], errors)
         self.assertIn("4 error/stack-trace entries excused", notes[-1])
 
+    # PandiO/knk-workspace#586 (CI run 43834635237): another knk-api-client thread logs a plain WARN (no exception)
+    # between UserManager's ERROR and its printStackTrace() frames.
+    PLAIN_WARN_IN_BETWEEN = (
+        "[08:59:07] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnOwner (a7f0): "
+        "java.lang.RuntimeException: Failed to check duplicate\n"
+        "[08:59:07] [Server thread/INFO]: ScnOwner[localhost/127.0.0.1:25565] logged in with entity id 285\n"
+        "[08:59:07] [knk-api-client/WARN]: [net.knightsandkings.knk.paper.user.AdminFreezeManager] Failed to check "
+        "frozen state for ScnOwner on join; using the last known state\n"
+        "[08:59:07] [knk-api-client/WARN]: java.util.concurrent.CompletionException: java.lang.RuntimeException: "
+        "Failed to check duplicate\n"
+        "[08:59:07] [knk-api-client/WARN]: \tat java.base/java.lang.Thread.run(Thread.java:1474)\n"
+        "[08:59:07] [knk-api-client/WARN]: Caused by: java.lang.RuntimeException: Failed to check duplicate\n"
+        "[08:59:07] [knk-api-client/WARN]: Caused by: java.net.ConnectException: Failed to connect to "
+        "localhost/[0:0:0:0:0:0:0:1]:5294\n"
+    )
+
+    def test_print_stack_trace_joins_the_entry_that_quotes_its_exception_not_a_later_plain_warn(self):
+        log = GOOD_BOOT + self.PLAIN_WARN_IN_BETWEEN
+        errors, notes = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual([], errors)
+        self.assertIn("3 error/stack-trace entries excused", notes[-1])
+        entries = parse_entries(lines(log))
+        sync = next(e for e in entries if "Failed to sync user data" in e.lines[0])
+        freeze = next(e for e in entries if "AdminFreezeManager" in e.lines[0])
+        self.assertTrue(sync.printed_trace)
+        self.assertFalse(freeze.has_stack_trace)
+
+    def test_quoted_exception_does_not_excuse_an_error_whose_trace_is_not_the_api(self):
+        log = GOOD_BOOT + self.PLAIN_WARN_IN_BETWEEN.replace(
+            "java.net.ConnectException: Failed to connect to localhost/[0:0:0:0:0:0:0:1]:5294",
+            "java.lang.IllegalStateException: duplicate check broke")
+        errors, _ = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual(1, len(errors))
+        self.assertIn("Failed to sync user data", errors[0])
+
     def test_trace_lines_of_another_thread_start_their_own_entry(self):
         log = GOOD_BOOT + (
             "[10:51:28] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnFeeder\n"
