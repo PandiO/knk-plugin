@@ -148,6 +148,37 @@ class TeleportAuditorTest {
         }
     }
 
+    /**
+     * The paper-boot race of PandiO/knk-workspace#586: the first write fails while the API is down, and the retry
+     * fires after plugin disable, when the API client's executor is terminated and refuses the call by throwing.
+     */
+    @Test
+    void aRetryRefusedAfterThePluginStoppedIsLoggedWithoutAWarning() {
+        java.util.List<java.util.logging.LogRecord> records = new java.util.ArrayList<>();
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override public void publish(java.util.logging.LogRecord record) { records.add(record); }
+            @Override public void flush() { }
+            @Override public void close() { }
+        };
+        java.util.logging.Logger logger = java.util.logging.Logger.getLogger(TeleportAuditor.class.getName());
+        logger.addHandler(handler);
+        try {
+            when(acting.recordTeleportAudit(any()))
+                .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Failed to connect to localhost:5294")))
+                .thenThrow(new java.util.concurrent.RejectedExecutionException(
+                    "Task rejected from java.util.concurrent.ThreadPoolExecutor[Terminated, pool size = 0]"));
+
+            await(auditor.record(TeleportPlan.staffToPlayer(alice, alice, alice, false), from, to));
+
+            verify(acting, times(2)).recordTeleportAudit(any());
+            assertTrue(records.stream().noneMatch(r -> r.getLevel().intValue() >= java.util.logging.Level.WARNING.intValue()),
+                "no WARNING for a retry refused at shutdown");
+            assertTrue(records.stream().anyMatch(r -> r.getMessage().contains("skipped: the plugin is shutting down")));
+        } finally {
+            logger.removeHandler(handler);
+        }
+    }
+
     @Test
     void isShutdownFindsARejectedExecutionAnywhereInTheCauses() {
         assertTrue(TeleportAuditor.isShutdown(new java.util.concurrent.CompletionException(

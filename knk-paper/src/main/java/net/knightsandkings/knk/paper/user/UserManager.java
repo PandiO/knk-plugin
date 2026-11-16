@@ -4,6 +4,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.bukkit.entity.Player;
@@ -133,8 +134,9 @@ public class UserManager {
                 return userData;
             })
             .exceptionally(ex -> {
-                logger.severe("Failed to sync user data for " + username + " (" + uuid + "): " + ex.getMessage());
-                ex.printStackTrace();
+                // The exception goes with the log record, not to System.err: printStackTrace() lines arrive
+                // separately and can end up next to another thread's entry (PandiO/knk-workspace#586).
+                logger.log(Level.SEVERE, "Failed to sync user data for " + username + " (" + uuid + "): " + ex.getMessage(), ex);
 
                 // Create fallback minimal entry
                 PlayerUserData fallback = PlayerUserData.minimal(uuid, username, null);
