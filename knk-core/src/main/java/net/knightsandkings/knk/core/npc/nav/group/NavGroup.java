@@ -21,6 +21,7 @@ import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcNavState;
 import net.knightsandkings.knk.core.npc.nav.NavGeometry;
+import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
 import net.knightsandkings.knk.core.npc.nav.PathTargets;
 import net.knightsandkings.knk.core.npc.nav.RecentSteps;
@@ -208,6 +209,22 @@ public final class NavGroup {
     private int level;
     /** A new path: the next look takes the width that fits at once, without the hysteresis. */
     private boolean widthFresh = true;
+    // ---- elastic formation keeping (implementation plan 4c.3 decision 2, link M3) ----
+    /** {@code group-formation-keeping: elastic}. */
+    private final boolean elastic;
+    /** Per width: its half width in lateral spacings (the squeeze scales it). */
+    private double[] levelUnits = {0};
+    /** Per follower (by its index): the index of its slot in the current width's slot list (re-assigned by place). */
+    private int[] slotOf = new int[0];
+    /** The gap between rows now: {@code group-spacing}, closed up towards {@code group-spacing-min} while squeezed. */
+    private double rowSpacing;
+    /** The tight places passed by merging lanes in this order, by where they start (counted once each). */
+    private final Set<Long> merges = new java.util.HashSet<>();
+    /** The group's access verdict for a lane in other regions than the path (decision 2.6). */
+    private final GroupPath.LaneRules laneRules = this::laneAllowed;
+    /** The leader's route line the shaped chunks are of, and the shaped chunks by their first line index. */
+    private RouteFollower shapedOf;
+    private final Map<Integer, List<NavPoint>> shapedChunks = new HashMap<>();
     private MemberListener memberListener;
 
     private final GroupPath path = new GroupPath();
@@ -245,6 +262,8 @@ public final class NavGroup {
         this.leader = Objects.requireNonNull(leader, "leader");
         this.profile = Objects.requireNonNull(profile, "profile");
         this.settings = Objects.requireNonNull(settings, "settings");
+        this.elastic = settings.keeping().elastic();
+        this.rowSpacing = settings.formation().spacing();
         for (NpcMover follower : followers) {
             this.followers.add(new Follower(follower));
         }
@@ -253,6 +272,9 @@ public final class NavGroup {
 
     private void slotsChanged() {
         Formation formation = settings.formation();
+        if (elastic && rowSpacing != formation.spacing()) {
+            formation = new Formation(formation.type(), rowSpacing, formation.lateralSpacing(), formation.ranksWidth());
+        }
         int n = followers.size();
         widths = formation.widths();
         int count = widths.size();
@@ -276,6 +298,27 @@ public final class NavGroup {
         levelSlots = slots;
         level = Math.min(level, count - 1);
         path.levels(levelHalf);
+        levelUnits = new double[count];
+        for (int l = 0; l < count; l++) {
+            levelUnits[l] = levelHalf[l] / formation.lateralSpacing();
+        }
+        if (slotOf.length != n) {
+            slotOf = new int[n];
+            for (int i = 0; i < n; i++) {
+                slotOf[i] = i;
+            }
+        }
+    }
+
+    /** Follower {@code i}'s slot in the current width (tests: the re-assignment by place). */
+    Formation.Slot slotOf(int i) {
+        return slotFor(levelSlots.get(level), i);
+    }
+
+    /** Follower {@code i}'s slot in the current width. */
+    private Formation.Slot slotFor(List<Formation.Slot> slots, int i) {
+        int k = i < slotOf.length ? slotOf[i] : i;
+        return slots.get(Math.max(0, Math.min(k, slots.size() - 1)));
     }
 
     // ==================== callers ====================
@@ -297,7 +340,29 @@ public final class NavGroup {
         return settings;
     }
 
+    /** The followers' mover ids, in slot order (crowd awareness, link M4). */
+    public int[] followerIds() {
+        int[] ids = new int[followers.size()];
+        for (int i = 0; i < ids.length; i++) {
+            ids[i] = followers.get(i).mover.id();
+        }
+        return ids;
+    }
+
     /** Whether the group has an order. */
+    /** Whether the mover is this group's leader or one of its followers. */
+    public boolean isMember(int moverId) {
+        if (leader != null && leader.id() == moverId) {
+            return true;
+        }
+        for (Follower f : followers) {
+            if (f.mover.id() == moverId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean hasOrder() {
         return goal != null;
     }
@@ -460,6 +525,7 @@ public final class NavGroup {
      */
     void rulesChanged() {
         verdicts.clear();
+        path.forgetFits(); // the lanes' access verdicts (elastic, decision 2.6) are asked again
         doorVerdicts.clear();
         doorBoxes.clear();
         rulesPending = goal != null || finishing() > 0;
@@ -563,6 +629,7 @@ public final class NavGroup {
 
     private void resetPath() {
         path.clear();
+        merges.clear();
         routeDoors.clear();
         leaderIdx = -1;
         line = null;
@@ -630,7 +697,7 @@ public final class NavGroup {
         for (int i = 0; i < followers.size(); i++) {
             Follower f = followers.get(i);
             f.queue = queued;
-            step(f, slots.get(i), leaderArc, lookahead);
+            step(f, slotFor(slots, i), leaderArc, lookahead);
             queued += f.cut && (f.state == FollowerState.FOLLOWING || f.state == FollowerState.FINISHING) ? 1 : 0;
             if (f.mover.isSpawned() && !f.lost && !f.heldByRule && f.state != FollowerState.FINISHING) {
                 maxLag = Math.max(maxLag, f.lag);
@@ -668,9 +735,18 @@ public final class NavGroup {
                 int index = lineBase + (nearest - lineStart);
                 double wanted = Math.max(LOOKAHEAD, settings.widthHysteresisBlocks() + 1) + maxFront
                     + 2 * RouteFollower.STEP;
+                if (elastic) {
+                    // the look-ahead (decision 2.3) and the length of a tight place starting at its end
+                    wanted = Math.max(wanted, maxFront + 1 + maxDepth + settings.keeping().lookaheadBlocks()
+                        + settings.widthHysteresisBlocks() + 2 * RouteFollower.STEP);
+                }
                 while (lineStart + lineAdded < points.size() && (lineBase + lineAdded <= index
                     || path.endArc() - path.arc(index) < wanted)) {
-                    path.addSnapped(ports.world(), points.get(lineStart + lineAdded), leaderFloorY);
+                    NavPoint linePoint = points.get(lineStart + lineAdded);
+                    if (elastic || plazaOptions() != null) {
+                        linePoint = shapedLinePoint(follower, lineStart + lineAdded, leaderFloorY);
+                    }
+                    path.addSnapped(ports.world(), linePoint, leaderFloorY);
                     lineAdded++;
                 }
                 leaderIdx = Math.max(Math.min(index, path.size() - 1), Math.min(leaderIdx, path.size() - 1));
@@ -702,6 +778,10 @@ public final class NavGroup {
     private void decideWidth() {
         int count = widths.size();
         if (count <= 1 || leaderIdx < 0) {
+            return;
+        }
+        if (elastic) {
+            decideElastic();
             return;
         }
         double leaderArc = path.arc(leaderIdx);
@@ -755,8 +835,35 @@ public final class NavGroup {
             }
         }
         if (target != level) {
-            changeWidth(target, narrowAt >= 0 ? narrowAt : leaderIdx);
+            // the reason is judged where the width just wider than the target first fails (decision 2.8)
+            int reasonAt = target > level ? firstMisfit(widest, from, leaderArc, target - 1, 0) : -1;
+            changeWidth(target, narrowAt >= 0 ? narrowAt : leaderIdx, reasonAt >= 0 ? reasonAt
+                : narrowAt >= 0 ? narrowAt : leaderIdx);
         }
+    }
+
+    /**
+     * Why the group gives up width {@code level} at path point {@code index} (implementation plan 4c.3 decision 2.8,
+     * link M1: counted and logged only): a gate door on the leader's routes there, else what the path says
+     * ({@link GroupPath#misfitReason}).
+     */
+    private NpcNavigationMetrics.FoldReason foldReason(int index, int level) {
+        NavPoint feet = HopPlanner.feet(path.get(index).floor);
+        for (int doorId : routeDoors) {
+            Optional<GateBox> box = doorBoxes.computeIfAbsent(doorId, id -> ports.rules().doorBox(id));
+            if (box.isPresent() && inDoorWay(box.get(), feet)) {
+                return NpcNavigationMetrics.FoldReason.DOOR;
+            }
+        }
+        if (elastic) {
+            return switch (path.fit(ports.world(), index, laneRules).limit()) {
+                case STEP -> NpcNavigationMetrics.FoldReason.STAIR;
+                case RULES -> NpcNavigationMetrics.FoldReason.RULES;
+                case DROP -> NpcNavigationMetrics.FoldReason.EDGE;
+                default -> NpcNavigationMetrics.FoldReason.NARROW;
+            };
+        }
+        return path.misfitReason(ports.world(), index, level);
     }
 
     /**
@@ -793,7 +900,7 @@ public final class NavGroup {
         return !(onLine && line != null && lineStart + lineAdded < line.line().size()) && path.endArc() - start > hysteresis;
     }
 
-    private void changeWidth(int target, int atIndex) {
+    private void changeWidth(int target, int atIndex, int reasonIndex) {
         int before = level;
         Formation.Width was = widths.get(before);
         Formation.Width now = widths.get(target);
@@ -802,22 +909,487 @@ public final class NavGroup {
         NavPoint at = path.get(Math.max(0, Math.min(atIndex, path.size() - 1))).floor;
         String what;
         Event event;
+        NpcNavigationMetrics.FoldReason reason = null;
+        if (target > before) {
+            int i = Math.max(0, Math.min(reasonIndex, path.size() - 1));
+            reason = foldReason(i, target - 1);
+        }
+        if (elastic) {
+            reassign(target);
+        }
         if (now.column()) {
             event = Event.GROUP_FOLD;
-            what = "folds into a column: the path is too narrow for " + widths.get(count - 2).describe();
+            what = "folds into a column: the path is too narrow for " + widths.get(count - 2).describe()
+                + " (" + reason.label() + ")";
         } else if (was.column()) {
             event = Event.GROUP_REFORM;
             what = "takes up " + now.describe() + " again";
         } else if (target > before) {
             event = Event.GROUP_NARROW;
-            what = "narrows to " + now.describe() + ": the path is too narrow for " + was.describe();
+            what = "narrows to " + now.describe() + ": the path is too narrow for " + was.describe()
+                + " (" + reason.label() + ")";
         } else {
             event = Event.GROUP_WIDEN;
             what = "widens to " + now.describe();
         }
         ports.metrics().count(event);
+        if (reason != null && NpcNavigationMetrics.WIDTH_CHANGES.contains(event)) {
+            ports.metrics().countFoldReason(event, reason);
+        }
         ports.log().accept(String.format(Locale.ROOT, "group %d (%s, %d NPCs) %s at %d %d %d", id, leader.name(), size(),
             what, at.blockX(), at.blockY() + 1, at.blockZ()));
+    }
+
+    // ==================== elastic formation keeping (implementation plan 4c.3 decision 2, link M3) ====================
+
+    /** Route line points shaped at once for the group path (about the 32 blocks of a stretch at 1.5 apart). */
+    static final int SHAPE_CHUNK = 20;
+
+    /**
+     * A point of the leader's route line moved onto its corridor-shaped line (link M3, plan 4c.3 decision 1.5: the
+     * group path uses the corridor too): the line is shaped a chunk at a time by the navigation service's shared
+     * corridor shaper ({@code corridor-half-width}'s decided 4, {@code wall-clearance}), and each route point is
+     * replaced by the nearest point of its chunk's shaped line, so the path keeps one point per route point and the
+     * leader's place on it is found as before. Without a shaped chunk (no floor to start from) the route point as it is.
+     */
+    private NavPoint shapedLinePoint(RouteFollower follower, int index, int floorY) {
+        List<NavPoint> line = follower.line();
+        if (follower != shapedOf) {
+            shapedOf = follower;
+            shapedChunks.clear();
+        }
+        int first = index / SHAPE_CHUNK * SHAPE_CHUNK;
+        List<NavPoint> shaped = shapedChunks.computeIfAbsent(first, f -> shapeChunk(follower, f, floorY));
+        NavPoint p = line.get(index);
+        if (shaped.size() < 2) {
+            return p;
+        }
+        NavPoint best = p;
+        double bestD = Double.MAX_VALUE;
+        for (int k = 0; k + 1 < shaped.size(); k++) {
+            NavPoint a = shaped.get(k);
+            NavPoint b = shaped.get(k + 1);
+            double dx = b.x() - a.x();
+            double dz = b.z() - a.z();
+            double len2 = dx * dx + dz * dz;
+            double t = len2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((p.x() - a.x()) * dx + (p.z() - a.z()) * dz) / len2));
+            double x = a.x() + dx * t;
+            double z = a.z() + dz * t;
+            double d = (x - p.x()) * (x - p.x()) + (z - p.z()) * (z - p.z()) + (a.y() - 1 - p.y()) * (a.y() - 1 - p.y());
+            if (d < bestD) {
+                bestD = d;
+                best = new NavPoint(p.world(), x, p.y(), z);
+            }
+        }
+        return best;
+    }
+
+    /**
+     * The clearance the group path's plaza lines keep (link M5): the widest width's half width plus {@code wall-clearance},
+     * so the formation passes a well on the plaza without squeezing (at most the corridor's cap).
+     */
+    public double plazaClearance() {
+        Formation formation = settings.formation();
+        Formation.Width widest = formation.widths().get(0);
+        double half = widest.ring() ? Formation.RING_RADIUS * formation.lateralSpacing()
+            : (widest.abreast() - 1) / 2.0 * formation.lateralSpacing();
+        return Math.min(net.knightsandkings.knk.core.npc.nav.corridor.Corridor.CAP,
+            half + settings.keeping().wallClearance());
+    }
+
+    /** The plaza-line options of the group path: its leader's {@code plaza-lines}, or null when off (link M5). */
+    private net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options plazaOptions() {
+        return ports.navigation().plazaOptions(leader.id());
+    }
+
+    /** One chunk of the route line (with a point of overlap either side) shaped in its corridor; empty without. */
+    private List<NavPoint> shapeChunk(RouteFollower follower, int first, int floorY) {
+        List<NavPoint> line = follower.line();
+        int from = Math.max(0, first - 1);
+        int to = Math.min(line.size(), first + SHAPE_CHUNK + 1);
+        var plazas = plazaOptions();
+        List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing> crossings = List.of();
+        if (plazas != null) {
+            // a chunk holds the whole way across a plaza it reaches into, so both chunks place the same plaza line
+            int reach = (int) Math.ceil(plazas.plazaBlocks() / RouteFollower.STEP) + 2;
+            int lowest = Math.max(0, from - SHAPE_CHUNK);
+            int highest = Math.min(line.size(), to + SHAPE_CHUNK);
+            for (RouteFollower.PlazaOnLine p : follower.plazas()) {
+                if (p.index() + reach >= from && p.index() - reach < to) {
+                    // at most a chunk more either way, so junctions close together don't chain
+                    from = Math.max(lowest, Math.min(from, p.index() - reach));
+                    to = Math.min(highest, Math.max(to, p.index() + reach + 1));
+                }
+            }
+            crossings = follower.plazasBetween(from, to);
+            if (!elastic && crossings.isEmpty()) {
+                return List.of(); // levels: the route line as it is away from plazas
+            }
+        }
+        List<NavPoint> feet = new ArrayList<>();
+        List<Integer> indexes = new ArrayList<>();
+        int refY = floorY;
+        for (int i = from; i < to; i++) {
+            NavPoint floor = HopPlanner.surfaceNear(ports.world(), line.get(i), refY);
+            if (floor == null) {
+                return List.of();
+            }
+            refY = floor.blockY();
+            NavPoint f = HopPlanner.feet(floor);
+            if (!feet.isEmpty() && feet.get(feet.size() - 1).horizontalDistance(f) < 1e-6
+                && feet.get(feet.size() - 1).y() == f.y()) {
+                continue;
+            }
+            feet.add(f);
+            indexes.add(i);
+        }
+        if (feet.size() < 2) {
+            return List.of();
+        }
+        var options = new net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options(
+            NavigationSettingsDefaults.HALF_WIDTH, settings.keeping().wallClearance());
+        if (plazas != null) {
+            options = elastic ? options.withPlazas(plazas.plazaBlocks(), plazaClearance())
+                : net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options.plazasOnly(
+                    NavigationSettingsDefaults.HALF_WIDTH, settings.keeping().wallClearance(), plazas.plazaBlocks(),
+                    plazaClearance());
+        }
+        try {
+            return ports.navigation().corridors().shape(ports.world(), feet, indexes, options, to == line.size(),
+                crossings).waypoints();
+        } catch (RuntimeException e) {
+            return List.of(); // a line the shaper cannot take (no corridor): the route line as it is
+        }
+    }
+
+    /** The corridor's decided half width (plan 4c.6 question 3). */
+    private static final class NavigationSettingsDefaults {
+        static final double HALF_WIDTH = net.knightsandkings.knk.core.npc.nav.NavigationSettings.CORRIDOR_HALF_WIDTH
+            .defaultValue();
+    }
+
+    /** The widest width that fits at a path point squeezed (decision 2.2). */
+    private int elasticWidest(int index) {
+        return path.elasticWidest(ports.world(), index, laneRules, levelUnits, lateralMin());
+    }
+
+    private double lateralMin() {
+        return Math.min(settings.keeping().lateralSpacingMin(), settings.formation().lateralSpacing());
+    }
+
+    /**
+     * The elastic width decision (decisions 2.2 to 2.4, 2.8): the group looks at the stretch from its rearmost slot to
+     * {@code group-lookahead-blocks} past its depth ahead of the leader. A width it walks in is given up only for a
+     * tight place where it does not fit even squeezed that lasts longer than {@code group-width-hysteresis-blocks}
+     * (then the widest width that has no such place there, the column last); a shorter one is passed by merging the
+     * lanes (counted once, with its reason). A wider width is taken when the stretch has no lasting tight place for
+     * it. The same rule for every change, the column included; a new order takes the fitting width at once.
+     */
+    private void decideElastic() {
+        int count = widths.size();
+        double leaderArc = path.arc(leaderIdx);
+        double hysteresis = settings.widthHysteresisBlocks();
+        double rear = leaderArc - levelDepth[level] - 1;
+        double fore = leaderArc + levelFront[level] + 1 + levelDepth[level] + settings.keeping().lookaheadBlocks();
+        int from = path.indexAtArc(Math.max(0, rear));
+        int to = from;
+        while (to + 1 < path.size() && path.arc(to + 1) <= fore) {
+            to++;
+        }
+        boolean more = onLine && line != null && lineStart + lineAdded < line.line().size();
+        int target = level;
+        int[] lastingAt = new int[count];
+        for (int l = 0; l < count; l++) {
+            lastingAt[l] = l == count - 1 ? -1 : lastingMisfit(from, to, l, hysteresis);
+        }
+        if (widthFresh) {
+            widthFresh = false;
+            target = count - 1;
+            for (int l = 0; l < count; l++) {
+                if (lastingAt[l] < 0) {
+                    target = l;
+                    break;
+                }
+            }
+        } else if (lastingAt[level] >= 0) {
+            for (int l = level + 1; l < count; l++) {
+                if (lastingAt[l] < 0) {
+                    target = l;
+                    break;
+                }
+            }
+        } else if (!more || path.endArc() >= fore) {
+            for (int l = 0; l < level; l++) {
+                if (lastingAt[l] < 0) {
+                    target = l;
+                    break;
+                }
+            }
+        }
+        if (target != level) {
+            int reasonAt = target > level ? lastingAt[target - 1] : -1;
+            int at = target > level ? reasonAt : leaderIdx;
+            changeWidth(target, at >= 0 ? at : leaderIdx, reasonAt >= 0 ? reasonAt : leaderIdx);
+        }
+        countMerges(path.indexAtArc(Math.max(0, leaderArc - 1)), to);
+        squeezeRows(from, to);
+    }
+
+    /**
+     * The first point of a tight place for width {@code l} (where it does not fit squeezed) that touches the points
+     * {@code [from, to]} and lasts longer than the hysteresis along the path; -1 when there is none. A tight place's
+     * length runs from half way to the point before it to half way to the point after it; one that reaches the end of
+     * the path known so far while more of the leader's line is to come counts once it is longer than the hysteresis.
+     */
+    private int lastingMisfit(int from, int to, int l, double hysteresis) {
+        int i = from;
+        while (i <= to) {
+            if (elasticWidest(i) <= l) {
+                i++;
+                continue;
+            }
+            int first = i;
+            while (first > 0 && elasticWidest(first - 1) > l) {
+                first--;
+            }
+            int last = i;
+            while (last + 1 < path.size() && elasticWidest(last + 1) > l) {
+                last++;
+            }
+            if (tightLength(first, last) > hysteresis) {
+                return Math.max(first, from);
+            }
+            i = last + 1;
+        }
+        return -1;
+    }
+
+    /** The length along the path of the tight place from point {@code first} to point {@code last}. */
+    private double tightLength(int first, int last) {
+        double start = first > 0 ? (path.arc(first - 1) + path.arc(first)) / 2 : path.arc(first);
+        double end = last + 1 < path.size() ? (path.arc(last) + path.arc(last + 1)) / 2 : path.arc(last);
+        return end - start;
+    }
+
+    /**
+     * Counts the tight places ahead of the leader that the group passes with its lanes merged (decision 2.4, with its
+     * reason, decision 2.8): each once per order, where it starts.
+     */
+    private void countMerges(int from, int to) {
+        if (level >= widths.size() - 1) {
+            return; // a column merges nothing
+        }
+        for (int i = from; i <= to; i++) {
+            if (elasticWidest(i) <= level) {
+                continue;
+            }
+            int first = i;
+            while (first > 0 && elasticWidest(first - 1) > level) {
+                first--;
+            }
+            int last = i;
+            while (last + 1 < path.size() && elasticWidest(last + 1) > level) {
+                last++;
+            }
+            if (merges.add(Math.round(path.arc(first) * 4))) {
+                int narrowest = first;
+                for (int k = first; k <= last; k++) {
+                    if (path.fit(ports.world(), k, laneRules).total()
+                        < path.fit(ports.world(), narrowest, laneRules).total()) {
+                        narrowest = k;
+                    }
+                }
+                NpcNavigationMetrics.FoldReason reason = foldReason(narrowest, level);
+                ports.metrics().count(Event.GROUP_MERGE);
+                ports.metrics().countFoldReason(Event.GROUP_MERGE, reason);
+                NavPoint at = path.get(first).floor;
+                ports.log().accept(String.format(Locale.ROOT, "group %d (%s, %d NPCs) merges its lanes for %.1f blocks: "
+                    + "the path is too narrow for %s (%s) at %d %d %d", id, leader.name(), size(), tightLength(first, last),
+                    widths.get(level).describe(), reason.label(), at.blockX(), at.blockY() + 1, at.blockZ()));
+            }
+            i = last;
+        }
+    }
+
+    /**
+     * Closes the rows up while the group is squeezed (decision 2.2): the gap between rows goes from
+     * {@code group-spacing} towards {@code group-spacing-min} as the lateral spacing on the stretch goes towards
+     * {@code group-lateral-spacing-min}, in quarter steps; a column walks at the closed-up gap.
+     */
+    private void squeezeRows(int from, int to) {
+        double s0 = settings.formation().lateralSpacing();
+        double sMin = lateralMin();
+        double gap0 = settings.formation().spacing();
+        double gapMin = Math.min(settings.keeping().spacingMin(), gap0);
+        double t;
+        if (level == widths.size() - 1) {
+            t = 1;
+        } else {
+            double least = s0;
+            for (int i = from; i <= to; i++) {
+                if (elasticWidest(i) <= level) {
+                    least = Math.min(least, GroupPath.squeezed(path.fit(ports.world(), i, laneRules), levelUnits[level],
+                        s0, sMin));
+                }
+            }
+            t = s0 - sMin < 1e-9 ? 0 : (s0 - least) / (s0 - sMin);
+        }
+        t = Math.round(Math.max(0, Math.min(1, t)) * 4) / 4.0;
+        double gap = gap0 - t * (gap0 - gapMin);
+        if (Math.abs(gap - rowSpacing) > 1e-9) {
+            rowSpacing = gap;
+            slotsChanged();
+        }
+    }
+
+    /**
+     * Gives the followers the new width's slots by their place (decision 2.7): sorted along the path (the foremost
+     * first), each row's slots taken by the next followers sorted across the path, so nobody crosses another's line
+     * or brakes for a slot that lies behind others. At most 20 followers, once per width change.
+     */
+    private void reassign(int target) {
+        int n = followers.size();
+        if (n == 0) {
+            return;
+        }
+        double[] along = new double[n];
+        double[] across = new double[n];
+        for (int i = 0; i < n; i++) {
+            NavPoint feet = followers.get(i).mover.position().orElse(null);
+            if (feet == null || path.isEmpty()) {
+                along[i] = -Double.MAX_VALUE / 2 - slotOf[i]; // keeps its order at the back
+                continue;
+            }
+            int k = path.nearest(feet, 0, path.size());
+            NavPoint c = path.get(k).floor;
+            double[] h = path.heading(k);
+            along[i] = path.arcOf(feet, k);
+            across[i] = (feet.x() - c.x()) * -h[1] + (feet.z() - c.z()) * h[0];
+        }
+        Integer[] byPlace = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            byPlace[i] = i;
+        }
+        java.util.Arrays.sort(byPlace, (a, b) -> Double.compare(along[b], along[a]));
+        List<Formation.Slot> slots = levelSlots.get(target);
+        Integer[] bySlot = new Integer[slots.size()];
+        for (int k = 0; k < bySlot.length; k++) {
+            bySlot[k] = k;
+        }
+        java.util.Arrays.sort(bySlot, (a, b) -> {
+            int c = Double.compare(slots.get(a).back(), slots.get(b).back());
+            return c != 0 ? c : Double.compare(slots.get(a).side(), slots.get(b).side());
+        });
+        int[] next = new int[n];
+        int k = 0;
+        while (k < Math.min(n, bySlot.length)) {
+            int rowEnd = k + 1;
+            while (rowEnd < Math.min(n, bySlot.length)
+                && Math.abs(slots.get(bySlot[rowEnd]).back() - slots.get(bySlot[k]).back()) < 1e-6) {
+                rowEnd++;
+            }
+            Integer[] row = java.util.Arrays.copyOfRange(byPlace, k, rowEnd);
+            java.util.Arrays.sort(row, (a, b) -> Double.compare(across[a], across[b]));
+            for (int j = 0; j < row.length; j++) {
+                next[row[j]] = bySlot[k + j];
+            }
+            k = rowEnd;
+        }
+        slotOf = next;
+    }
+
+    /**
+     * An elastic lane's point (decisions 2.1, 2.2, 2.4): the formation's centre placed in the free width with the wall
+     * margin, the slot's lane at its squeezed spacing off it; where the width does not fit (a merge), the lane is
+     * kept inside the free width with the hard margin, so lanes fall in with their inside neighbour. A lane keeps to
+     * the narrowest band of the points from one path step before to {@link #LANE_RETURN} after (a lane is back in line
+     * before a tight place, not round its corner).
+     */
+    private NavPoint elasticLanePoint(int index, double along, double side) {
+        if (index < 0 || index >= path.size()) {
+            return null;
+        }
+        double lateral = elasticLateral(index, side);
+        NavPoint p = path.lateralPoint(ports.world(), index, along, lateral);
+        if (p == null && along != 0) {
+            p = path.lateralPoint(ports.world(), index, along, 0);
+        }
+        return p != null ? p : HopPlanner.feet(path.get(index).floor);
+    }
+
+    /** The lane's offset to the right of the path's centre at a point (see {@link #elasticLanePoint}). */
+    private double elasticLateral(int index, double side) {
+        double s0 = settings.formation().lateralSpacing();
+        double units = side / s0;
+        GroupPath.Fit fit = path.fit(ports.world(), index, laneRules);
+        double lateral;
+        if (elasticWidest(index) <= level) {
+            double s = GroupPath.squeezed(fit, levelUnits[level], s0, lateralMin());
+            lateral = GroupPath.centre(fit, levelUnits[level] * s, settings.keeping().wallClearance()) + units * s;
+        } else {
+            lateral = GroupPath.centre(fit, 0, settings.keeping().wallClearance()) + units * lateralMin();
+        }
+        // a lane keeps within the bands of the points from a path step behind to LANE_RETURN ahead (on points heading
+        // the same way): the preferred margin first, so a notch on one side does not pull it in for one point and out
+        // again (its wall corner is in the way: found by npc-jagged-straight), else the hard margin
+        double[] h = path.heading(index);
+        double arc = path.arc(index);
+        for (boolean preferred : new boolean[] {true, false}) {
+            double[] own = band(index, h, preferred);
+            double lo = own[0];
+            double hi = own[1];
+            for (int k = index - 1; k >= 0 && path.arc(k) >= arc - RouteFollower.STEP - 1e-6; k--) {
+                double[] band = band(k, h, preferred);
+                if (band != null) {
+                    lo = Math.max(lo, band[0]);
+                    hi = Math.min(hi, band[1]);
+                }
+            }
+            for (int k = index + 1; k < path.size() && path.arc(k) <= arc + LANE_RETURN; k++) {
+                double[] band = band(k, h, preferred);
+                if (band != null) {
+                    lo = Math.max(lo, band[0]);
+                    hi = Math.min(hi, band[1]);
+                }
+            }
+            if (lo <= hi) {
+                return Math.max(lo, Math.min(hi, lateral));
+            }
+        }
+        double lo = -fit.left() + GroupPath.HARD_MARGIN;
+        double hi = fit.right() - GroupPath.HARD_MARGIN;
+        return lo > hi ? (fit.right() - fit.left()) / 2 : Math.max(lo, Math.min(hi, lateral));
+    }
+
+    /**
+     * A point's band for a lane centre, when it heads within 30° of {@code h} (null otherwise): the margin the
+     * formation keeps there ({@code preferred}: its spare room up to {@code wall-clearance}, at least the hard 0.35)
+     * or the hard margin.
+     */
+    private double[] band(int k, double[] h, boolean preferred) {
+        double[] hk = path.heading(k);
+        if (hk[0] * h[0] + hk[1] * h[1] < 0.866) {
+            return null;
+        }
+        GroupPath.Fit fit = path.fit(ports.world(), k, laneRules);
+        double margin = GroupPath.HARD_MARGIN;
+        if (preferred && elasticWidest(k) <= level) {
+            double s = GroupPath.squeezed(fit, levelUnits[level], settings.formation().lateralSpacing(), lateralMin());
+            double spare = (fit.total() - 2 * levelUnits[level] * s) / 2;
+            margin = Math.max(GroupPath.HARD_MARGIN, Math.min(settings.keeping().wallClearance(), spare));
+        }
+        return new double[] {-fit.left() + margin, fit.right() - margin};
+    }
+
+    /** The group's access verdict for a lane in other regions than the path's (decision 2.6, the cached verdicts). */
+    private boolean laneAllowed(String world, Set<String> pathRegions, Set<String> laneRegions) {
+        for (String region : laneRegions) {
+            if (!pathRegions.contains(region) && !verdicts.computeIfAbsent(new Verdict(pathRegions, region), v -> ports
+                .rules().mayEnter(new NpcAccessSubject(leader.name(), profile, world, pathRegions)).test(region))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void step(Follower f, Formation.Slot slot, double leaderArc, double lookahead) {
@@ -906,7 +1478,8 @@ public final class NavGroup {
         if (f.ladder.isOpen() && recoveryTick(f, slot, slotArc, at, a)) {
             return; // on a step of its ladder, or waiting before the next
         }
-        if (f.engineStuck != null && f.state == FollowerState.FOLLOWING && targetArc - a > 1) {
+        if (f.engineStuck != null && f.state == FollowerState.FOLLOWING && targetArc - a > 1
+            && !(f.engineStuck == NpcMover.StuckKind.STATIONARY && waitsBehind(f, at))) {
             NpcMover.StuckKind kind = f.engineStuck;
             f.engineStuck = null;
             stuck(f, slot, slotArc, at, a, kind == NpcMover.StuckKind.NO_PATH ? RecoveryLadder.Reporter.NO_PATH
@@ -961,8 +1534,36 @@ public final class NavGroup {
         } else if (f.heldByRule) {
             f.progressTick = now;
         } else if (targetArc - a > 1 && now - f.progressTick >= settings.noProgressTicks()) {
-            stuck(f, slot, slotArc, at, a, RecoveryLadder.Reporter.NO_PROGRESS);
+            if (waitsBehind(f, at)) {
+                f.progressTick = now; // behind another NPC: a wait, not a stuck spell (link M4, decision 3.4)
+            } else {
+                stuck(f, slot, slotArc, at, a, RecoveryLadder.Reporter.NO_PROGRESS);
+            }
         }
+    }
+
+    /**
+     * Crowd awareness (link M4, plan 4c.3 decision 3.4): whether a follower stands behind another NPC in its lane, a
+     * cell within 1.5 blocks along the path's heading taken by someone else. The wait is counted once; false with the
+     * key off.
+     */
+    private boolean waitsBehind(Follower f, NavPoint at) {
+        if (!ports.navigation().crowdAwareness(f.mover.id()) || path.isEmpty()) {
+            return false;
+        }
+        double[] dir = pathDirection(f);
+        double len = Math.hypot(dir[0], dir[1]);
+        if (len < 1e-9) {
+            return false;
+        }
+        NavPoint ahead = new NavPoint(at.world(), at.x() + dir[0] / len * 1.5, at.y(), at.z() + dir[1] / len * 1.5);
+        return ports.navigation().waitsBehind(f.mover.id(), at, List.of(ahead));
+    }
+
+    /** Crowd awareness (link M4): another NPC stands in this feet cell, so a recovery step does not end there. */
+    private boolean occupied(Follower f, NavPoint feet) {
+        return ports.navigation().crowdAwareness(f.mover.id())
+            && ports.navigation().occupancy().occupied(feet, f.mover.id());
     }
 
     /** Whether a feet position lies on the leader's route line beyond the part of it that is on the group's path. */
@@ -1070,11 +1671,13 @@ public final class NavGroup {
             case BACK_OFF -> {
                 move.clear();
                 move.addAll(f.steps.wayBack(at, 2));
-                yield !move.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, move.get(0));
+                yield !move.isEmpty() && NavGeometry.straightWalkable(ports.world(), at, move.get(0))
+                    && !occupied(f, move.get(move.size() - 1));
             }
             case SIDE_STEP -> {
                 move.clear();
-                NavPoint p = RecoveryMoves.sideStep(ports.world(), at, wall, away, feet -> mayStand(f, here, feet));
+                NavPoint p = RecoveryMoves.sideStep(ports.world(), at, wall, away,
+                    feet -> mayStand(f, here, feet) && !occupied(f, feet));
                 if (p != null) {
                     move.add(p);
                 }
@@ -1286,6 +1889,9 @@ public final class NavGroup {
      * before the next, not around its corner).
      */
     private NavPoint lanePoint(int index, double along, double side) {
+        if (elastic) {
+            return elasticLanePoint(index, along, side);
+        }
         NavPoint p = null;
         double lane = laneSide(index, side);
         if (Math.abs(lane) > 1e-9 && laneFree(index - 1, side, lane) && laneAhead(index, along, side, lane)) {
@@ -1677,7 +2283,7 @@ public final class NavGroup {
             if (feet == null) {
                 continue;
             }
-            Formation.Slot slot = slots.get(i);
+            Formation.Slot slot = slotFor(slots, i);
             double slotArc = leaderArc - slot.back();
             int end = path.indexAtArc(slotArc);
             double a = path.arcOf(feet, f.pathIdx);

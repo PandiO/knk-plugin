@@ -24,7 +24,8 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * (a flat wall would let it slide out). It frees itself within the cap, taking the steps in order (its footsteps from
  * before the push are no way back, a side-step of one block does not reach a straight line out, the local leg does),
  * the run log's count never passes the cap, and no two tries of a spell come within {@code recovery-wait-ticks} of
- * each other. Needs Citizens.
+ * each other. With {@code local-legs-clearance} on (link M6, PandiO/knk-workspace#623): the ladder's local leg frees it,
+ * found by K&K's own search on its walk grid, and no leg needs the engine's search. Needs Citizens.
  */
 public final class NpcStuckLadderScenario implements Scenario<ScenarioScene> {
 
@@ -61,7 +62,8 @@ public final class NpcStuckLadderScenario implements Scenario<ScenarioScene> {
                 }
             })
             .act("start NPC navigation on Citizens", () -> npcs.set(ScenarioNpcs.start(scene, road,
-                NavigationSettings.defaults())))
+                NavigationSettings.builder().global(NavigationSettings.Overrides.of(
+                    NavigationSettings.LOCAL_LEGS_CLEARANCE, true)).build())))
             .cleanup("remove the NPC", () -> {
                 if (npcs.get() != null) {
                     npcs.get().stop();
@@ -113,6 +115,21 @@ public final class NpcStuckLadderScenario implements Scenario<ScenarioScene> {
                     }
                 }
                 return null;
+            })
+            .check("the ladder's local leg freed it, found by K&K without an engine search (M6)", () -> {
+                var m = npcs.get().metrics();
+                new NpcMovementReport(scene, name())
+                    .add("freed", "back-off %d, side-step %d, local leg %d, replan %d, not freed %d",
+                        m.total(Event.FREED_BACK_OFF), m.total(Event.FREED_SIDE_STEP), m.total(Event.FREED_LOCAL_LEG),
+                        m.total(Event.FREED_REPLAN), m.total(Event.NOT_FREED))
+                    .add("steps per spell max", m.spells().maxSteps())
+                    .add("recovery no path", m.total(Event.RECOVERY_NO_PATH))
+                    .add("legs", npcs.get().localLegs())
+                    .log("pushed into the pocket");
+                return m.total(Event.FREED_LOCAL_LEG) >= 1 && m.total(Event.LOCAL_LEG_KNK) >= 1
+                    && m.total(Event.LOCAL_LEG_ENGINE) == 0 && m.total(Event.LOCAL_LEG_NONE) == 0
+                    && m.total(Event.RECOVERY_NO_PATH) == 0 ? null
+                    : npcs.get().localLegs() + " | " + npcs.get().stats() + npcs.get().tail(20);
             })
             .check("the counters add up", () -> npcs.get().countersAddUp());
     }

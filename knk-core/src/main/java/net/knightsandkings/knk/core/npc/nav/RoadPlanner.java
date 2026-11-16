@@ -42,6 +42,23 @@ public interface RoadPlanner {
     }
 
     /**
+     * A junction the route passes that may be a plaza (implementation plan 4c.3 decision 6, link M5): the road-graph
+     * builder collapses a plaza into one junction, so the route runs to its middle and out again.
+     *
+     * @param centre the junction's floor point (on the route line)
+     * @param radius a designed plaza's radius in blocks, or 0 for a junction whose open floor the corridor measures
+     *               (an automatic plaza, or no plaza at all)
+     */
+    record PlazaCrossing(NavPoint centre, int radius) {
+        public PlazaCrossing {
+            Objects.requireNonNull(centre, "centre");
+            if (radius < 0) {
+                throw new IllegalArgumentException("radius must be >= 0 (0 = measure)");
+            }
+        }
+    }
+
+    /**
      * @param line         the route as floor points (the road's polyline) for {@link Status#FOUND}; for
      *                     {@link Status#BLOCKED} the part up to the blocking element (may be empty); else empty
      * @param reason       why there is no route, for logs and the caller
@@ -51,13 +68,27 @@ public interface RoadPlanner {
      * @param stillBlocked for {@link Status#BLOCKED}: whether the blocking element still blocks a subject now,
      *                     asked on the main thread when an event may have opened it; null when unknown (then the
      *                     route is planned again to find out)
+     * @param plazas       the junctions {@code line} passes that may be plazas, in route order (link M5; empty when
+     *                     unknown)
      */
     record RoadPlan(Status status, List<NavPoint> line, String reason, BlockingElement blocking,
-                    List<GateCrossing> gates, Predicate<AccessSubject> stillBlocked) {
+                    List<GateCrossing> gates, Predicate<AccessSubject> stillBlocked, List<PlazaCrossing> plazas) {
         public RoadPlan {
             Objects.requireNonNull(status, "status");
             line = line == null ? List.of() : List.copyOf(line);
             gates = gates == null ? List.of() : List.copyOf(gates);
+            plazas = plazas == null ? List.of() : List.copyOf(plazas);
+        }
+
+        /** Without plaza crossings. */
+        public RoadPlan(Status status, List<NavPoint> line, String reason, BlockingElement blocking,
+                        List<GateCrossing> gates, Predicate<AccessSubject> stillBlocked) {
+            this(status, line, reason, blocking, gates, stillBlocked, List.of());
+        }
+
+        /** The same plan with the junctions it passes that may be plazas (link M5). */
+        public RoadPlan withPlazas(List<PlazaCrossing> crossings) {
+            return new RoadPlan(status, line, reason, blocking, gates, stillBlocked, crossings);
         }
 
         public static RoadPlan found(List<NavPoint> line) {

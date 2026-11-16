@@ -67,6 +67,9 @@ public final class ScenarioNpcs {
     private final Map<Integer, int[]> lastBlock = new HashMap<>();
     private final Map<Integer, Integer> stillTicks = new HashMap<>();
     private long tick;
+    /** K&K's navigation time on the main thread (group and service ticks) and NPC ticks, for the cost per NPC. */
+    private long navNanos;
+    private long npcTicks;
     private int longestStill;
     private String longestStillWho = "-";
     private BukkitTask task;
@@ -135,7 +138,14 @@ public final class ScenarioNpcs {
     }
 
     private NpcMover traced;
+    /** The junctions on the scene's road that may be plazas, handed out with every road plan (link M5). */
+    private List<RoadPlanner.PlazaCrossing> plazas = List.of();
     private final List<Runnable> watchers = new ArrayList<>();
+
+    /** The junctions on the scene's road that may be plazas (link M5): each road plan names them, as the router does. */
+    public void plazas(List<RoadPlanner.PlazaCrossing> crossings) {
+        plazas = List.copyOf(crossings);
+    }
     private final Map<NavGroup, List<NpcMover>> groupMembers = new HashMap<>();
 
     /** Runs {@code watcher} every tick after the NPCs moved (a scenario's own per-tick check). */
@@ -150,8 +160,11 @@ public final class ScenarioNpcs {
 
     private void tick() {
         tick++;
+        long started = System.nanoTime();
         groups.tick();
         service.tick();
+        navNanos += System.nanoTime() - started;
+        npcTicks += movers.size();
         if (traced != null && tick % 5 == 0) {
             NpcMover t = traced;
             log.add(new LogLine(tick, "trace " + t.name() + " " + t.position().map(p -> String.format(Locale.ROOT,
@@ -163,6 +176,17 @@ public final class ScenarioNpcs {
         }
         for (Runnable watcher : watchers) {
             watcher.run();
+        }
+    }
+
+    /** Removes single NPCs (a scenario that runs singles, then a group, PandiO/knk-workspace#621). */
+    public void remove(List<NpcMover> singles) {
+        for (NpcMover mover : List.copyOf(singles)) {
+            service.unregister(mover.id());
+            mover.remove();
+            movers.remove(mover);
+            stillTicks.remove(mover.id());
+            lastBlock.remove(mover.id());
         }
     }
 
@@ -187,7 +211,9 @@ public final class ScenarioNpcs {
             leaderWaits |= group.leader().id() == mover.id() && group.holding();
             follower |= group.followerState(mover.id()) != null;
         }
-        if (at == null || follower || leaderWaits || state == null || state == NpcNavState.IDLE) {
+        // an NPC crowd awareness holds (link M4) waits in a queue: not "still" (the plan's "outside a queue")
+        if (at == null || follower || leaderWaits || state == null || state == NpcNavState.IDLE
+            || service.crowdHeld(mover.id())) {
             stillTicks.put(mover.id(), 0);
             return;
         }
@@ -241,7 +267,7 @@ public final class ScenarioNpcs {
                 }
             }
         }
-        return CompletableFuture.completedFuture(RoadPlanner.RoadPlan.found(line, crossed));
+        return CompletableFuture.completedFuture(RoadPlanner.RoadPlan.found(line, crossed).withPlazas(plazas));
     }
 
     private CompletableFuture<LocalLegPreparer.Prepared> prepare(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
@@ -370,6 +396,43 @@ public final class ScenarioNpcs {
         return longestStillWho;
     }
 
+    /** Starts the longest-still watch afresh (a second phase of a scenario). */
+    public void resetLongestStill() {
+        longestStill = 0;
+        longestStillWho = "-";
+    }
+
+    /**
+     * K&K's navigation time on the main thread per NPC per tick so far, in milliseconds (the group and navigation
+     * services' ticks; the budget of plan 4c.1 item 7 is 0.03 ms). NaN before the first NPC tick.
+     */
+    public double navMsPerNpcTick() {
+        return npcTicks == 0 ? Double.NaN : navNanos / 1e6 / npcTicks;
+    }
+
+    /**
+     * Corridor steering's share of {@link #navMsPerNpcTick} (plan 4c.3 decision 1.5, link M2): the time spent shaping
+     * stretches per NPC per tick so far, in milliseconds. NaN before the first NPC tick.
+     */
+    public double corridorMsPerNpcTick() {
+        return npcTicks == 0 ? Double.NaN : service.corridors().nanos() / 1e6 / npcTicks;
+    }
+
+    /** Crowd awareness's share of {@link #navMsPerNpcTick} (link M4), in milliseconds; NaN before the first NPC tick. */
+    public double crowdMsPerNpcTick() {
+        return npcTicks == 0 ? Double.NaN : service.crowdNanos() / 1e6 / npcTicks;
+    }
+
+    /** NPC ticks so far (one per NPC per tick), for a phase's cost per NPC per tick (link M5). */
+    public long npcTicks() {
+        return npcTicks;
+    }
+
+    /** The server ticks the NPCs have been ticked so far. */
+    public long ticks() {
+        return tick;
+    }
+
     /** Null when the counters of 4b.2 item 12 add up, else why not. */
     public String countersAddUp() {
         long spells = metrics.total(Event.STUCK_ENGINE) + metrics.total(Event.STUCK_NO_PROGRESS);
@@ -381,6 +444,15 @@ public final class ScenarioNpcs {
         }
         return freed == metrics.total(Event.RECOVERED) ? null
             : "recovered " + metrics.total(Event.RECOVERED) + " is not the sum of the freed_* events " + freed;
+    }
+
+    /** The stats line of the local legs (link M6), with K&K's search counters, for failure reasons. */
+    public String localLegs() {
+        var legs = service.localLegs();
+        return NpcNavigationMetrics.localLegsLine(metrics.total(Event.LOCAL_LEG_KNK), metrics.total(Event.LOCAL_LEG_ENGINE),
+            metrics.total(Event.LOCAL_LEG_NONE)) + String.format(java.util.Locale.ROOT,
+            " (K&K searches %d, found %d, %d cells, %.3f ms)", legs.searches(), legs.found(), legs.expansions(),
+            legs.nanos() / 1e6);
     }
 
     /** The stats line of the spells, for failure reasons. */
