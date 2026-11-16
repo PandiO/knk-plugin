@@ -112,6 +112,15 @@ class NpcRoadPlanningTest {
     }
 
     @Test
+    void theJunctionsTheRoutePassesComeWithThePlanAsPossiblePlazas() {
+        // link M5: West End -> B -> Cinix Keep passes the junction B; its open floor is measured on the NPC side
+        RoadPlan plan = plan(floor(0, 0), floor(200, 0));
+        assertEquals(List.of(new RoadPlanner.PlazaCrossing(new NavPoint(NavigationTestNetwork.WORLD, 100, 64, 0), 0)),
+            plan.plazas());
+        assertTrue(plan.line().contains(plan.plazas().get(0).centre()), "on the route's polyline");
+    }
+
+    @Test
     void aRouteWithoutGatesNamesNone() {
         assertTrue(plan(floor(0, 0), floor(90, 0)).gates().isEmpty());
     }
