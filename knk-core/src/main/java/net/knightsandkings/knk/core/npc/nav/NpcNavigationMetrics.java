@@ -48,6 +48,13 @@ public final class NpcNavigationMetrics implements MetricsCollector {
         LOCAL_LEG_ENGINE,
         /** A local leg found no path at all: K&K's search found nothing and the engine's search ended without one. */
         LOCAL_LEG_NONE,
+        /**
+         * A wait counted by crowd awareness (link M4): an NPC queued for its turn at a narrow place, stepped aside, or
+         * stood behind another NPC; counted once per wait, never as a stuck spell.
+         */
+        CROWD_WAIT,
+        /** An NPC met an oncoming one in a narrow place it entered second and stepped back out (link M4). */
+        CROWD_YIELD,
         /** A navigating NPC's feet dropped 3 or more blocks between two looks while it was off the ground. */
         FELL,
         /** Recovery steps used up (DESIGN §6): the route is planned again. */

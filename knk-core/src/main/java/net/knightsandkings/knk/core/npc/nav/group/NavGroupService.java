@@ -68,6 +68,15 @@ public final class NavGroupService {
             }
             return Double.NaN;
         });
+        // crowd awareness (link M4): a leader keeps its turn at a narrow place until its followers are through
+        ports.navigation().setGroupMembers(moverId -> {
+            for (NavGroup group : groups.values()) {
+                if (group.leader().id() == moverId) {
+                    return group.followerIds();
+                }
+            }
+            return new int[0];
+        });
         ports.navigation().setIdleStuckListener((moverId, kind) -> {
             for (NavGroup group : groups.values()) {
                 if (group.engineStuck(moverId, kind)) {

@@ -349,6 +349,50 @@ class NpcNavigationConfigTest {
     }
 
     @Test
+    void readsTheCrowdAwarenessKeyInEveryConfigLayer() throws Exception {
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.CROWD_AWARENESS, anywhere), "off by default");
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.CROWD_AWARENESS, anywhere).layer(),
+            "the shipped config.yml has the key");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                crowd-awareness: true
+                worlds:
+                  w2:
+                    crowd-awareness: false
+                regions:
+                  stairhouse:
+                    crowd-awareness: false
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        assertEquals(true, settings.value(NavigationSettings.CROWD_AWARENESS, anywhere), "the global layer");
+        assertEquals(false, settings.value(NavigationSettings.CROWD_AWARENESS, Scope.of("w2")), "a world turns it off");
+        net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings resolved =
+            net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+                new Scope("w", List.of("town", "stairhouse"), null, null));
+        assertEquals(false, resolved.crowdAwareness(), "a region turns it off");
+        assertEquals(true, net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere)
+            .crowdAwareness());
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                crowd-awareness: sometimes
+            """);
+        assertEquals(1, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
     void readsTheLocalLegsClearanceKeyInEveryConfigLayer() throws Exception {
         YamlConfiguration shipped = new YamlConfiguration();
         try (InputStreamReader reader = new InputStreamReader(

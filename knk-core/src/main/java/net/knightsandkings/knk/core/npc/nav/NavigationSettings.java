@@ -209,6 +209,16 @@ public final class NavigationSettings {
     /** The largest plaza radius, in blocks, the corridor widens to (plan 4c.3 decision 6: 16). */
     public static final Key<Integer> PLAZA_CORRIDOR_BLOCKS = new Key<>("plaza-corridor-blocks", 16,
         integer(4, 32), "the largest plaza radius in blocks that plaza lines widen the corridor to");
+    /**
+     * Crowd awareness (implementation plan 4c.3 decision 3, link M4; BEHAVIOR_MODEL NAV-26): an occupancy hash of the
+     * navigating NPCs' feet cells every 5 ticks; narrow places (free width under 2 blocks) taken in turns, one direction
+     * at a time, an NPC already in one first, then first come; NPCs that meet head-on in one: the second to enter steps
+     * aside; waiting behind someone, in a queue or yielding is counted as waiting, not as a stuck spell; recovery steps
+     * never end on an occupied cell. Off by default until the developer has tested it.
+     */
+    public static final Key<Boolean> CROWD_AWARENESS = new Key<>("crowd-awareness", false, bool(),
+        "take narrow places in turns (one direction at a time, first come), step aside for oncoming NPCs, and count "
+            + "waiting behind others as waiting, not stuck");
     /** Walking speed, as a factor, of a follower that is behind its slot; 1 = no catching up. */
     public static final Key<Double> GROUP_CATCH_UP_SPEED = new Key<>("group-catch-up-speed", 1.3,
         decimal(1, 2), "speed factor of a follower that is behind its slot (1 = off)");
@@ -217,7 +227,7 @@ public final class NavigationSettings {
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
         CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, LOCAL_LEGS_CLEARANCE, PLAZA_LINES,
-        PLAZA_CORRIDOR_BLOCKS, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
+        PLAZA_CORRIDOR_BLOCKS, CROWD_AWARENESS, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
         COLLIDABLE, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
         GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FORMATION_KEEPING, GROUP_LATERAL_SPACING_MIN, GROUP_SPACING_MIN,
         GROUP_LOOKAHEAD_BLOCKS, GROUP_FOLLOWERS_FINISH_TRIP, GROUP_REJOIN_BLOCKS, GROUP_REGROUP_BLOCKS,

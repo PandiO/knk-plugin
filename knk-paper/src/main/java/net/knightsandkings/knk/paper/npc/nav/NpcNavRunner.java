@@ -666,6 +666,8 @@ public final class NpcNavRunner {
         mostGroupRoadPlans = 0;
         mostLocalLegs = 0;
         metrics.spells().reset();
+        service.crowd().resetCounts();
+        service.occupancy().resetCounts();
         straySamples = 0;
         strayOver2 = 0;
         strayMax = 0;
@@ -720,6 +722,9 @@ public final class NpcNavRunner {
         // local legs (link M6): found by K&K's own search, walked with the engine's, or no path either way
         lines.add(NpcNavigationMetrics.localLegsLine(since(Event.LOCAL_LEG_KNK), since(Event.LOCAL_LEG_ENGINE),
             since(Event.LOCAL_LEG_NONE)));
+        // crowd awareness (link M4): waits for a turn, behind others or yielding; yields; the longest queue
+        lines.add(net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.statsLine(since(Event.CROWD_WAIT),
+            since(Event.CROWD_YIELD), service.crowd().longestQueue()));
         lines.add(String.format(Locale.ROOT,
             "waits: no allowed route %d (reported blocked %d), way ahead not loaded %d | chunk-unload pauses %d, resumes %d",
             since(Event.NO_ROUTE_WAIT), blockedReports, since(Event.UNLOADED_WAIT), since(Event.PAUSED),

@@ -12,11 +12,15 @@ import net.knightsandkings.knk.paper.scenario.NpcMovementScene;
 import net.knightsandkings.knk.paper.scenario.ScenarioScene;
 
 /**
- * Plan 4c.5 item 5 (link M1, PandiO/knk-workspace#621), in report mode: two rooms joined by a one-block doorway, 6
- * singles in each room walk to the other room at once. Reports arrivals, the longest still single, the ticks two or
- * more NPCs stood in the doorway's cell at once (overlap) and the most at once, stuck spells and the tick cost.
- * Later links check: all arrive, nobody still longer than its queue needs, no overlap with collision on, 0 stuck
- * spells (M4). Needs Citizens.
+ * Plan 4c.5 item 5 (link M1, PandiO/knk-workspace#621): two rooms joined by a one-block doorway, 6 singles in each room
+ * walk to the other room at once. Reports arrivals, the longest still single (outside a queue), the ticks two or more
+ * NPCs stood in the doorway's cell at once (overlap) and the most at once, crowd awareness's waits and yields, stuck
+ * spells and the tick cost.
+ * <p>
+ * Link M4 (PandiO/knk-workspace#626) runs it with {@code crowd-awareness} on (and {@code local-legs-clearance}, since
+ * every trip here is a short local leg through the doorway) and checks plan 4c.4 item 4.3: all arrive, nobody waits
+ * longer than the queue ahead of it needs, nobody still longer than 3 s outside a queue, 0 stuck spells. Needs
+ * Citizens.
  */
 public final class NpcDoorwayCrowdScenario implements Scenario<ScenarioScene> {
 
@@ -35,7 +39,7 @@ public final class NpcDoorwayCrowdScenario implements Scenario<ScenarioScene> {
 
     @Override
     public String description() {
-        return "Report: 6 singles from each side through a one-block doorway at once (collision "
+        return "6 singles from each side through a one-block doorway at once, crowd awareness on (collision "
             + (collisionOn ? "on" : "off") + ")";
     }
 
@@ -52,7 +56,7 @@ public final class NpcDoorwayCrowdScenario implements Scenario<ScenarioScene> {
         int[] mostInDoor = {0};
         plan.act("paste the two rooms and the doorway", () -> built.set(rooms.build()))
             .act("start NPC navigation on Citizens", () -> npcs.set(ScenarioNpcs.start(scene, rooms.doorLoop(),
-                NpcMovementReport.settings(collisionOn))))
+                NpcMovementReport.settings(collisionOn, true, true, false, false, true))))
             .cleanup("remove the NPCs", () -> {
                 if (npcs.get() != null) {
                     npcs.get().stop();
@@ -85,16 +89,29 @@ public final class NpcDoorwayCrowdScenario implements Scenario<ScenarioScene> {
             })
             .await("every trip ends or the time is up", MAX_TICKS + 20,
                 () -> trips.get().allEnded() || npcs.get().ticks() - started[0] >= MAX_TICKS)
-            .check("report the numbers (report mode, M1)", () -> {
+            .check("all arrive, no wait longer than the queue needs, nobody still over 3 s, 0 stuck spells (M4)", () -> {
+                java.util.List<String> failed = new ArrayList<>();
+                if (!trips.get().allEnded() || trips.get().arrived() != trips.get().movers().size()) {
+                    failed.add("arrived " + trips.get().arrivals() + " (" + trips.get().others() + ")");
+                }
+                String crowd = report.crowdFailures(npcs.get());
+                if (crowd != null) {
+                    failed.add(crowd);
+                }
+                if (npcs.get().longestStillTicks() > NpcMovementReport.MAX_STILL_TICKS) {
+                    failed.add(String.format(java.util.Locale.ROOT, "still for %.1f s outside a queue (%s)",
+                        npcs.get().longestStillTicks() / 20.0, npcs.get().longestStillWho()));
+                }
                 report.add("scene", built.get())
                     .add("arrived", trips.get().arrivals())
                     .add("others", trips.get().others())
                     .add("trips", trips.get().tripTimes())
                     .add("overlap in the doorway", overlapTicks[0] + " ticks (most at once " + mostInDoor[0] + ")")
                     .add("longest still within 3 blocks of the doorway", nearDoor.describe())
+                    .crowd(npcs.get())
                     .common(npcs.get(), rooms)
                     .log("6 + 6 singles through the doorway");
-                return null;
+                return failed.isEmpty() ? null : String.join("; ", failed);
             });
     }
 }
