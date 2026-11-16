@@ -517,6 +517,14 @@ public final class NavigationService implements SiegeMatchObserver {
 
     // ==================== NPC navigation (PandiO/knk-workspace#360) ====================
 
+    /**
+     * The road graph of a world as the router has it now (link B1, PandiO/knk-workspace#670: the NPC navigation
+     * snapshot takes the edges round a route); null or empty when there is none.
+     */
+    public RoadNetworkSnapshot roadNetwork(String world) {
+        return deps.snapshots().apply(world);
+    }
+
     /** The walk-leg capture, search and executor, or null when walk paths are off ({@code navigation.walk.enabled}). */
     public Walk walk() {
         return deps.walk();
