@@ -245,9 +245,11 @@ public final class CorridorShaper {
         }
         long start = nanoTime.getAsLong();
         int[] misses = new int[1];
-        ShapedLine line = shapeNow(world, key.feet(), key.indexes(), options, keepLast, near, misses);
+        long[] rayReads = new long[1];
+        ShapedLine line = shapeNow(world, key.feet(), key.indexes(), options, keepLast, near, misses, rayReads);
         nanos += nanoTime.getAsLong() - start;
         shaped++;
+        reads += rayReads[0];
         plazaLines += line.plazaLines();
         plazaMisses += misses[0];
         for (Corridor c : line.corridors()) {
@@ -276,12 +278,6 @@ public final class CorridorShaper {
         return out;
     }
 
-    /** A plaza's footprint as the corridor covers it: its radius, at most {@code plaza-corridor-blocks}. */
-    static Corridor.Disc disc(PlazaCrossing p, Options options) {
-        double r = p.radius() > 0 ? Math.min(p.radius(), options.plazaBlocks()) : options.plazaBlocks();
-        return new Corridor.Disc(p.centre().x(), p.centre().z(), r);
-    }
-
     static ShapedLine shapeNow(NavWorld world, List<NavPoint> feet, List<Integer> indexes, Options options,
                                boolean keepLast) {
         return shapeNow(world, feet, indexes, options, keepLast, List.of(), new int[1]);
@@ -289,13 +285,60 @@ public final class CorridorShaper {
 
     static ShapedLine shapeNow(NavWorld world, List<NavPoint> feet, List<Integer> indexes, Options options,
                                boolean keepLast, List<PlazaCrossing> plazas, int[] misses) {
+        return shapeNow(world, feet, indexes, options, keepLast, plazas, misses, new long[1]);
+    }
+
+    /** A plaza junction on the stretch with its footprint's radius worked out ({@link #resolve}). */
+    record Plaza(NavPoint centre, double radius) {
+    }
+
+    /**
+     * A plaza junction with its footprint's radius worked out: a designed plaza's radius, at most {@code plaza-corridor-blocks}; else the open floor round the junction less
+     * {@code wall-clearance} (the line starts clear of the plaza's walls), or null when it is no wider than the
+     * corridor (a junction of streets).
+     */
+    static Plaza resolve(NavWorld world, List<NavPoint> feet, PlazaCrossing p, Options options, long[] reads) {
+        NavPoint at = null;
+        double atD = Double.MAX_VALUE;
+        for (NavPoint f : feet) {
+            double d = f.horizontalDistance(p.centre());
+            if (Math.abs(f.blockY() - 1 - p.centre().blockY()) <= 2 && d < atD) {
+                atD = d;
+                at = f;
+            }
+        }
+        if (at == null || atD > 2.5) {
+            return null;
+        }
+        double radius;
+        if (p.radius() > 0) {
+            radius = Math.min(p.radius(), options.plazaBlocks());
+        } else {
+            double open = PlazaLine.openRadius(world, at, options.plazaBlocks(), reads);
+            if (open <= options.halfWidth()) {
+                return null;
+            }
+            radius = open - options.wallClearance();
+        }
+        return new Plaza(new NavPoint(at.world(), at.x(), at.blockY() - 1, at.z()), radius);
+    }
+
+    static ShapedLine shapeNow(NavWorld world, List<NavPoint> feet, List<Integer> indexes, Options options,
+                               boolean keepLast, List<PlazaCrossing> plazas, int[] misses, long[] rayReads) {
         List<NavPoint> outPoints = new ArrayList<>();
         List<Integer> outIndexes = new ArrayList<>();
         List<FreeWidth> outWidths = new ArrayList<>();
         List<Corridor> corridors = new ArrayList<>();
+        // a junction's open floor is measured first, with rays: one no wider than the corridor is no plaza and costs no
+        // disc; a plaza's corridor covers only its footprint
         List<Corridor.Disc> discs = new ArrayList<>();
+        List<Plaza> resolved = new ArrayList<>();
         for (PlazaCrossing p : plazas) {
-            discs.add(disc(p, options));
+            Plaza r = resolve(world, feet, p, options, rayReads);
+            if (r != null) {
+                resolved.add(r);
+                discs.add(new Corridor.Disc(r.centre().x(), r.centre().z(), r.radius() + 1));
+            }
         }
         int chokepoints = 0;
         int placed = 0;
@@ -312,7 +355,7 @@ public final class CorridorShaper {
             }
             corridors.add(corridor);
             boolean pinLast = keepLast && e == feet.size();
-            Piece piece = new Piece(corridor, feet.subList(s, e), indexes.subList(s, e), options, pinLast, plazas);
+            Piece piece = new Piece(corridor, feet.subList(s, e), indexes.subList(s, e), options, pinLast, resolved);
             chokepoints += piece.shape();
             placed += piece.plazaLines;
             misses[0] += piece.plazaMisses;
@@ -346,7 +389,7 @@ public final class CorridorShaper {
         private final List<Integer> indexes;
         private final Options options;
         private final boolean pinLast;
-        private final List<PlazaCrossing> plazas;
+        private final List<Plaza> plazas;
         private final String world;
         final List<NavPoint> outPoints = new ArrayList<>();
         final List<Integer> outIndexes = new ArrayList<>();
@@ -355,7 +398,7 @@ public final class CorridorShaper {
         int plazaMisses;
 
         Piece(Corridor corridor, List<NavPoint> feet, List<Integer> indexes, Options options, boolean pinLast,
-              List<PlazaCrossing> plazas) {
+              List<Plaza> plazas) {
             this.corridor = corridor;
             this.feet = feet;
             this.indexes = indexes;
@@ -466,13 +509,13 @@ public final class CorridorShaper {
          */
         private List<Dense> placePlazas(List<Dense> line) {
             List<Dense> out = line;
-            for (PlazaCrossing p : plazas) {
+            for (Plaza p : plazas) {
                 out = placePlaza(out, p);
             }
             return out;
         }
 
-        private List<Dense> placePlaza(List<Dense> line, PlazaCrossing p) {
+        private List<Dense> placePlaza(List<Dense> line, Plaza p) {
             double cx = p.centre().x();
             double cz = p.centre().z();
             int cf = p.centre().blockY();
@@ -489,17 +532,7 @@ public final class CorridorShaper {
             if (at < 0 || atD > 2.5) {
                 return line; // the junction is in another piece of the stretch
             }
-            double radius;
-            if (p.radius() > 0) {
-                radius = Math.min(p.radius(), options.plazaBlocks());
-            } else {
-                double open = PlazaLine.openRadius(corridor, line.get(at).x(), line.get(at).z(), options.plazaBlocks());
-                if (open <= options.halfWidth()) {
-                    return line; // a junction of streets, no plaza: the corridor already covers it
-                }
-                // the footprint ends wall-clearance short of the plaza's edge, so the line starts clear of its walls
-                radius = open - options.wallClearance();
-            }
+            double radius = p.radius();
             int a = at;
             while (a - 1 >= 0 && !line.get(a - 1).pinned() && within(line.get(a - 1), cx, cz, radius)) {
                 a--;

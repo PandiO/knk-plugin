@@ -246,8 +246,9 @@ class PlazaLineTest {
         // two 3-wide streets crossing between houses
         world.walls(-6, 13, 13, 13).walls(17, 13, 36, 13).walls(-6, 17, 13, 17).walls(17, 17, 36, 17);
         world.walls(13, -6, 13, 13).walls(17, -6, 17, 13).walls(13, 17, 13, 36).walls(17, 17, 17, 36);
-        assertTrue(PlazaLine.openRadius(Corridor.build(world, vLine(), 16, false,
-            List.of(new Corridor.Disc(15.5, 15.5, 16))), 15.5, 15.5, 16) <= 4);
+        long[] reads = new long[1];
+        assertTrue(PlazaLine.openRadius(world, world.feet(15.5, 15.5), 16, reads) <= 4);
+        assertTrue(reads[0] < 800, "a few rays, no plaza-sized corridor: " + reads[0]);
 
         CorridorShaper.ShapedLine shaped = shape(vLine(), PLAZAS, 0);
         CorridorShaper.ShapedLine m2 = new CorridorShaper(tick::get, null).shape(world, vLine(),
@@ -307,8 +308,7 @@ class PlazaLineTest {
     void theOpenRadiusOfTheScenariosPlazaIsItsHalfSize() {
         plaza();
         well();
-        Corridor c = Corridor.build(world, vLine(), 4, false, List.of(new Corridor.Disc(15.5, 15.5, 16)));
-        double r = PlazaLine.openRadius(c, 15.5, 15.5, 16);
+        double r = PlazaLine.openRadius(world, world.feet(15.5, 15.5), 16, new long[1]);
         assertTrue(r >= 7 && r <= 9, "about the plaza's half size: " + r);
     }
 }

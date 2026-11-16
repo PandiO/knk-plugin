@@ -50,15 +50,62 @@ public final class PlazaLine {
     }
 
     /**
-     * The open floor round a junction: the {@link #RAY_RANK}+1-th shortest of {@link #RAYS} rays from it to a face
-     * that stops a body, a drop, another level or a region the line does not pass, each at most {@code max}. A
-     * junction of narrow streets measures about the streets' half width; a plaza its half size.
+     * The open floor round a junction: the {@link #RAY_RANK}+1-th shortest of {@link #RAYS} rays from it, each at most
+     * {@code max}. A junction of narrow streets measures about the streets' half width; a plaza its half size. Read
+     * straight from the world before any corridor is built (so a junction of streets costs a few rays, not a
+     * plaza-sized corridor): each ray walks cell by cell
+     * from {@code feet} while the next cell has a standable floor within a step of the last, the body's headroom and
+     * the same WorldGuard regions as {@code feet}'s cell. {@code reads[0]} counts the world reads.
      */
-    public static double openRadius(Corridor corridor, double x, double z, double max) {
+    public static double openRadius(net.knightsandkings.knk.core.npc.nav.NavWorld world,
+                                    net.knightsandkings.knk.core.npc.nav.NavPoint feet, double max, long[] reads) {
+        String w = feet.world();
+        java.util.Set<String> regions = world.regionsAt(w, feet.blockX(), feet.blockY(), feet.blockZ());
+        reads[0]++;
         double[] rays = new double[RAYS];
         for (int k = 0; k < RAYS; k++) {
             double a = 2 * Math.PI * k / RAYS;
-            rays[k] = corridor.reach(x, z, Math.cos(a), Math.sin(a), max);
+            double dx = Math.cos(a);
+            double dz = Math.sin(a);
+            int floor = feet.blockY() - 1;
+            int cx = feet.blockX();
+            int cz = feet.blockZ();
+            double t = 0;
+            double reached = max;
+            while (t < max) {
+                t = Math.min(max, t + SAMPLE);
+                int nx = (int) Math.floor(feet.x() + dx * t);
+                int nz = (int) Math.floor(feet.z() + dz * t);
+                if (nx == cx && nz == cz) {
+                    continue;
+                }
+                int found = Integer.MIN_VALUE;
+                reads[0]++;
+                if (world.isLoaded(w, nx, nz)) {
+                    for (int d : new int[] {0, 1, -1}) {
+                        reads[0] += 2;
+                        if (world.isStandableFloor(w, nx, floor + d, nz)
+                            && world.freeHeight(w, nx, floor + d, nz) >= net.knightsandkings.knk.core.npc.nav.NavGeometry.BODY_HEIGHT) {
+                            found = floor + d;
+                            break;
+                        }
+                    }
+                }
+                if (found != Integer.MIN_VALUE) {
+                    reads[0]++;
+                    if (!world.regionsAt(w, nx, found + 1, nz).equals(regions)) {
+                        found = Integer.MIN_VALUE;
+                    }
+                }
+                if (found == Integer.MIN_VALUE) {
+                    reached = Math.max(0, t - SAMPLE);
+                    break;
+                }
+                floor = found;
+                cx = nx;
+                cz = nz;
+            }
+            rays[k] = reached;
         }
         Arrays.sort(rays);
         return rays[RAY_RANK];
