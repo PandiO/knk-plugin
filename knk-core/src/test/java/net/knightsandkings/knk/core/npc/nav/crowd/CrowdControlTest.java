@@ -222,6 +222,133 @@ class CrowdControlTest {
         assertEquals(Kind.GO, d.kind());
         assertTrue(d.overdue(), "let go after 30 s");
         assertEquals(1, crowd.overdue());
+        // link B3: why it was let go
+        assertEquals(1, crowd.releases().size());
+        CrowdControl.Release r = crowd.releases().get(0);
+        assertEquals(2, r.npc());
+        assertEquals(0, r.earlier());
+        assertEquals(1, r.holders().size());
+        assertEquals(1, r.holders().get(0).npc(), "1 held the turn");
+        assertTrue(r.holders().get(0).blocks(), "and alone stopped 2");
+        assertFalse(r.holders().get(0).passed());
+        crowd.resetCounts();
+        assertTrue(crowd.releases().isEmpty(), "reset with the counts");
+    }
+
+    // ==================== link B3: turns judged in 3D ====================
+
+    private static NavPoint at(double x, double y, double z) {
+        return new NavPoint(CrowdWorld.W, x, y, z);
+    }
+
+    @Test
+    void aHolderOnTheFloorAboveOrUnderThePlaceHasLeftItsTurn() {
+        CrowdWorld world = CrowdWorld.doorway(10, 5);
+        where.put(1, feet(11.5, 5.5)); // westward, a step before the doorway
+        update();
+        assertEquals(Kind.GO, decide(world, 1, feet(4.5, 5.5)).kind());
+        assertTrue(crowd.hasTurn(1));
+        where.put(2, feet(7.5, 5.5)); // eastward, arrives
+        update();
+        assertEquals(Kind.WAIT, decide(world, 2, feet(16.5, 5.5)).kind(), "one direction at a time");
+
+        where.put(1, at(10.5, 68, 5.5)); // over the doorway, on the floor above (as on a stacked flight)
+        update();
+        assertFalse(crowd.hasTurn(1), "it left the place's floor: its turn ended");
+        assertEquals(Kind.GO, crowd.decideHeld(world, 2, where.get(2), tick).kind(), "the other goes at once");
+        assertEquals(0, crowd.overdue());
+    }
+
+    @Test
+    void aHolderThatFellUnderThePlaceHasLeftItsTurnToo() {
+        CrowdWorld world = CrowdWorld.doorway(10, 5);
+        where.put(1, feet(10.5, 5.5)); // in the doorway
+        update();
+        assertEquals(Kind.GO, decide(world, 1, feet(4.5, 5.5)).kind());
+        where.put(1, at(10.5, 61, 5.5)); // fell under it
+        update();
+        assertFalse(crowd.hasTurn(1));
+    }
+
+    @Test
+    void aStepOrAJumpInThePlaceKeepsTheTurn() {
+        CrowdWorld world = CrowdWorld.doorway(10, 5);
+        where.put(1, feet(10.5, 5.5));
+        update();
+        assertEquals(Kind.GO, decide(world, 1, feet(4.5, 5.5)).kind());
+        where.put(2, feet(7.5, 5.5));
+        for (double y : new double[] {65.5, 66.0, 67.25, 64.0}) {
+            where.put(1, at(10.5, y, 5.5));
+            update();
+            assertTrue(crowd.hasTurn(1), "feet at " + y + " are still the doorway's floor");
+            assertEquals(Kind.WAIT, decide(world, 2, feet(16.5, 5.5)).kind(), "the oncoming one still waits");
+        }
+    }
+
+    @Test
+    void noQueueFormsBehindAHolderStandingOnTheFloorAbove() {
+        CrowdWorld world = CrowdWorld.doorway(10, 5);
+        crowd.setGroupMembers(id -> id == 1 ? new int[] {5} : new int[0]);
+        where.put(1, feet(8.5, 5.5)); // eastward leader
+        where.put(5, feet(6.5, 5.5)); // its follower
+        update();
+        assertEquals(Kind.GO, decide(world, 1, feet(16.5, 5.5)).kind());
+        // the leader climbed on: it stands over the doorway's entry a floor up; its follower is in the doorway
+        where.put(1, at(9.0, 69, 5.5));
+        where.put(5, feet(10.5, 5.5));
+        where.put(2, feet(7.0, 5.5)); // a single the same way
+        update();
+        assertTrue(crowd.hasTurn(1), "its follower in the doorway keeps the leader's turn");
+        assertEquals(Kind.GO, decide(world, 2, feet(16.5, 5.5)).kind(),
+            "the leader a floor up is not 'just inside the entry': the single goes, a block behind the follower");
+        where.put(3, feet(13.5, 5.5)); // oncoming
+        update();
+        assertEquals(Kind.WAIT, decide(world, 3, feet(4.5, 5.5)).kind(),
+            "but nobody of the other direction cuts into the column while a follower is in it");
+    }
+
+    @Test
+    void aFollowerOnTheFloorAboveDoesNotKeepItsLeadersTurn() {
+        CrowdWorld world = CrowdWorld.doorway(10, 5);
+        crowd.setGroupMembers(id -> id == 1 ? new int[] {5} : new int[0]);
+        where.put(1, feet(8.5, 5.5));
+        where.put(5, feet(6.5, 5.5));
+        update();
+        assertEquals(Kind.GO, decide(world, 1, feet(16.5, 5.5)).kind());
+        where.put(1, feet(14.5, 5.5)); // the leader is through
+        where.put(5, at(10.0, 69, 5.5)); // its follower is over the doorway on the floor above, not in it
+        update();
+        assertFalse(crowd.hasTurn(1), "a follower a floor up keeps no turn here");
+    }
+
+    @Test
+    void aFlightsPlaceRisesWithItsStepsAndAFlightAboveIsAnotherLevel() {
+        // a 1-wide flight going east, one step up per block: feet cells x 10..13 at y 65..68
+        CrowdControl.Place flight = new CrowdControl.Place(1, CrowdWorld.W, 1, 0);
+        java.util.Set<Long> cells = new java.util.HashSet<>();
+        for (int i = 0; i < 4; i++) {
+            cells.add(Occupancy.pack(10 + i, 65 + i, 5));
+        }
+        flight.add(cells, 65);
+        assertEquals(1.0, flight.slope, 1e-9, "a step up per block");
+        assertEquals(0, flight.levelGap(at(11.5, 66, 5.5)), 1e-9, "on its step");
+        assertEquals(0, flight.levelGap(at(11.5, 66.5, 5.5)), 1e-9, "half a step up: its own cell");
+        assertFalse(flight.offLevel(at(12.5, 68.2, 5.5)), "a step above its step still counts");
+        assertTrue(flight.offLevel(at(11.5, 69, 5.5)), "the flight stacked above (feet 3 up)");
+        assertTrue(flight.offLevel(at(11.5, 63, 5.5)), "the flight under it");
+        assertTrue(flight.offLevel(at(11.5, 74, 5.5)), "the stair house's next flight up (8 above)");
+        // before the flight: the flat landing and the flight's own steps carried on both count
+        assertFalse(flight.offLevel(at(7.5, 65, 5.5)), "on the landing before it");
+        assertFalse(flight.offLevel(at(7.5, 62, 5.5)), "on the steps leading up to it");
+        assertTrue(flight.offLevel(at(7.5, 68, 5.5)), "a floor up, over the landing");
+        // after it: the landing at the top
+        assertFalse(flight.offLevel(at(15.0, 68, 5.5)), "on the top landing");
+        assertTrue(flight.offLevel(at(15.0, 64.5, 5.5)), "under the top landing");
+        // a flat doorway stays flat
+        CrowdControl.Place flat = new CrowdControl.Place(2, CrowdWorld.W, 1, 0);
+        flat.add(java.util.Set.of(Occupancy.pack(10, 65, 5)), 65);
+        assertEquals(0, flat.slope, 1e-9);
+        assertTrue(flat.offLevel(at(6.5, 68, 5.5)), "flat: no slope carried on before it");
     }
 
     @Test

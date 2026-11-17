@@ -35,6 +35,12 @@ import net.knightsandkings.knk.core.npc.nav.corridor.FreeWidth;
  * without its turn while one of the other direction entered before it steps back out to its queue spot (a yield) and
  * waits there. A queue never holds an NPC longer than {@link #MAX_WAIT_TICKS} (a deadlock guard).
  *
+ * <p><b>In 3D</b> (link B3, PandiO/knk-workspace#672): a place has a floor along its axis, flat or a flight's slope
+ * ({@link Place#levelGap}). Progress and the distance across are measured along it; feet {@link #LEVEL_GAP} or more
+ * above or below it are on another level. A holder on another level has passed (it climbed on to the flight above, or
+ * fell): its turn ends unless a follower on the place's floor still keeps it. A holder or follower on another level
+ * never stops a waiter, and a follower there keeps no turn, so no queue forms against an NPC a flight up or down.
+ *
  * <p><i>Future updates (plan 4c.7), hooks only:</i> {@link #earlier} is the one place that orders two NPCs; an
  * authority value per NPC (item 1) and closed formations first (item 2) would go there.
  *
@@ -60,12 +66,21 @@ public final class CrowdControl {
      * next NPC of the other direction starts from its queue spot, at least {@link #FIRST_GAP} away.
      */
     public static final double PASSED = 0.5;
+    /**
+     * Feet this far above or below the place's floor are on another level (link B3, PandiO/knk-workspace#672): a step
+     * (1) or a jump (1.25) still counts as the place's floor, a flight or floor stacked above or below (feet 3 or more
+     * apart) does not. Measured from the band of feet heights the floor allows at that point along the axis
+     * ({@link Place#levelGap}).
+     */
+    public static final double LEVEL_GAP = 1.5;
     /** A queue never holds an NPC longer than this (30 s): it then goes (logged). */
     public static final long MAX_WAIT_TICKS = 600;
     /** A turn held longer than this (30 s) is dropped (the NPC is stuck in the place; recovery has it). */
     public static final long STALE_TICKS = 600;
     /** The free-width cache is cleared this often. */
     public static final long WIDTH_CACHE_TICKS = 200;
+    /** The steepest floor a place is fitted with (a full-block stair rises 1 per block). */
+    static final double MAX_SLOPE = 1.0;
     /** Narrow runs closer than this along the way are one place. */
     static final double MERGE_GAP = 2.0;
     /** Points looked at along the way, this far apart. */
@@ -109,6 +124,11 @@ public final class CrowdControl {
         double cz;
         double cy;
         double halfLength;
+        /** The floor along the axis (feet level at the middle, rise per block along +axis, the cells' span). */
+        double levelMid;
+        double slope;
+        double sLo;
+        double sHi;
         final List<Ticket> entered = new ArrayList<>();
         final List<Ticket> waiting = new ArrayList<>();
         long lastUsed;
@@ -154,6 +174,57 @@ public final class CrowdControl {
             return Math.abs(-(feet.x() - cx) * az + (feet.z() - cz) * ax);
         }
 
+        /**
+         * How far a feet position is above or below the place's floor at its point along the axis, 0 on it (link B3).
+         * The floor is the cells' feet level fitted along the axis (a flat place, or a flight's slope). Over the cells
+         * a body's feet may be anywhere in its cell, so the band is [level, level + 1). Before and after the cells the
+         * band spans from the end's level to the slope carried on for up to {@link #APPROACH} blocks: the flat landing
+         * at a flight's ends and the flight's own steps both count.
+         */
+        double levelGap(NavPoint feet) {
+            double s = progress(1, feet);
+            double end = levelMid + slope * Math.max(sLo, Math.min(sHi, s));
+            double on = levelMid + slope * Math.max(sLo - APPROACH, Math.min(sHi + APPROACH, s));
+            double lo = Math.min(end, on);
+            double hi = Math.max(end, on) + 1;
+            double y = feet.y();
+            return y < lo ? lo - y : y > hi ? y - hi : 0;
+        }
+
+        /** Whether a feet position is on another level than the place's floor ({@link #LEVEL_GAP} or more off it). */
+        boolean offLevel(NavPoint feet) {
+            return levelGap(feet) >= LEVEL_GAP;
+        }
+
+        /** Fits the floor along the axis to the cells' feet levels (least squares of level over progress). */
+        private void fitLevel() {
+            double n = cells.size();
+            double ss = 0;
+            double sy = 0;
+            double lo = Double.MAX_VALUE;
+            double hi = -Double.MAX_VALUE;
+            for (long c : cells) {
+                double along = (unpackX(c) + 0.5 - cx) * ax + (unpackZ(c) + 0.5 - cz) * az;
+                ss += along;
+                sy += unpackY(c);
+                lo = Math.min(lo, along);
+                hi = Math.max(hi, along);
+            }
+            double ms = ss / n;
+            double my = sy / n;
+            double cov = 0;
+            double var = 0;
+            for (long c : cells) {
+                double along = (unpackX(c) + 0.5 - cx) * ax + (unpackZ(c) + 0.5 - cz) * az;
+                cov += (along - ms) * (unpackY(c) - my);
+                var += (along - ms) * (along - ms);
+            }
+            slope = var < 1e-6 ? 0 : Math.max(-MAX_SLOPE, Math.min(MAX_SLOPE, cov / var));
+            levelMid = my - slope * ms;
+            sLo = lo - 0.5;
+            sHi = hi + 0.5;
+        }
+
         void add(Set<Long> more, int y) {
             if (cells.isEmpty()) {
                 cy = y;
@@ -173,6 +244,7 @@ public final class CrowdControl {
                 half = Math.max(half, along + 0.5);
             }
             halfLength = half;
+            fitLevel();
         }
     }
 
@@ -343,7 +415,7 @@ public final class CrowdControl {
         if (inside) {
             Ticket oncoming = null;
             for (Ticket e : p.entered) {
-                if (e.dir != t.dir && (oncoming == null || e.enteredSeq < oncoming.enteredSeq)) {
+                if (e.dir != t.dir && !elsewhere(e) && (oncoming == null || e.enteredSeq < oncoming.enteredSeq)) {
                     oncoming = e;
                 }
             }
@@ -377,7 +449,7 @@ public final class CrowdControl {
     private boolean mayEnter(Ticket t) {
         Place p = t.place;
         for (Ticket e : p.entered) {
-            if (e.dir != t.dir) {
+            if (e.dir != t.dir && !elsewhere(e)) {
                 return false;
             }
         }
@@ -388,11 +460,21 @@ public final class CrowdControl {
         }
         for (Ticket e : p.entered) {
             NavPoint pos = occupancy.positionOf(e.npc);
-            if (pos != null && p.progress(e.dir, pos) < -p.halfLength + QUEUE_SPACING) {
+            if (pos != null && !p.offLevel(pos) && p.progress(e.dir, pos) < -p.halfLength + QUEUE_SPACING) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * Whether a turn's holder and every follower that keeps its turn stand on another level than the place (link B3):
+     * nobody of that turn is in the place, so it stops nobody. A holder off the place's floor whose followers are still
+     * in it keeps its turn for them, as on the place's own level.
+     */
+    private boolean elsewhere(Ticket e) {
+        NavPoint pos = occupancy.positionOf(e.npc);
+        return pos != null && e.place.offLevel(pos) && membersClear(e);
     }
 
     /**
@@ -441,8 +523,12 @@ public final class CrowdControl {
         waits++;
     }
 
+    /**
+     * Whether a turn's holder is through the place: another world, beyond its end, far to the side, or (link B3) on
+     * another level than its floor: it climbed on to the flight above, or fell under it.
+     */
     private boolean passed(Place p, int dir, NavPoint at) {
-        return !at.world().equals(p.world) || p.progress(dir, at) > p.halfLength + PASSED
+        return !at.world().equals(p.world) || p.offLevel(at) || p.progress(dir, at) > p.halfLength + PASSED
             || p.lateral(at) > LOOK_AHEAD + p.halfLength;
     }
 
@@ -463,8 +549,8 @@ public final class CrowdControl {
 
     /** Whether a follower standing at {@code pos} keeps its leader's turn (in the place or just before it). */
     private static boolean memberKeepsTurn(Place p, int dir, NavPoint pos) {
-        if (!pos.world().equals(p.world)) {
-            return false;
+        if (!pos.world().equals(p.world) || p.offLevel(pos)) {
+            return false; // a follower on the flight above or below is not in the place (link B3)
         }
         double s = p.progress(dir, pos);
         return s >= -p.halfLength - MEMBER_BEFORE && s <= p.halfLength + 0.3 && p.lateral(pos) <= 3;
