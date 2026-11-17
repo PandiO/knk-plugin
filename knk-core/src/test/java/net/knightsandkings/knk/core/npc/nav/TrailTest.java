@@ -121,6 +121,15 @@ class TrailTest {
     }
 
     @Test
+    void aWaypointTheNpcHasNotReachedYetStays() {
+        // before the zig (z 24.9 < 25.5): beyond it along the diagonal back-step, but further from the next waypoint
+        FakeNavWorld world = new FakeNavWorld();
+        List<NavPoint> way = List.of(feet(16.5, 65, 25.5), feet(15.5, 65, 26.5), feet(15.5, 65, 27.5));
+
+        assertEquals(way, Trail.fromFeet(world, feet(15.4, 65, 24.9), way));
+    }
+
+    @Test
     void aWaypointAheadIsNeverSkipped() {
         // a corner kept clear: the NPC before the corner waypoint keeps it although the next one is a straight walk
         FakeNavWorld world = new FakeNavWorld();

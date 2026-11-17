@@ -107,7 +107,8 @@ public final class Trail {
 
     /**
      * The list without its first waypoints the NPC is already past (link B2): a waypoint is dropped while the feet are
-     * beyond it along the step to the next one, on its level (less than a block up or down), and the next one is a
+     * beyond it along the step to the next one and no further from the next one than the waypoint is (0.1 slack), on
+     * its level (less than a block up or down), and the next one is a
      * straight walk from the feet ({@link NavGeometry#straightWalkable}). So the NPC does not turn back to a waypoint
      * behind it when the next stretch is appended. Nothing ahead of the NPC is skipped: corners kept clear
      * ({@link CornerClearance}), landings and waypoints on another level stay.
@@ -121,6 +122,7 @@ public final class Trail {
             NavPoint p = way.get(from);
             NavPoint q = way.get(from + 1);
             if (Math.abs(p.y() - feet.y()) >= 1 || Math.abs(q.y() - feet.y()) >= 1 || beyond(p, q, feet) < 0.1
+                || feet.horizontalDistance(q) > p.horizontalDistance(q) + 0.1
                 || !NavGeometry.straightWalkable(world, feet, q)) {
                 break;
             }
