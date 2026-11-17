@@ -153,6 +153,12 @@ public final class SnapshotReplay {
             scene.worldY(0) + real[1] - frame[1], scene.worldZ(0) + real[2] - frame[2]);
     }
 
+    /** A scene point as real coordinates (the inverse of {@link #inScene}). */
+    public double[] real(ScenarioScene scene, NavPoint p) {
+        return new double[] {p.x() - scene.worldX(0) + frame[0], p.y() - scene.worldY(0) + frame[1],
+            p.z() - scene.worldZ(0) + frame[2]};
+    }
+
     /** The stored route line in the scene (floor points). */
     public List<NavPoint> line(ScenarioScene scene) {
         List<NavPoint> out = new ArrayList<>();
