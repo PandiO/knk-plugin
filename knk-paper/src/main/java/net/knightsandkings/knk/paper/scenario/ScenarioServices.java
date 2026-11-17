@@ -11,6 +11,7 @@ import net.knightsandkings.knk.paper.gates.GateDisplayManager;
 import net.knightsandkings.knk.paper.gates.GateLoaderAdapter;
 import net.knightsandkings.knk.paper.menu.MenuService;
 import net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld;
+import net.knightsandkings.knk.paper.npc.nav.NpcWalkPlanner;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.Plugin;
 
@@ -41,8 +42,28 @@ public record ScenarioServices(
     Supplier<MenuTemplatesDataAccess> menuTemplatesDataAccess,
     Supplier<ApiConnectivity> apiConnectivity,
     // PandiO/knk-workspace#668: the world the live NPC module's rule checks read WorldGuard regions from
-    Supplier<BukkitNavWorld> npcRulesWorld
+    Supplier<BukkitNavWorld> npcRulesWorld,
+    // PandiO/knk-workspace#700 (link C1): the walk navigator's parts NPCs plan their off-road legs with
+    Supplier<NpcWalkPlanner.Sources> npcWalkSources
 ) {
+
+    /** Without the walk navigator's parts (tests that build no NPC navigation). */
+    public ScenarioServices(Plugin plugin, Supplier<GateManager> gateManager, Supplier<GateLoaderAdapter> gateLoader,
+                            Supplier<GateDisplayManager> gateDisplays, Supplier<InetSocketAddress> regionHttpAddress,
+                            Supplier<NavigationService> roadNavigationService, Supplier<NpcMoverFactory> npcMoverFactory,
+                            Supplier<String> npcUnavailableReason, Supplier<UserCache> userCache,
+                            Supplier<PermissionsDataAccess> permissionsDataAccess, Supplier<MenuService> menuService,
+                            Supplier<MenuTemplatesDataAccess> menuTemplatesDataAccess,
+                            Supplier<ApiConnectivity> apiConnectivity, Supplier<BukkitNavWorld> npcRulesWorld) {
+        this(plugin, gateManager, gateLoader, gateDisplays, regionHttpAddress, roadNavigationService, npcMoverFactory,
+            npcUnavailableReason, userCache, permissionsDataAccess, menuService, menuTemplatesDataAccess, apiConnectivity,
+            npcRulesWorld, () -> null);
+    }
+
+    /** The walk navigator's parts for NPC off-road legs (link C1); fails the step when walk paths are off. */
+    public NpcWalkPlanner.Sources npcWalks() {
+        return required(npcWalkSources.get(), "walk paths (navigation.walk.enabled)");
+    }
 
     public FileConfiguration config() {
         return plugin.getConfig();

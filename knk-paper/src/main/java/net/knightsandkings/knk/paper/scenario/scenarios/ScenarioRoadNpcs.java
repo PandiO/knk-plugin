@@ -123,10 +123,10 @@ public final class ScenarioRoadNpcs {
         RoadPlanner roads = router::planRoadFor;
         metrics.setEnabled(true);
         BukkitNavWorld world = new BukkitNavWorld(null);
-        this.service = new NpcNavigationService(new NpcNavigationService.Ports(roads,
+        this.service = new NpcNavigationService(ScenarioNpcs.withWalks(scene, new NpcNavigationService.Ports(roads,
             new NpcLegPreparer(legs, walk.searches(), nextTick,
                 Bukkit::getWorld, plugin.getLogger()),
-            world, metrics, System::nanoTime, log::add, AccessRules.OPEN), 4);
+            world, metrics, System::nanoTime, log::add, AccessRules.OPEN)), 4);
         this.groups = new NavGroupService(new NavGroupService.Ports(service, world, AccessRules.OPEN, metrics,
             System::nanoTime, log::add));
     }
