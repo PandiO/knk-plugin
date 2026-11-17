@@ -320,9 +320,30 @@ final class ClimbWatch {
                     h.membersIn() == 0 ? "" : String.format(Locale.ROOT, ", %d followers keep it, first at %s (y %+.2f)",
                         h.membersIn(), house.realBlock(h.memberAt()), h.memberAt().y() - r.place().y())));
             }
+            b.append(why(r.why(), names));
             out.add(b.toString());
         }
         return out;
+    }
+
+    /** Waits of 10 s or more that ended in a normal turn, with what held them (link B3). */
+    List<String> longWaits(java.util.function.IntFunction<String> names) {
+        List<String> out = new ArrayList<>();
+        for (var w : service.crowd().longWaits()) {
+            out.add(String.format(Locale.ROOT, "%s waited %.1f s at %s%s", names.apply(w.npc()), w.waitedTicks() / 20.0,
+                house.realBlock(w.place()), why(w.why(), names)));
+        }
+        return out;
+    }
+
+    private String why(List<net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.Block> blocks,
+                       java.util.function.IntFunction<String> names) {
+        StringBuilder b = new StringBuilder();
+        for (var k : blocks) {
+            b.append(String.format(Locale.ROOT, "; held by %s %s %d looks, last at %s (level %+.2f, progress %+.1f)",
+                k.kind(), names.apply(k.npc()), k.looks(), house.realBlock(k.at()), k.levelGap(), k.progress()));
+        }
+        return b.toString();
     }
 
     /** "x y z" of a world position's block in real coordinates. */

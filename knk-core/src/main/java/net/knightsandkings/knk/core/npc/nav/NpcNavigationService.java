@@ -1494,7 +1494,7 @@ public final class NpcNavigationService {
                 case GO -> {
                     if (d.overdue()) {
                         ports.log().accept(nav.mover.name() + " waited " + CrowdControl.MAX_WAIT_TICKS / 20
-                            + " s at a narrow place: goes");
+                            + " s at a narrow place without the queue moving: goes");
                     }
                 }
                 case WAIT, YIELD -> hold(nav, at, d);
@@ -1550,7 +1550,7 @@ public final class NpcNavigationService {
         if (d.kind() == CrowdControl.Kind.GO) {
             if (d.overdue()) {
                 ports.log().accept(nav.mover.name() + " waited " + CrowdControl.MAX_WAIT_TICKS / 20
-                    + " s at a narrow place: goes");
+                    + " s at a narrow place without the queue moving: goes");
             }
             resume(nav, at);
         } else {

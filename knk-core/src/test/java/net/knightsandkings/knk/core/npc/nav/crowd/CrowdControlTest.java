@@ -235,6 +235,51 @@ class CrowdControlTest {
         assertTrue(crowd.releases().isEmpty(), "reset with the counts");
     }
 
+    @Test
+    void aQueueThatMovesIsNoDeadlockTheGuardCountsFromTheLastEntry() {
+        CrowdWorld world = CrowdWorld.doorway(10, 5);
+        crowd.setGroupMembers(id -> new int[0]);
+        where.put(1, feet(8.5, 5.5)); // eastward, takes the turn and stays before the doorway (a slow climber)
+        update();
+        assertEquals(Kind.GO, decide(world, 1, feet(16.5, 5.5)).kind());
+        where.put(1, feet(9.0, 5.5));
+        where.put(3, feet(7.5, 5.5)); // first in the queue
+        update();
+        assertEquals(Kind.WAIT, decide(world, 3, feet(16.5, 5.5)).kind(), "1 is not a block into the doorway");
+        where.put(2, feet(6.8, 5.5)); // second
+        update();
+        assertEquals(Kind.WAIT, decide(world, 2, feet(16.5, 5.5)).kind());
+        long waitTicks = 25 * 20;
+        for (long t = 0; t < waitTicks; t += Occupancy.UPDATE_TICKS) {
+            update();
+            assertEquals(Kind.WAIT, crowd.decideHeld(world, 3, where.get(3), tick).kind());
+            assertEquals(Kind.WAIT, crowd.decideHeld(world, 2, where.get(2), tick).kind());
+        }
+        where.put(1, feet(12.5, 5.5)); // 1 is through after 25 s: 3 goes, the queue moved
+        update();
+        assertEquals(Kind.GO, crowd.decideHeld(world, 3, where.get(3), tick).kind());
+        assertFalse(crowd.decideHeld(world, 3, where.get(3), tick).overdue());
+        // 3 stays before the doorway another 25 s: 2 has now waited 50 s, but its queue moved 25 s ago
+        for (long t = 0; t < waitTicks; t += Occupancy.UPDATE_TICKS) {
+            update();
+            assertEquals(Kind.WAIT, crowd.decideHeld(world, 2, where.get(2), tick).kind(), "the queue moved: no deadlock");
+        }
+        assertEquals(0, crowd.overdue());
+        // and once it has not moved for 30 s, the guard still lets 2 go
+        Decision d = null;
+        for (int i = 0; i < (CrowdControl.MAX_WAIT_TICKS - waitTicks) / Occupancy.UPDATE_TICKS + 2; i++) {
+            update();
+            d = crowd.decideHeld(world, 2, where.get(2), tick);
+            if (d.kind() == Kind.GO) {
+                break;
+            }
+        }
+        assertEquals(Kind.GO, d.kind());
+        assertTrue(d.overdue());
+        assertEquals(1, crowd.overdue());
+        assertTrue(crowd.longestWaitTicks() >= 55 * 20, "the wait itself is still counted from its arrival");
+    }
+
     // ==================== link B3: turns judged in 3D ====================
 
     private static NavPoint at(double x, double y, double z) {

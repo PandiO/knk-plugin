@@ -33,7 +33,9 @@ import net.knightsandkings.knk.core.npc.nav.corridor.FreeWidth;
  * side, {@link #FIRST_GAP} before the place and {@link #QUEUE_SPACING} apart, {@link #SIDE_OFFSET} to the side of the
  * line where the floor allows, so the way out stays free. <b>Oncoming in a narrow place:</b> an NPC found in a place
  * without its turn while one of the other direction entered before it steps back out to its queue spot (a yield) and
- * waits there. A queue never holds an NPC longer than {@link #MAX_WAIT_TICKS} (a deadlock guard).
+ * waits there. A queue that does not move for {@link #MAX_WAIT_TICKS} lets the NPC go (a deadlock guard): since link B3
+ * the time counts from its arrival or from the last time anyone entered the place, whichever is later, so a long single
+ * file that drains steadily is never let go, and a place nobody enters still is after 30 s.
  *
  * <p><b>In 3D</b> (link B3, PandiO/knk-workspace#672): a place has a floor along its axis, flat or a flight's slope
  * ({@link Place#levelGap}). Progress and the distance across are measured along it; feet {@link #LEVEL_GAP} or more
@@ -73,7 +75,11 @@ public final class CrowdControl {
      * ({@link Place#levelGap}).
      */
     public static final double LEVEL_GAP = 1.5;
-    /** A queue never holds an NPC longer than this (30 s): it then goes (logged). */
+    /**
+     * A queue that has not moved for this long (30 s: nobody entered the place since the NPC arrived or since the last
+     * one entered) lets it go (logged, counted). Before link B3 the time counted from its arrival only, so the last of a
+     * long single file that kept moving was let go too.
+     */
     public static final long MAX_WAIT_TICKS = 600;
     /** A turn held longer than this (30 s) is dropped (the NPC is stuck in the place; recovery has it). */
     public static final long STALE_TICKS = 600;
@@ -106,7 +112,7 @@ public final class CrowdControl {
      * @param spot       the queue spot to stand on (feet), null to stand where it is
      * @param queueIndex its place in the queue of its direction, 0 first
      * @param place      the narrow place, null for {@link Kind#GO} without one
-     * @param overdue    a GO because the NPC waited {@link #MAX_WAIT_TICKS}
+     * @param overdue    a GO because the queue did not move for {@link #MAX_WAIT_TICKS}
      */
     public record Decision(Kind kind, NavPoint spot, int queueIndex, Place place, boolean overdue) {
         static final Decision GO = new Decision(Kind.GO, null, 0, null, false);
@@ -191,6 +197,11 @@ public final class CrowdControl {
             return y < lo ? lo - y : y > hi ? y - hi : 0;
         }
 
+        /** The floor's feet level at a position's point along the axis, clamped to the cells (diagnostics). */
+        double levelAt(NavPoint feet) {
+            return levelMid + slope * Math.max(sLo, Math.min(sHi, progress(1, feet)));
+        }
+
         /** Whether a feet position is on another level than the place's floor ({@link #LEVEL_GAP} or more off it). */
         boolean offLevel(NavPoint feet) {
             return levelGap(feet) >= LEVEL_GAP;
@@ -261,13 +272,24 @@ public final class CrowdControl {
         long seen;
         /** Others that entered the place while this one waited (for "no longer than the queue needs"). */
         int passedAhead;
+        /** When it arrived, or when the last one entered the place while it waited: the queue last moved (link B3). */
+        long queueMoved;
         boolean yielded;
+        /** What kept it waiting, by kind and NPC (diagnostics, link B3): how often, and where that NPC stood last. */
+        final Map<String, Block> blocks = new java.util.LinkedHashMap<>();
+
+        void noteBlock(String kind, int other, NavPoint at, double progress, double levelGap) {
+            String key = kind + other;
+            Block b = blocks.get(key);
+            blocks.put(key, new Block(kind, other, b == null ? 1 : b.looks() + 1, at, progress, levelGap));
+        }
 
         Ticket(int npc, Place place, int dir, long arrived, long seq) {
             this.npc = npc;
             this.place = place;
             this.dir = dir;
             this.arrived = arrived;
+            this.queueMoved = arrived;
             this.seq = seq;
         }
     }
@@ -435,7 +457,7 @@ public final class CrowdControl {
             enter(t, tick);
             return Decision.GO;
         }
-        if (tick - t.arrived >= MAX_WAIT_TICKS) {
+        if (tick - t.queueMoved >= MAX_WAIT_TICKS) {
             overdue++;
             noteRelease(t, at, tick);
             enter(t, tick);
@@ -450,21 +472,31 @@ public final class CrowdControl {
         Place p = t.place;
         for (Ticket e : p.entered) {
             if (e.dir != t.dir && !elsewhere(e)) {
+                noteBlock(t, "oncoming", e.npc, e.dir);
                 return false;
             }
         }
         for (Ticket w : p.waiting) {
             if (w != t && earlier(w, t)) {
+                noteBlock(t, "earlier", w.npc, w.dir);
                 return false;
             }
         }
         for (Ticket e : p.entered) {
             NavPoint pos = occupancy.positionOf(e.npc);
             if (pos != null && !p.offLevel(pos) && p.progress(e.dir, pos) < -p.halfLength + QUEUE_SPACING) {
+                noteBlock(t, "spacing", e.npc, e.dir);
                 return false;
             }
         }
         return true;
+    }
+
+    private void noteBlock(Ticket t, String kind, int other, int dir) {
+        NavPoint pos = occupancy.positionOf(other);
+        if (pos != null) {
+            t.noteBlock(kind, other, pos, t.place.progress(dir, pos), pos.y() - t.place.levelAt(pos));
+        }
     }
 
     /**
@@ -504,9 +536,13 @@ public final class CrowdControl {
         p.entered.add(t);
         for (Ticket w : p.waiting) {
             w.passedAhead++;
+            w.queueMoved = tick;
         }
         if (t.arrived < tick) {
             long waited = tick - t.arrived;
+            if (waited >= LONG_WAIT_TICKS && tick - t.queueMoved < MAX_WAIT_TICKS && longWaits.size() < RELEASES_KEPT) {
+                longWaits.add(new LongWait(t.npc, waited, p.centre(), why(t)));
+            }
             longestWaitTicks = Math.max(longestWaitTicks, waited);
             worstWaitPerPass = Math.max(worstWaitPerPass, waited / (double) Math.max(1, t.passedAhead));
         }
@@ -794,7 +830,39 @@ public final class CrowdControl {
      * @param earlier  NPCs waiting there that came earlier (either direction)
      */
     public record Release(int npc, NavPoint at, NavPoint place, int minY, int maxY, double halfLength, int dir,
-                          List<Holder> holders, int earlier) {
+                          List<Holder> holders, int earlier, List<Block> why) {
+    }
+
+    /**
+     * What kept a waiting NPC from entering (diagnostics, link B3), counted per kind and NPC over its wait.
+     *
+     * @param kind      {@code oncoming} (a holder of the other direction), {@code earlier} (a waiter that came first)
+     *                  or {@code spacing} (a holder of its own direction not yet a block into the place)
+     * @param npc       that NPC
+     * @param looks     how many of the waiter's looks it was the reason
+     * @param at        where that NPC stood at the last of them
+     * @param progress  its progress along its own direction then
+     * @param levelGap  its feet above (+) or below (-) the place's floor level then
+     */
+    public record Block(String kind, int npc, int looks, NavPoint at, double progress, double levelGap) {
+    }
+
+    /** A wait of {@value #LONG_WAIT_TICKS} ticks or more that ended in a normal turn (diagnostics, link B3). */
+    public record LongWait(int npc, long waitedTicks, NavPoint place, List<Block> why) {
+    }
+
+    static final long LONG_WAIT_TICKS = 200;
+    private final List<LongWait> longWaits = new ArrayList<>();
+
+    /** The first {@value #RELEASES_KEPT} waits of {@value #LONG_WAIT_TICKS} ticks or more since the counts were reset. */
+    public List<LongWait> longWaits() {
+        return List.copyOf(longWaits);
+    }
+
+    private static List<Block> why(Ticket t) {
+        List<Block> out = new ArrayList<>(t.blocks.values());
+        out.sort((a, b) -> Integer.compare(b.looks(), a.looks()));
+        return out.size() > 3 ? List.copyOf(out.subList(0, 3)) : List.copyOf(out);
     }
 
     /**
@@ -857,10 +925,10 @@ public final class CrowdControl {
             minY = Math.min(minY, unpackY(c));
             maxY = Math.max(maxY, unpackY(c));
         }
-        releases.add(new Release(t.npc, at, p.centre(), minY, maxY, p.halfLength, t.dir, holders, earlier));
+        releases.add(new Release(t.npc, at, p.centre(), minY, maxY, p.halfLength, t.dir, holders, earlier, why(t)));
     }
 
-    /** NPCs a queue let go after {@link #MAX_WAIT_TICKS}. */
+    /** NPCs a queue let go after it did not move for {@link #MAX_WAIT_TICKS}. */
     public long overdue() {
         return overdue;
     }
@@ -926,6 +994,7 @@ public final class CrowdControl {
         yields = 0;
         overdue = 0;
         releases.clear();
+        longWaits.clear();
         longestQueue = 0;
         longestWaitTicks = 0;
         worstWaitPerPass = 0;
