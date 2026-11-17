@@ -365,6 +365,7 @@ public final class CrowdControl {
         }
         if (tick - t.arrived >= MAX_WAIT_TICKS) {
             overdue++;
+            noteRelease(t, at, tick);
             enter(t, tick);
             return new Decision(Kind.GO, null, 0, p, true);
         }
@@ -453,15 +454,20 @@ public final class CrowdControl {
         Place p = t.place;
         for (int m : members) {
             NavPoint pos = occupancy.positionOf(m);
-            if (pos == null || !pos.world().equals(p.world)) {
-                continue;
-            }
-            double s = p.progress(t.dir, pos);
-            if (s >= -p.halfLength - MEMBER_BEFORE && s <= p.halfLength + 0.3 && p.lateral(pos) <= 3) {
+            if (pos != null && memberKeepsTurn(p, t.dir, pos)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /** Whether a follower standing at {@code pos} keeps its leader's turn (in the place or just before it). */
+    private static boolean memberKeepsTurn(Place p, int dir, NavPoint pos) {
+        if (!pos.world().equals(p.world)) {
+            return false;
+        }
+        double s = p.progress(dir, pos);
+        return s >= -p.halfLength - MEMBER_BEFORE && s <= p.halfLength + 0.3 && p.lateral(pos) <= 3;
     }
 
     /** Ends an NPC's claim on any place (its order ended, it was replanned, it left navigation). */
@@ -688,6 +694,86 @@ public final class CrowdControl {
         return yields;
     }
 
+    /**
+     * Why a queue let an NPC go after {@link #MAX_WAIT_TICKS} (link B3, PandiO/knk-workspace#672): where it stood, the
+     * place, and what held it: an NPC in the place ({@code holders}, with their 3D positions) or an earlier waiter.
+     *
+     * @param npc      the NPC let go
+     * @param at       where it stood (feet)
+     * @param place    the place's middle (feet height of its first cell)
+     * @param minY     the lowest feet level of the place's cells
+     * @param maxY     the highest feet level of the place's cells
+     * @param dir      its direction along the place's axis
+     * @param holders  the NPCs with their turn there now
+     * @param earlier  NPCs waiting there that came earlier (either direction)
+     */
+    public record Release(int npc, NavPoint at, NavPoint place, int minY, int maxY, double halfLength, int dir,
+                          List<Holder> holders, int earlier) {
+    }
+
+    /**
+     * An NPC with its turn at a place when the guard let a waiter go.
+     *
+     * @param progress   along its own direction from the place's middle (horizontal)
+     * @param lateral    across the axis (horizontal)
+     * @param heldTicks  how long it has held the turn
+     * @param blocks     whether it alone stops the waiter (other direction, or its own direction not far enough in)
+     * @param passed     whether it counts as past the place now
+     * @param membersIn  its group's followers that keep its turn now (in the place or just before it)
+     * @param memberAt   where the first of those stands (null: none)
+     */
+    public record Holder(int npc, NavPoint at, int dir, double progress, double lateral, long heldTicks,
+                         boolean blocks, boolean passed, int membersIn, NavPoint memberAt) {
+    }
+
+    /** The first {@value #RELEASES_KEPT} releases since the counts were reset. */
+    public List<Release> releases() {
+        return List.copyOf(releases);
+    }
+
+    static final int RELEASES_KEPT = 20;
+    private final List<Release> releases = new ArrayList<>();
+
+    private void noteRelease(Ticket t, NavPoint at, long tick) {
+        if (releases.size() >= RELEASES_KEPT) {
+            return;
+        }
+        Place p = t.place;
+        List<Holder> holders = new ArrayList<>();
+        for (Ticket e : p.entered) {
+            NavPoint pos = occupancy.positionOf(e.npc);
+            if (pos == null) {
+                continue;
+            }
+            boolean blocks = e.dir != t.dir || p.progress(e.dir, pos) < -p.halfLength + QUEUE_SPACING;
+            int membersIn = 0;
+            NavPoint memberAt = null;
+            int[] members = groupMembers.apply(e.npc);
+            for (int m : members == null ? new int[0] : members) {
+                NavPoint mp = occupancy.positionOf(m);
+                if (mp != null && memberKeepsTurn(p, e.dir, mp)) {
+                    membersIn++;
+                    memberAt = memberAt == null ? mp : memberAt;
+                }
+            }
+            holders.add(new Holder(e.npc, pos, e.dir, p.progress(e.dir, pos), p.lateral(pos), tick - e.enteredTick,
+                blocks, passed(p, e.dir, pos), membersIn, memberAt));
+        }
+        int earlier = 0;
+        for (Ticket w : p.waiting) {
+            if (w != t && earlier(w, t)) {
+                earlier++;
+            }
+        }
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (long c : p.cells) {
+            minY = Math.min(minY, unpackY(c));
+            maxY = Math.max(maxY, unpackY(c));
+        }
+        releases.add(new Release(t.npc, at, p.centre(), minY, maxY, p.halfLength, t.dir, holders, earlier));
+    }
+
     /** NPCs a queue let go after {@link #MAX_WAIT_TICKS}. */
     public long overdue() {
         return overdue;
@@ -753,6 +839,7 @@ public final class CrowdControl {
         waits = 0;
         yields = 0;
         overdue = 0;
+        releases.clear();
         longestQueue = 0;
         longestWaitTicks = 0;
         worstWaitPerPass = 0;
@@ -767,6 +854,10 @@ public final class CrowdControl {
 
     static int unpackX(long c) {
         return (int) (c >> 38) << 6 >> 6;
+    }
+
+    static int unpackY(long c) {
+        return (int) (c & 0xFFF) << 20 >> 20;
     }
 
     static int unpackZ(long c) {

@@ -259,6 +259,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .add("engine stair hops (off a stair's step)", watch.stairHops().size())
             .add("jumps toward a waypoint on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
+            .add("why the guard let them go (B3)", ClimbWatch.first(watch.releases(npcs::nameOf), 6))
             .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))
             .add("line steps walked as local legs", npcs.service().gapLegs())
