@@ -82,11 +82,13 @@ class SnapshotReplayTest {
         SnapshotReplay replay = SnapshotReplay.fromResource("quarry-to-keep-stairhouse.zip");
         NavSnapshot s = replay.snapshot();
         assertEquals("quarry-to-keep", s.manifest().route());
-        assertEquals("0.1.0+0f039203", s.manifest().pluginVersion());
-        assertEquals(103, s.route().line().size());
+        // the snapshot of 2026-11-17 19:34 since link B5 (PandiO/knk-workspace#699), with the gate doors' states
+        assertEquals("0.1.0+e69dba6a", s.manifest().pluginVersion());
+        assertEquals(101, s.route().line().size());
         assertEquals(18, s.route().stretches().size());
         assertEquals(13, s.domains().size());
         assertTrue(s.domains().stream().filter(NavSnapshot.Domain::isGate).count() >= 6, "GateStructure domains");
+        assertTrue(s.domains().stream().anyMatch(d -> !d.gateDoors().isEmpty()), "gate doors recorded (B1's GateStructure fix)");
         List<String> rejected = new ArrayList<>();
         NavigationSettings settings = replay.settings(rejected);
         assertTrue(rejected.isEmpty(), rejected.toString());
