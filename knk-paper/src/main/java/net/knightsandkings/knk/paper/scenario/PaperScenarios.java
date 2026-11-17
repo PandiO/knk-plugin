@@ -17,6 +17,7 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnOnGroundScen
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnUnderRoofScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersLineScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.WalkTrailStairhouseScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupRealtimeEntryScenario;
@@ -79,6 +80,7 @@ public final class PaperScenarios {
             // NPC wall corners and stuck recovery (implementation plan 4b.2 item 18, PandiO/knk-workspace#521); the
             // walking ones need Citizens, which CI's paper-boot server has as a pinned build
             .register(new NpcCornersLineScenario())
+            .register(new WalkTrailStairhouseScenario())
             .register(new NpcCornersWalkScenario())
             .register(new NpcStuckLadderScenario())
             .register(new NpcGroupNarrowsScenario())
