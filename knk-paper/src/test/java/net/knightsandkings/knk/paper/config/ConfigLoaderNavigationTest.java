@@ -65,7 +65,8 @@ class ConfigLoaderNavigationTest {
         assertNotNull(walk, "config.yml has a navigation.walk block (KNG-51 §9)");
         assertEquals(java.util.Set.of("enabled", "max-expansions", "max-length-factor", "max-length", "detour-allowance",
             "climb-allowance", "max-drop", "drop-penalty", "capture-margin", "chunk-ttl-seconds", "recompute-distance",
-            "max-concurrent-searches", "climbables", "wall-cost", "max-chunks-per-request"), walk.getKeys(false));
+            "max-concurrent-searches", "climbables", "wall-cost", "max-chunks-per-request", "clearance-cost", "wall-clearance",
+            "curve"), walk.getKeys(false));
         assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 5, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0,
             64), ConfigLoader.load(yaml).navigation().walk());
     }
@@ -87,6 +88,62 @@ class ConfigLoaderNavigationTest {
         yaml.set("navigation.walk.max-chunks-per-request", 1025);
         assertThrows(IllegalArgumentException.class,
             ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).walk()::validate);
+    }
+
+    @Test
+    void guidanceV2IsOffInConfigYmlAndItsWalkKeysHaveTheDesignDefaults() throws Exception {
+        // off-road navigation phase 6.1 (#710, DESIGN § 7.6): the flag, off; the walk keys it uses
+        YamlConfiguration yaml = bundledConfig();
+        assertTrue(yaml.contains("navigation.guidance-v2"), "config.yml names the flag");
+        NavigationConfig navigation = ConfigLoader.load(yaml).navigation();
+        assertFalse(navigation.guidanceV2());
+        assertFalse(NavigationConfig.defaults().guidanceV2());
+        assertEquals(5.0, navigation.walk().clearanceCost());
+        assertEquals(0.8, navigation.walk().wallClearance());
+        assertTrue(navigation.walk().curve());
+    }
+
+    @Test
+    void withGuidanceV2OffTheWalkProfileIsTodaysExactly() {
+        // A16: the flag off keeps wall-cost's meaning; on, the clearance cost replaces it (0 = the kill switch)
+        NavigationConfig.WalkConfig walk = NavigationConfig.WalkConfig.defaults();
+        assertEquals(walk.profile(), walk.profile(false));
+        assertFalse(walk.profile(false).usesClearance());
+        assertEquals(1.0, walk.profile(false).wallCost());
+        assertTrue(walk.profile(true).usesClearance());
+        assertEquals(5.0, walk.profile(true).clearanceCost());
+        assertEquals(0.8, walk.profile(true).wallClearance());
+        NavigationConfig.WalkConfig noCost = new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 5, 3, 10, 16, 10, 6,
+            2, List.of("LADDER"), 1.0, 64, 0, 0.8, true);
+        assertFalse(noCost.profile(true).usesClearance(), "clearance-cost 0: the wall cost, as before");
+        assertEquals(new net.knightsandkings.knk.core.roads.walk.WalkPathShaper.Options(8, 0.8, true), walk.shaping());
+    }
+
+    @Test
+    void theGuidanceKeysAreReadAndChecked() {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.guidance-v2", true);
+        yaml.set("navigation.walk.clearance-cost", 3.5);
+        yaml.set("navigation.walk.wall-clearance", 1.2);
+        yaml.set("navigation.walk.curve", false);
+        NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+        assertTrue(navigation.guidanceV2());
+        assertEquals(3.5, navigation.walk().clearanceCost());
+        assertEquals(1.2, navigation.walk().wallClearance());
+        assertFalse(navigation.walk().curve());
+        navigation.walk().validate();
+        assertTrue(navigation.withGuidanceV2(false).walk().equals(navigation.walk()));
+        assertFalse(navigation.withGuidanceV2(false).guidanceV2());
+
+        yaml.set("navigation.walk.wall-clearance", 0.2);
+        IllegalArgumentException low = assertThrows(IllegalArgumentException.class,
+            ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).walk()::validate);
+        assertTrue(low.getMessage().contains("wall-clearance"), low.getMessage());
+        yaml.set("navigation.walk.wall-clearance", 0.8);
+        yaml.set("navigation.walk.clearance-cost", -1);
+        IllegalArgumentException negative = assertThrows(IllegalArgumentException.class,
+            ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).walk()::validate);
+        assertTrue(negative.getMessage().contains("clearance-cost"), negative.getMessage());
     }
 
     @Test

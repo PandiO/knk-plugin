@@ -2077,7 +2077,8 @@ public class KnKPlugin extends JavaPlugin {
             return t;
         });
         var preparer = net.knightsandkings.knk.paper.navigation.walk.WalkLegPreparer.server(walkSnapshots,
-            net.knightsandkings.knk.paper.navigation.walk.WorldGuardWalkAccess.factory(access), navigation.walk(), gateManager);
+            net.knightsandkings.knk.paper.navigation.walk.WorldGuardWalkAccess.factory(access), navigation.walk(),
+            navigation.guidanceV2(), gateManager);
         return new net.knightsandkings.knk.paper.navigation.NavigationService.Walk(preparer,
             new net.knightsandkings.knk.core.roads.walk.WalkSearch(), walkSearches);
     }
