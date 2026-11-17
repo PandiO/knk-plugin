@@ -35,8 +35,9 @@ import net.knightsandkings.knk.paper.scenario.SnapshotReplay;
  * settings (the merged dev config: {@code elastic}, spacing 1.5, 40/40, stretches of 32 blocks) and with the settings
  * of the failed smoke test (decision 35.3: {@code levels}, spacing 2.0, 60/60). Since link B2 (PandiO/knk-workspace#671)
  * each walk fails on a fall from a flight or landing, a handover onto another level, a turn released by the 30 s guard
- * after its holder fell ({@link ClimbWatch#failures}) and a leader that does not arrive. Lost followers stay report
- * only: on the real blocks they come from slots on flight 5's half-block steps (link B4, #673), not from the handover.
+ * after its holder fell ({@link ClimbWatch#failures}) and a leader that does not arrive. Since link B4
+ * (PandiO/knk-workspace#673) the group also fails on a lost follower: on the real blocks they came from slots on flight
+ * 5's half-block steps at whole-block heights.
  */
 public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>, SizedScene {
 
@@ -168,7 +169,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
         long[] t = {0, -1};
         plan.act("a leader alone walks from the street east of the house to the top hall (" + config + ")", () -> {
                 report.set(new NpcMovementReport(scene, name()).phaseStarts(npcs.get()));
-                watch.set(new ClimbWatch(scene, replay, npcs.get().service()));
+                watch.set(new ClimbWatch(scene, replay, npcs.get().service()).stairHopsIn(scene.world()));
                 NpcMover leader = npcs.get().spawn(feet(scene, replay, START[0], START[1], START[2]));
                 alone.add(leader);
                 t[0] = npcs.get().ticks();
@@ -199,7 +200,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
         long[] g = {0, -1};
         plan.act("a group of 20 in ranks walks the same way (" + config + ")", () -> {
                 report.set(new NpcMovementReport(scene, name()).phaseStarts(npcs.get()));
-                watch.set(new ClimbWatch(scene, replay, npcs.get().service()));
+                watch.set(new ClimbWatch(scene, replay, npcs.get().service()).stairHopsIn(scene.world()));
                 members.add(npcs.get().spawn(feet(scene, replay, START[0], START[1], START[2])));
                 for (int i = 1; i < MEMBERS; i++) {
                     // three abreast behind the leader, further south on the street (real 1435..1437, -490..-484)
@@ -228,9 +229,11 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
                 if (!(groupResult.get() instanceof NavigationResult.Arrived)) {
                     failures.add("the group's leader did not arrive: " + groupResult.get());
                 }
-                // lost followers stay report only here (link B2, PandiO/knk-workspace#671): on the real blocks the
-                // rear rows' slots fall on flight 5's half-block steps, where a follower never settles at a slot at a
-                // whole-block height; a separate cause from the handover, left to link B4 (#673)
+                // since link B4 (PandiO/knk-workspace#673) a lost follower fails the walk: the rear rows' slots on
+                // flight 5's half-block steps are at the real surface height now (B2 left it report only)
+                if (group.get().lost() > 0) {
+                    failures.add(group.get().lost() + " followers lost:" + lostLines(npcs.get(), 24));
+                }
                 npcs.get().stop();
                 return failures.isEmpty() ? null : String.join("; ", failures);
             });
@@ -252,6 +255,9 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .add("handovers onto another level", ClimbWatch.first(watch.crossLevel(), 4))
             .add("new stretches starting off the feet level (B1's measure)", watch.stretchOffLevel().size())
             .add("falls from the climb", watch.fallsFromClimb().size())
+            .add("jumps (by upward speed)", watch.jumps().size())
+            .add("engine stair hops (off a stair's step)", watch.stairHops().size())
+            .add("jumps toward a waypoint on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
             .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))
@@ -259,9 +265,56 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .add("stuck spells", report.count(npcs, Event.STUCK_ENGINE) + report.count(npcs, Event.STUCK_NO_PROGRESS))
             .add("trespasses", report.count(npcs, Event.TRESPASS));
         if (group != null) {
+            report.add("stuck spells opened", ClimbWatch.first(spellsOpened(npcs, watch), 6));
             report.add("width now", group.width().describe()).add("lost", group.lost())
                 .add("leader falls kept out of the group path", group.leaderFalls());
         }
         return report.crowd(npcs);
+    }
+
+    /**
+     * The run-log lines of the followers that ended lost (why each could not get back, and the spells before it), at
+     * most {@code n}: a failed walk says where and why without the NPC log files.
+     */
+    static String lostLines(ScenarioNpcs npcs, int n) {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            if (line.text().contains("could not get back to the group's path")) {
+                names.add(line.text().substring(0, line.text().indexOf(' ')));
+            }
+        }
+        List<String> lines = new ArrayList<>();
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            String text = line.text();
+            if (!text.startsWith("trace ") && names.stream().anyMatch(name -> text.startsWith(name + " "))) {
+                lines.add(line.tick() + ": " + text);
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        for (String line : lines.subList(Math.max(0, lines.size() - n), lines.size())) {
+            out.append("\n  ").append(line);
+        }
+        return out.toString();
+    }
+
+    private static final java.util.regex.Pattern STUCK_AT = java.util.regex.Pattern.compile(
+        "^(\\S+) \\(group \\d+\\) stuck at (\\S+) (\\S+) (\\S+), (\\S+) blocks behind its slot .*\\((\\S+) away\\)");
+
+    /**
+     * Where the group's stuck spells opened (link B4): who, the real block, how far behind its slot along the path and
+     * how far from its slot's point, from the group's spell lines in the run log.
+     */
+    static List<String> spellsOpened(ScenarioNpcs npcs, ClimbWatch watch) {
+        List<String> out = new ArrayList<>();
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            java.util.regex.Matcher m = STUCK_AT.matcher(line.text());
+            if (m.find()) {
+                NavPoint at = new NavPoint("scene", Double.parseDouble(m.group(2)), Double.parseDouble(m.group(3)),
+                    Double.parseDouble(m.group(4))); // the frame needs the coordinates only
+                out.add(String.format(Locale.ROOT, "%s at %s, %s behind its slot along the path, %s from its point",
+                    m.group(1), watch.realBlock(at), m.group(5), m.group(6)));
+            }
+        }
+        return out;
     }
 }

@@ -1237,7 +1237,7 @@ public final class NpcNavigationService {
                         nav.knkLegRest = Double.NaN;
                         nav.lastProgressTick = tick;
                         nav.trail = null;
-                        nav.mover.follow(way, nav.settings.waypointMargin());
+                        nav.mover.follow(NavGeometry.onSurface(ports.world(), way), nav.settings.waypointMargin());
                     } else {
                         nav.engineLegOpen = true; // counted engine or none once the engine's search answered
                         nav.legTarget = target;
@@ -1534,7 +1534,7 @@ public final class NpcNavigationService {
         nav.crowdSpot = spot;
         if (at.horizontalDistance(spot) > 0.4) {
             nav.trail = null;
-            nav.mover.follow(List.of(spot), 0.3);
+            nav.mover.follow(NavGeometry.onSurface(ports.world(), List.of(spot)), 0.3);
         }
     }
 
@@ -1584,7 +1584,8 @@ public final class NpcNavigationService {
                     nav.knkLeg.size());
                 nav.knkLegRest = Double.NaN;
                 nav.trail = null;
-                nav.mover.follow(List.copyOf(rest), nav.settings.waypointMargin());
+                nav.mover.follow(NavGeometry.onSurface(ports.world(), List.copyOf(rest)),
+                    nav.settings.waypointMargin());
             }
             case ENGINE_LEG -> {
                 if (nav.legTarget == null || nav.legPrepared == null) {
@@ -1848,7 +1849,7 @@ public final class NpcNavigationService {
         } else if (NavGeometry.straightWalkable(ports.world(), at, home)) {
             nav.bodyReturn = true;
             nav.trail = null;
-            nav.mover.follow(List.of(home), 0.3);
+            nav.mover.follow(NavGeometry.onSurface(ports.world(), List.of(home)), 0.3);
         } else if (nav.goal == null) {
             // no straight way back to its post: an order home, under K&K's rules (NAV-02), whose result nobody needs
             long since = nav.returnSince;
@@ -1909,7 +1910,7 @@ public final class NpcNavigationService {
             }
             nav.knkLeg = null;
             nav.state = NpcNavState.MOVING;
-            nav.mover.follow(back, nav.settings.waypointMargin());
+            nav.mover.follow(NavGeometry.onSurface(ports.world(), back), nav.settings.waypointMargin());
             nav.trail = nav.onTrail && !back.isEmpty() ? new Trail(back) : null;
             return;
         }
@@ -2025,7 +2026,10 @@ public final class NpcNavigationService {
                     }
                 }
                 nav.trail = new Trail(split.walk());
-                nav.mover.follow(split.walk(), nav.settings.marginFor(stretch));
+                // the engine gets the waypoints at the real walking surface (link B4, PandiO/knk-workspace#673): a
+                // half-block stair step is walked up, not jumped to a whole-block height; the trail keeps floor + 1
+                nav.mover.follow(NavGeometry.onSurface(ports.world(), nav.mover.onGround() ? at : null, split.walk()),
+                    nav.settings.marginFor(stretch));
             }
             default -> { }
         }
@@ -2537,7 +2541,7 @@ public final class NpcNavigationService {
                     nav.moveOnly = true;
                 }
                 nav.state = NpcNavState.MOVING;
-                nav.mover.follow(waypoints, nav.settings.waypointMargin());
+                nav.mover.follow(NavGeometry.onSurface(ports.world(), waypoints), nav.settings.waypointMargin());
                 nav.trail = nav.onTrail && !waypoints.isEmpty() ? new Trail(waypoints) : null;
             }
             case LOCAL_LEG -> {

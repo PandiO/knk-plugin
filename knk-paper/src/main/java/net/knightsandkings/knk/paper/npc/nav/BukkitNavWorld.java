@@ -89,6 +89,41 @@ public final class BukkitNavWorld implements NavWorld {
     }
 
     /**
+     * The walking surface of a floor (link B4, PandiO/knk-workspace#673): the top of the floor block's step, the box
+     * that spans the whole cell (a bottom slab 0.5, an upright stair's step 0.5, an upside-down stair 1.0, a path
+     * block 0.9375), at most a whole block; {@code floorY + 1} where the floor is not standable. A stair's upper half
+     * is not the waypoint's height: the engine jumps for a target a whole block up within a block, and the step is
+     * walked up half a block at a time.
+     */
+    @Override
+    public double surfaceY(String world, double x, int floorY, double z) {
+        if (!isStandableFloor(world, (int) Math.floor(x), floorY, (int) Math.floor(z))) {
+            return floorY + 1;
+        }
+        World w = Bukkit.getWorld(world);
+        Block floor = w.getBlockAt((int) Math.floor(x), floorY, (int) Math.floor(z));
+        return floorY + surfaceTop(floor.getCollisionShape().getBoundingBoxes());
+    }
+
+    /**
+     * The top of a block's step (block-relative boxes, 0 to 1): the highest top among the boxes that span the whole
+     * cell, else the highest of all; clamped to (0, 1], 1 without any box.
+     */
+    static double surfaceTop(java.util.Collection<org.bukkit.util.BoundingBox> boxes) {
+        double spanning = -1;
+        double any = -1;
+        for (org.bukkit.util.BoundingBox box : boxes) {
+            any = Math.max(any, box.getMaxY());
+            if (box.getMinX() <= 1e-6 && box.getMaxX() >= 1 - 1e-6 && box.getMinZ() <= 1e-6
+                && box.getMaxZ() >= 1 - 1e-6) {
+                spanning = Math.max(spanning, box.getMaxY());
+            }
+        }
+        double top = spanning > 0 ? spanning : any;
+        return top <= 0 || top > 1 ? 1.0 : top;
+    }
+
+    /**
      * Whether a block stops a walking body (implementation plan 4b.2 items 1 and 13): anything not passable, except a
      * step the body walks up (a bottom slab, a stair that is not upside down). False in an unloaded chunk.
      */

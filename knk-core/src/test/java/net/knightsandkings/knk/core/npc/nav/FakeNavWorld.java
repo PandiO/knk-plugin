@@ -21,6 +21,8 @@ final class FakeNavWorld implements NavWorld {
     final Set<String> walls = new HashSet<>();
     /** Free height above a floor, as "x,y,z" of the floor; others have 3. */
     final java.util.Map<String, Double> headroom = new java.util.HashMap<>();
+    /** The top of a floor block under a body, as "x,y,z" of the floor (a bottom slab: 0.5); others are whole (1). */
+    final java.util.Map<String, Double> tops = new java.util.HashMap<>();
     /** Floors that are not standable although {@link #floor} says so (air columns, a drop). */
     final Set<String> holes = new HashSet<>();
 
@@ -45,6 +47,11 @@ final class FakeNavWorld implements NavWorld {
             return 0;
         }
         return headroom.getOrDefault(x + "," + floorY + "," + z, 3.0);
+    }
+
+    @Override
+    public double surfaceY(String world, double x, int floorY, double z) {
+        return floorY + tops.getOrDefault((int) Math.floor(x) + "," + floorY + "," + (int) Math.floor(z), 1.0);
     }
 
     @Override

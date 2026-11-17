@@ -126,6 +126,39 @@ class NavGroupTest {
         }
     }
 
+    // ==================== slots at the real walking surface (link B4, PandiO/knk-workspace#673) ====================
+
+    @Test
+    void slotsOnAHalfBlockStairAreSentAtTheSlabsTop() {
+        // a half-block stair from x 10 to x 17 (the Keep stair's flight 5): a bottom slab, a full block, a slab, ...,
+        // each step half a block up (surfaces 64.5, 65, 65.5 ... 68), then flat at 68
+        sim.world.floorY = (x, z) -> x < 10 ? 64 : x < 18 ? 64 + (x - 10) / 2 : 67;
+        sim.world.top = (x, z) -> x >= 10 && x < 18 && (x - 10) % 2 == 0 ? 0.5 : 1.0;
+        NavGroup group = sim.group(4, COLUMN);
+
+        group.navigate(new NavPoint(GroupSim.WORLD, 20.5, 68, 0.5), results);
+        assertTrue(sim.runUntil(results::ended, 2000));
+        sim.run(200);
+
+        assertArrived();
+        assertEquals(0, group.lost(), "log: " + tail());
+        for (int i = 0; i < 3; i++) {
+            SimMover f = follower(i);
+            int x = (int) Math.floor(f.position.x());
+            double surface = sim.world.floorY.applyAsInt(x, 0) + sim.world.top.applyAsDouble(x, 0);
+            assertEquals(surface, f.position.y(), 1e-9, "follower " + i + " stands on the surface at x " + x);
+            for (NavPoint p : f.lastSent) {
+                int px = (int) Math.floor(p.x());
+                double s = sim.world.floorY.applyAsInt(px, (int) Math.floor(p.z()))
+                    + sim.world.top.applyAsDouble(px, (int) Math.floor(p.z()));
+                assertEquals(s, p.y(), 1e-9, "follower " + i + "'s waypoint at x " + p.x() + " on the surface");
+            }
+        }
+        assertTrue(follower(1).position.x() > 10 && follower(1).position.x() < 18,
+            "a rear slot lies on the stair: " + follower(1).position);
+        assertEquals(0.5, follower(1).position.y() % 1, 1e-9, "on a slab's top: " + follower(1).position);
+    }
+
     // ==================== one blocked state, one wake-up, one replan ====================
 
     private static final BlockingElement KEEP_GATE = BlockingElement.gate(7, "the Keep Gate");

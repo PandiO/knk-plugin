@@ -47,6 +47,13 @@ final class GroupSim {
         BiPredicate<Integer, Integer> walls = (x, z) -> false;
         java.util.function.ToIntBiFunction<Integer, Integer> floorY = (x, z) -> 64;
         BiFunction<Integer, Integer, Set<String>> regions = (x, z) -> Set.of();
+        /** The top of a column's floor block under a body (a bottom slab: 0.5; link B4); whole blocks unless set. */
+        java.util.function.ToDoubleBiFunction<Integer, Integer> top = (x, z) -> 1.0;
+
+        @Override
+        public double surfaceY(String world, double x, int floorY, double z) {
+            return floorY + top.applyAsDouble((int) Math.floor(x), (int) Math.floor(z));
+        }
 
         @Override
         public boolean isLoaded(String world, int x, int z) {
@@ -115,6 +122,8 @@ final class GroupSim {
         double fastestFactor = 1;
         int follows;
         int walks;
+        /** The waypoints of its last {@link #follow} order, as given. */
+        List<NavPoint> lastSent = List.of();
 
         SimMover(int id, NavPoint feet) {
             this.id = id;
@@ -149,6 +158,7 @@ final class GroupSim {
         @Override
         public void follow(List<NavPoint> waypoints) {
             follows++;
+            lastSent = List.copyOf(waypoints);
             route.clear();
             route.addAll(waypoints);
             moving = !route.isEmpty();
