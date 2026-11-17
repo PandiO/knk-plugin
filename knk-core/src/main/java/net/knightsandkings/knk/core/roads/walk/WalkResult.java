@@ -31,13 +31,20 @@ public final class WalkResult {
     private final int expansions;
     private final String reason;
     private final WalkPath partial;
+    private final WalkSearchStats stats;
 
     private WalkResult(Status status, WalkPath path, int expansions, String reason, WalkPath partial) {
+        this(status, path, expansions, reason, partial, WalkSearchStats.NONE);
+    }
+
+    private WalkResult(Status status, WalkPath path, int expansions, String reason, WalkPath partial,
+                       WalkSearchStats stats) {
         this.status = Objects.requireNonNull(status, "status");
         this.path = path;
         this.expansions = expansions;
         this.reason = reason;
         this.partial = partial;
+        this.stats = Objects.requireNonNull(stats, "stats");
     }
 
     public static WalkResult found(WalkPath path, int expansions) {
@@ -82,6 +89,19 @@ public final class WalkResult {
     /** Cells the search expanded. */
     public int expansions() {
         return expansions;
+    }
+
+    /**
+     * What the search cost (phase 0 counters, PandiO/knk-workspace#703): {@link WalkSearchStats#NONE} for a result
+     * that did not come from {@link WalkSearch}. Measuring only; not part of {@link #toString()}.
+     */
+    public WalkSearchStats stats() {
+        return stats;
+    }
+
+    /** The same result with the search's counters attached. */
+    public WalkResult withStats(WalkSearchStats stats) {
+        return new WalkResult(status, path, expansions, reason, partial, stats);
     }
 
     /** A short debugging reason ("found", "no walkable cell near the start", "expansion budget" …). */

@@ -6,7 +6,9 @@ import net.knightsandkings.knk.core.util.BlockKey;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Objects;
 import java.util.PriorityQueue;
+import java.util.function.LongSupplier;
 
 import static net.knightsandkings.knk.core.roads.walk.WalkGrid.DX;
 import static net.knightsandkings.knk.core.roads.walk.WalkGrid.DZ;
@@ -48,6 +50,11 @@ import static net.knightsandkings.knk.core.roads.walk.WalkGrid.NO_LINK;
  * without arriving → NO_PATH. Either may carry a {@link WalkResult#partialPath() partial path} (§11-5,
  * revised 2026-10-07): to the expanded cell closest to the target (3D, ties to the cheaper), when it
  * is at least {@link #MIN_PARTIAL_GAIN} blocks closer than the start cell.
+ *
+ * <p><b>Counters</b> (off-road navigation phase 0, PandiO/knk-workspace#703): every result carries
+ * {@link WalkResult#stats()} - expansions, cells touched, the wall time of {@link #find} and the cap that ended
+ * the search. They cost two clock reads per search and nothing in the loop (the expansion count already exists,
+ * the cell count is the node map's size); the search never reads them, so they change no result.
  */
 public final class WalkSearch implements WalkPathfinder {
 
@@ -57,9 +64,26 @@ public final class WalkSearch implements WalkPathfinder {
     private static final double SQRT2 = Math.sqrt(2.0);
     private static final double EPS = 1e-9;
 
+    private final LongSupplier nanoClock;
+
+    /** The search, timed by {@link System#nanoTime()}. */
+    public WalkSearch() {
+        this(System::nanoTime);
+    }
+
+    /** @param nanoClock the clock {@link WalkSearchStats#searchNanos()} is read from (tests: a fake) */
+    public WalkSearch(LongSupplier nanoClock) {
+        this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+    }
+
     @Override
     public WalkResult find(WalkRequest request) {
-        return new Run(request).run();
+        long start = nanoClock.getAsLong();
+        Run run = new Run(request);
+        WalkResult result = run.run();
+        long elapsed = Math.max(0L, nanoClock.getAsLong() - start);
+        return result.withStats(new WalkSearchStats(result.expansions(), run.nodes.size(), elapsed, run.endedBy,
+            run.lengthCapped));
     }
 
     /**
@@ -112,6 +136,7 @@ public final class WalkSearch implements WalkPathfinder {
         private long seq;
         private int expansions;
         private boolean lengthCapped;
+        private WalkSearchStats.Cap endedBy = WalkSearchStats.Cap.NONE;
         private double cap;
         private Node closest;
         private double closestDistance = Double.POSITIVE_INFINITY;
@@ -153,6 +178,7 @@ public final class WalkSearch implements WalkPathfinder {
                 }
                 noteClosest(u);
                 if (expansions >= budget.maxExpansions()) {
+                    endedBy = WalkSearchStats.Cap.MAX_EXPANSIONS;
                     return WalkResult.fallback("expansion budget", expansions, partial());
                 }
                 expansions++;
@@ -162,9 +188,11 @@ public final class WalkSearch implements WalkPathfinder {
                     expandStanding(u);
                 }
             }
-            return lengthCapped
-                ? WalkResult.fallback("length cap", expansions, partial())
-                : WalkResult.noPath("target unreachable", expansions, partial());
+            if (lengthCapped) {
+                endedBy = WalkSearchStats.Cap.MAX_LENGTH;
+                return WalkResult.fallback("length cap", expansions, partial());
+            }
+            return WalkResult.noPath("target unreachable", expansions, partial());
         }
 
         // ===== partial path (§11-5) =====
