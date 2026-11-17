@@ -45,6 +45,66 @@ class GroupPathTest {
         assertEquals(path.get(1).floor, path.get(2).floor, "no walk within a block: the point before again");
     }
 
+    // ==================== shaped line points on the line's own level (link B5, PandiO/knk-workspace#699) ==========
+
+    /**
+     * A flight rising one block per block east along z = 0.5 (floor 64 at x = 0 to 69 at x = 5), a 3-wide stairwell
+     * void south of it (z = 1 to 3) and a hall floor at 63 beyond, as beside the stair house's flights.
+     */
+    private void flightBesideAHall() {
+        world.floorY = (x, z) -> z <= 0 ? 64 + Math.max(0, Math.min(5, x)) : 63;
+        world.noFloor = (x, z) -> z >= 1 && z <= 3;
+    }
+
+    @Test
+    void aShapedPointOverTheStairwellGivesWayToTheLinesOwnPoint() {
+        flightBesideAHall();
+        GroupPath path = new GroupPath();
+        path.addShaped(world, new NavPoint(GroupSim.WORLD, 0.5, 64, 0.5), new NavPoint(GroupSim.WORLD, 0.5, 64, 0.5), 64);
+
+        int index = path.addShaped(world, new NavPoint(GroupSim.WORLD, 1.5, 65, 2.5),
+            new NavPoint(GroupSim.WORLD, 1.5, 65, 0.5), 64);
+
+        assertEquals(1, index);
+        assertEquals(new NavPoint(GroupSim.WORLD, 1.5, 65, 0.5), path.get(1).floor,
+            "the line's own point, not the point before repeated (the path skipped the flight)");
+    }
+
+    @Test
+    void aShapedPointOnTheHallFloorUnderTheFlightGivesWayToTheLinesOwnPoint() {
+        flightBesideAHall();
+        world.noFloor = (x, z) -> false; // no void: the hall floor lies right beside the flight's first step
+        GroupPath path = new GroupPath();
+        path.addShaped(world, new NavPoint(GroupSim.WORLD, 0.5, 64, 0.5), new NavPoint(GroupSim.WORLD, 0.5, 64, 0.5), 64);
+
+        path.addShaped(world, new NavPoint(GroupSim.WORLD, 1.5, 65, 2.5), new NavPoint(GroupSim.WORLD, 1.5, 65, 0.5), 64);
+
+        assertEquals(65, path.get(1).floor.y(), "on the flight, not on the hall floor two blocks under its step");
+        assertEquals(0.5, path.get(1).floor.z(), 1e-9);
+    }
+
+    @Test
+    void aShapedPointAcrossTheVoidOnTheSameFloorGivesWayToo() {
+        // two walks at the same height either side of a 1-wide void (a landing seen across a stairwell)
+        world.noFloor = (x, z) -> z == 1;
+        GroupPath path = new GroupPath();
+        path.addShaped(world, new NavPoint(GroupSim.WORLD, 0.5, 64, 0.5), new NavPoint(GroupSim.WORLD, 0.5, 64, 0.5), 64);
+
+        path.addShaped(world, new NavPoint(GroupSim.WORLD, 1.5, 64, 2.5), new NavPoint(GroupSim.WORLD, 1.5, 64, 0.5), 64);
+
+        assertEquals(0.5, path.get(1).floor.z(), 1e-9, "no straight walk across the void to the shaped point");
+    }
+
+    @Test
+    void aShapedPointOnTheSameFloorWithAStraightWalkIsKept() {
+        GroupPath path = new GroupPath();
+        path.addShaped(world, new NavPoint(GroupSim.WORLD, 0.5, 64, 0.5), new NavPoint(GroupSim.WORLD, 0.5, 64, 0.5), 64);
+
+        path.addShaped(world, new NavPoint(GroupSim.WORLD, 1.5, 64, 2.2), new NavPoint(GroupSim.WORLD, 1.5, 64, 0.5), 64);
+
+        assertEquals(2.2, path.get(1).floor.z(), 1e-9, "corridor steering's shaping still holds on one level");
+    }
+
     @Test
     void distancesAlongThePathAreHorizontal() {
         GroupPath path = east(5);

@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Set;
 
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
+import net.knightsandkings.knk.core.npc.nav.NavGeometry;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
@@ -115,6 +116,27 @@ final class GroupPath {
             floor = nodes.isEmpty() ? HopPlanner.snapNear(world, linePoint, refY) : nodes.get(nodes.size() - 1).floor;
         }
         return add(floor);
+    }
+
+    /**
+     * Appends a route line point that corridor steering or plaza lines shaped (links M3, M5), kept on the walk (link B5,
+     * PandiO/knk-workspace#699): the shaped point where it has a floor near the path's last point, at most a block
+     * above or below the line's own point's floor, and a straight walk leads to it from the path's last point; the
+     * line's own point ({@link #addSnapped}) otherwise. The shaping pulls the line straight in 2D: on the stair house's
+     * stacked flights it cut the hairpin at flight 5's top across the stairwell (two points over the void, so the point
+     * before was repeated, then the far end of the landing above), so the path skipped the flight's top and its landing
+     * and every follower found itself off its lane there.
+     */
+    int addShaped(NavWorld world, NavPoint shaped, NavPoint linePoint, int fallbackFloorY) {
+        int refY = nodes.isEmpty() ? fallbackFloorY : (int) Math.round(nodes.get(nodes.size() - 1).floor.y());
+        NavPoint floor = HopPlanner.surfaceNear(world, shaped, refY);
+        NavPoint own = HopPlanner.surfaceNear(world, linePoint, refY);
+        if (floor != null && (own == null || Math.abs(floor.blockY() - own.blockY()) <= 1) && (nodes.isEmpty()
+            || NavGeometry.straightWalkable(world, HopPlanner.feet(nodes.get(nodes.size() - 1).floor),
+            HopPlanner.feet(floor)))) {
+            return add(floor);
+        }
+        return addSnapped(world, linePoint, fallbackFloorY);
     }
 
     /** The index of the point nearest a feet position among {@code [from, to)} (height counts fully). */
