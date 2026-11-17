@@ -147,7 +147,8 @@ final class NavSnapshotTaker {
     private void collect(CommandSender sender, String name, NpcRouteStore.Route route, World world,
                          NavigationService nav, RoadPlanner.RoadPlan plan) {
         List<String> notes = new ArrayList<>();
-        SnapshotBox box = SnapshotBox.around(plan.line());
+        // the route's from and to as well (link C1): an off-road goal and its domains are inside the box
+        SnapshotBox box = SnapshotBox.aroundRoute(plan.line(), route.from(), route.to());
         NavigationSettings.Scope scope = new NavigationSettings.Scope(world.getName(),
             regionsOuterToInner.apply(route.from()), null, null);
         NavigationSettings settings = config.settings();

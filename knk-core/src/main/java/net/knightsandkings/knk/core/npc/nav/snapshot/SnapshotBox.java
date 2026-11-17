@@ -7,7 +7,8 @@ import java.util.Objects;
 import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
- * The box a snapshot covers (link B1, PandiO/knk-workspace#670): the route line's blocks with a margin round them, and
+ * The box a snapshot covers (link B1, PandiO/knk-workspace#670): the route line's blocks (since link C1 also the route's
+ * from and to) with a margin round them, and
  * the region files ({@code r.<x>.<z>.mca}, 512 × 512 blocks each) that hold its blocks.
  *
  * @param min the lowest block (x, y, z), inclusive
@@ -39,6 +40,22 @@ public record SnapshotBox(int[] min, int[] max) {
     /** The box round a line of points with the default margins; at least one point. */
     public static SnapshotBox around(List<NavPoint> line) {
         return around(line, MARGIN, MARGIN_BELOW, MARGIN_ABOVE);
+    }
+
+    /**
+     * The box round a route (PandiO/knk-workspace#700, link C1): its road line and its from and to with the default
+     * margins, so an off-road start or goal (a goal upstairs in a tower) and the domains round it are inside. A null
+     * end is left out; an empty line takes the ends alone.
+     */
+    public static SnapshotBox aroundRoute(List<NavPoint> line, NavPoint from, NavPoint to) {
+        List<NavPoint> points = new ArrayList<>(line == null ? List.of() : line);
+        if (from != null) {
+            points.add(from);
+        }
+        if (to != null) {
+            points.add(to);
+        }
+        return around(points);
     }
 
     /** The box round a line of points with these margins; at least one point. */
