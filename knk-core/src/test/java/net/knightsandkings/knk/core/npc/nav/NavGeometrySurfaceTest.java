@@ -100,4 +100,33 @@ class NavGeometrySurfaceTest {
         assertFalse(NavGeometry.jumpFits(world, floor(2.5, 65, 0.5), floor(3.5, 66, 0.5)),
             "a whole block up needs the jump's headroom");
     }
+
+    @Test
+    void aStepSkippedBetweenTwoWaypointsGoesIn() {
+        // full block at 64 (x 0), a stair's step at 65 (x 1, top 65.5), full block at 65 (x 2): waypoints at x 0 and x 2
+        // only would leave a target a whole block up within a block of the feet, and the engine jumps
+        world.floor = (x, z) -> x <= 0 ? 64 : 65;
+        world.tops.put("1,65,0", 0.5);
+
+        List<NavPoint> sent = NavGeometry.onSurface(world, List.of(floor(0.5, 65, 0.5), floor(2.5, 66, 0.5)));
+
+        assertEquals(3, sent.size(), "the step goes in: " + sent);
+        assertEquals(65.5, sent.get(1).y(), 1e-9);
+        assertEquals(1, sent.get(1).blockX(), "in the step's cell, on the line");
+        assertEquals(0.5, sent.get(1).z(), 1e-9);
+        assertEquals(66, sent.get(2).y(), 1e-9);
+    }
+
+    @Test
+    void aWholeBlockFlightGetsTheBlockBetweenAndNeighboursNothing() {
+        world.floor = (x, z) -> x <= 0 ? 64 : x == 1 ? 65 : 66;
+        List<NavPoint> planned = List.of(floor(0.5, 65, 0.5), floor(2.5, 67, 0.5));
+
+        List<NavPoint> sent = NavGeometry.onSurface(world, planned);
+
+        assertEquals(3, sent.size(), "the block step between: " + sent);
+        assertEquals(66, sent.get(1).y(), 1e-9);
+        List<NavPoint> neighbours = List.of(floor(0.5, 65, 0.5), floor(1.5, 66, 0.5));
+        assertSame(neighbours, NavGeometry.onSurface(world, neighbours), "neighbours a block apart: nothing between");
+    }
 }

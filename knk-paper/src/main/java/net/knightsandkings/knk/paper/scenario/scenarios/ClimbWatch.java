@@ -296,6 +296,11 @@ final class ClimbWatch {
         body.fellInTurn = false;
     }
 
+    /** "x y z" of a world position's block in real coordinates. */
+    String realBlock(NavPoint at) {
+        return house.realBlock(at);
+    }
+
     /** Turns dropped by the crowd's 30 s guard ({@link #turn}). */
     List<String> staleTurns() {
         return staleTurns;

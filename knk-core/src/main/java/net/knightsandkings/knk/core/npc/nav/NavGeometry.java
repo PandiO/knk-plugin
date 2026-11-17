@@ -81,20 +81,72 @@ public final class NavGeometry {
         return Math.abs(y - feet.y()) < 1e-9 ? feet : new NavPoint(feet.world(), feet.x(), y, feet.z());
     }
 
-    /** {@link #onSurface(NavWorld, NavPoint)} for every waypoint of a list; the list itself when none changes. */
+    /**
+     * {@link #onSurface(NavWorld, NavPoint)} for every waypoint of a list, and the step between two waypoints that rise
+     * more than {@link #STEP_UP} (link B4): where the line from one to the next crosses a cell whose surface lies in
+     * between (a stair's step or a slab before a full block), that cell's point on the line goes in, so the engine
+     * never has a target a whole block above the feet within a block (its move control jumps for that). The list
+     * itself when nothing changes.
+     */
     public static java.util.List<NavPoint> onSurface(NavWorld world, java.util.List<NavPoint> feet) {
         java.util.List<NavPoint> out = null;
+        NavPoint prev = null;
         for (int i = 0; i < feet.size(); i++) {
             NavPoint p = feet.get(i);
             NavPoint q = onSurface(world, p);
-            if (q != p && out == null) {
+            java.util.List<NavPoint> steps = prev == null ? java.util.List.of() : stepsBetween(world, prev, q);
+            if ((q != p || !steps.isEmpty()) && out == null) {
                 out = new java.util.ArrayList<>(feet.subList(0, i));
             }
             if (out != null) {
+                out.addAll(steps);
                 out.add(q);
             }
+            prev = q;
         }
         return out == null ? feet : java.util.List.copyOf(out);
+    }
+
+    /**
+     * The points on the line from {@code a} to {@code b} (feet at the surface) in the cells between them whose surface
+     * lies between theirs, rising; empty when {@code b} is at most {@link #STEP_UP} above {@code a}.
+     */
+    static java.util.List<NavPoint> stepsBetween(NavWorld world, NavPoint a, NavPoint b) {
+        if (b.y() - a.y() <= STEP_UP + 1e-6 || !a.world().equals(b.world())) {
+            return java.util.List.of();
+        }
+        double len = a.horizontalDistance(b);
+        int samples = Math.max(1, (int) Math.ceil(len * SAMPLES_PER_BLOCK));
+        java.util.List<NavPoint> out = new java.util.ArrayList<>();
+        double last = a.y();
+        int refY = floorYOf(a.y());
+        long cellA = cell(a.blockX(), a.blockZ());
+        long cellB = cell(b.blockX(), b.blockZ());
+        long seen = cellA;
+        for (int i = 1; i < samples; i++) {
+            double t = (double) i / samples;
+            NavPoint at = new NavPoint(a.world(), a.x() + (b.x() - a.x()) * t, a.y(), a.z() + (b.z() - a.z()) * t);
+            long c = cell(at.blockX(), at.blockZ());
+            if (c == seen || c == cellB) {
+                continue;
+            }
+            seen = c;
+            NavPoint floor = HopPlanner.floorNear(world, new NavPoint(a.world(), at.x(), refY, at.z()), refY);
+            if (floor == null) {
+                continue;
+            }
+            double surface = world.surfaceY(a.world(), at.x(), floor.blockY(), at.z());
+            refY = floor.blockY();
+            if (surface > last + 1e-6 && surface < b.y() - 1e-6) {
+                out.add(new NavPoint(a.world(), at.x(), surface, at.z()));
+                last = surface;
+            }
+        }
+        return out;
+    }
+
+    private static long cell(int x, int z) {
+        return ((long) x << 32) ^ (z & 0xffffffffL);
     }
 
     /**

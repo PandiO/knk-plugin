@@ -265,6 +265,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .add("stuck spells", report.count(npcs, Event.STUCK_ENGINE) + report.count(npcs, Event.STUCK_NO_PROGRESS))
             .add("trespasses", report.count(npcs, Event.TRESPASS));
         if (group != null) {
+            report.add("stuck spells opened", ClimbWatch.first(spellsOpened(npcs, watch), 6));
             report.add("width now", group.width().describe()).add("lost", group.lost())
                 .add("leader falls kept out of the group path", group.leaderFalls());
         }
@@ -294,5 +295,26 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             out.append("\n  ").append(line);
         }
         return out.toString();
+    }
+
+    private static final java.util.regex.Pattern STUCK_AT = java.util.regex.Pattern.compile(
+        "^(\\S+) \\(group \\d+\\) stuck at (\\S+) (\\S+) (\\S+), (\\S+) blocks behind its slot .*\\((\\S+) away\\)");
+
+    /**
+     * Where the group's stuck spells opened (link B4): who, the real block, how far behind its slot along the path and
+     * how far from its slot's point, from the group's spell lines in the run log.
+     */
+    static List<String> spellsOpened(ScenarioNpcs npcs, ClimbWatch watch) {
+        List<String> out = new ArrayList<>();
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            java.util.regex.Matcher m = STUCK_AT.matcher(line.text());
+            if (m.find()) {
+                NavPoint at = new NavPoint("scene", Double.parseDouble(m.group(2)), Double.parseDouble(m.group(3)),
+                    Double.parseDouble(m.group(4))); // the frame needs the coordinates only
+                out.add(String.format(Locale.ROOT, "%s at %s, %s behind its slot along the path, %s from its point",
+                    m.group(1), watch.realBlock(at), m.group(5), m.group(6)));
+            }
+        }
+        return out;
     }
 }
