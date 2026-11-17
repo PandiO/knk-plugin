@@ -1659,6 +1659,13 @@ public final class NavGroup {
         switch (f.ladder.report(now, at, by, wall, settings.recoveryWaitTicks())) {
             case STARTED -> {
                 ports.metrics().spellStarted(by != RecoveryLadder.Reporter.NO_PROGRESS, wall);
+                // where it stands against its slot when the spell opens (link B4: followers short of a slot on a stair)
+                int slotIdx = path.indexAtArc(Math.max(0, slotArc));
+                NavPoint slotAt = lanePoint(slotIdx, Math.max(0, slotArc - path.arc(slotIdx)), slot.side());
+                ports.log().accept(String.format(Locale.ROOT, "%s (group %d) stuck at %.2f %.2f %.2f, %.2f blocks"
+                    + " behind its slot at %.2f %.2f %.2f (%.2f away), sent %.2f ahead, %s", f.mover.name(), id,
+                    at.x(), at.y(), at.z(), slotArc - a, slotAt.x(), slotAt.y(), slotAt.z(),
+                    at.horizontalDistance(slotAt), f.sentEndArc - a, f.mover.isMoving() ? "moving" : "not moving"));
                 nextTry(f, slot, slotArc, at, a);
             }
             case TRY_FAILED -> {

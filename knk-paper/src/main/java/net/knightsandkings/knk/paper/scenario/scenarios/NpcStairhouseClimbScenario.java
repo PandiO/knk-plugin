@@ -131,7 +131,7 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
         long[] took = {-1};
         plan.act(label + " walks the same way", () -> {
                 report.set(new NpcMovementReport(scene, name()).phaseStarts(npcs.get()));
-                watch.set(new ClimbWatch(house, npcs.get().service()));
+                watch.set(new ClimbWatch(house, npcs.get().service()).stairHopsIn(scene.world()));
                 for (int i = 0; i < MEMBERS; i++) {
                     members.add(npcs.get().spawn(house.climbStart(i)));
                 }
@@ -169,8 +169,9 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
                     failures.add(group.get().lost() + " followers lost");
                 }
                 if (!watch.get().jumpsOnClimb().isEmpty()) {
-                    // link B4 (PandiO/knk-workspace#673): waypoints at the real surface, no jump onto a flight
-                    failures.add("real jumps on the flights and their entries "
+                    // link B4 (PandiO/knk-workspace#673): waypoints at the real surface, no jump toward a waypoint; the
+                    // engine's own hops off a stair's step are reported, not failed
+                    failures.add("jumps toward a waypoint on the flights and their entries "
                         + ClimbWatch.first(watch.get().jumpsOnClimb(), 3));
                 }
                 npcs.get().dismiss(group.get());
@@ -195,7 +196,8 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
             .add("new stretches starting off the feet level (B1's measure)", watch.stretchOffLevel().size())
             .add("falls from the climb", watch.fallsFromClimb().size())
             .add("jumps (by upward speed)", watch.jumps().size())
-            .add("jumps on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
+            .add("engine stair hops (off a stair's step)", watch.stairHops().size())
+            .add("jumps toward a waypoint on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
             .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))

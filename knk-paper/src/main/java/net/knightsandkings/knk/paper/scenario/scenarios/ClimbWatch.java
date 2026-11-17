@@ -69,6 +69,9 @@ final class ClimbWatch {
     private final List<String> staleTurns = new ArrayList<>();
     private final List<String> jumps = new ArrayList<>();
     private final List<String> jumpsOnClimb = new ArrayList<>();
+    private final List<String> stairHops = new ArrayList<>();
+    /** Whether a take-off position stands on a stair's step under its upper half (null: never). */
+    private java.util.function.Predicate<NavPoint> onStairStep;
     private int handovers;
     private long tick;
 
@@ -126,6 +129,7 @@ final class ClimbWatch {
         NavPoint turnAt;
         boolean fellInTurn;
         final JumpDetector jumps = new JumpDetector();
+        NavPoint prevAt;
         final Map<List<NavPoint>, Boolean> seen = new IdentityHashMap<>();
     }
 
@@ -172,6 +176,8 @@ final class ClimbWatch {
     }
 
     private void jump(NpcMover mover, Body body, NavPoint at) {
+        NavPoint from = body.prevAt;
+        body.prevAt = at;
         if (!body.jumps.sample(at.y(), mover.onGround(), mover.verticalSpeed())) {
             return;
         }
@@ -179,9 +185,35 @@ final class ClimbWatch {
         String line = String.format(Locale.ROOT, "%s at %s (%s)", mover.name(), house.realBlock(at),
             NpcMovementScene.climbPlaceName(p));
         jumps.add(line);
+        if (from != null && onStairStep != null && onStairStep.test(from)) {
+            // the engine's own move control hops whenever the block at the feet has a collision top above them: on
+            // a stair's step, its upper half; no waypoint height takes that away (link B4)
+            stairHops.add(line);
+            return;
+        }
         if (p >= 0) { // from a flight, a landing, the corridor or the hall: the flights and their entries
             jumpsOnClimb.add(line);
         }
+    }
+
+    /**
+     * Tells the engine's stair hops apart (link B4): a jump that takes off with the feet on a stair's step, inside the
+     * stair block below its upper half. Minecraft's move control (Citizens' too) jumps there by itself: the block at
+     * the feet has a collision top above them.
+     */
+    ClimbWatch stairHopsIn(org.bukkit.World world) {
+        onStairStep = feet -> {
+            org.bukkit.block.Block block = world.getBlockAt(feet.blockX(), feet.blockY(), feet.blockZ());
+            if (!(block.getBlockData() instanceof org.bukkit.block.data.type.Stairs)) {
+                return false;
+            }
+            double top = 0;
+            for (org.bukkit.util.BoundingBox box : block.getCollisionShape().getBoundingBoxes()) {
+                top = Math.max(top, box.getMaxY());
+            }
+            return feet.y() < block.getY() + top - 1e-3;
+        };
+        return this;
     }
 
     private void place(NpcMover mover, Body body, NavPoint at) {
@@ -300,7 +332,15 @@ final class ClimbWatch {
         return jumps;
     }
 
-    /** Real jumps that took off on a place of the climb: a flight or the landing, hall or street at its entry. */
+    /** The engine's own hops off a stair's step ({@link #stairHopsIn}); not counted in {@link #jumpsOnClimb()}. */
+    List<String> stairHops() {
+        return stairHops;
+    }
+
+    /**
+     * Real jumps that took off on a place of the climb (a flight or the landing, hall or street at its entry), other
+     * than the engine's stair hops: jumps toward a waypoint above the feet.
+     */
     List<String> jumpsOnClimb() {
         return jumpsOnClimb;
     }

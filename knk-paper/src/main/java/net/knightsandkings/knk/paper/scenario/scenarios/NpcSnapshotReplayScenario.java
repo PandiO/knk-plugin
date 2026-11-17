@@ -169,7 +169,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
         long[] t = {0, -1};
         plan.act("a leader alone walks from the street east of the house to the top hall (" + config + ")", () -> {
                 report.set(new NpcMovementReport(scene, name()).phaseStarts(npcs.get()));
-                watch.set(new ClimbWatch(scene, replay, npcs.get().service()));
+                watch.set(new ClimbWatch(scene, replay, npcs.get().service()).stairHopsIn(scene.world()));
                 NpcMover leader = npcs.get().spawn(feet(scene, replay, START[0], START[1], START[2]));
                 alone.add(leader);
                 t[0] = npcs.get().ticks();
@@ -200,7 +200,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
         long[] g = {0, -1};
         plan.act("a group of 20 in ranks walks the same way (" + config + ")", () -> {
                 report.set(new NpcMovementReport(scene, name()).phaseStarts(npcs.get()));
-                watch.set(new ClimbWatch(scene, replay, npcs.get().service()));
+                watch.set(new ClimbWatch(scene, replay, npcs.get().service()).stairHopsIn(scene.world()));
                 members.add(npcs.get().spawn(feet(scene, replay, START[0], START[1], START[2])));
                 for (int i = 1; i < MEMBERS; i++) {
                     // three abreast behind the leader, further south on the street (real 1435..1437, -490..-484)
@@ -232,7 +232,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
                 // since link B4 (PandiO/knk-workspace#673) a lost follower fails the walk: the rear rows' slots on
                 // flight 5's half-block steps are at the real surface height now (B2 left it report only)
                 if (group.get().lost() > 0) {
-                    failures.add(group.get().lost() + " followers lost:" + lostLines(npcs.get(), 12));
+                    failures.add(group.get().lost() + " followers lost:" + lostLines(npcs.get(), 24));
                 }
                 npcs.get().stop();
                 return failures.isEmpty() ? null : String.join("; ", failures);
@@ -256,7 +256,8 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .add("new stretches starting off the feet level (B1's measure)", watch.stretchOffLevel().size())
             .add("falls from the climb", watch.fallsFromClimb().size())
             .add("jumps (by upward speed)", watch.jumps().size())
-            .add("jumps on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
+            .add("engine stair hops (off a stair's step)", watch.stairHops().size())
+            .add("jumps toward a waypoint on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
             .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))
