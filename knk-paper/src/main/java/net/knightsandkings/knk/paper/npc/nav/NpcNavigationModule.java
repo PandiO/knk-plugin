@@ -650,9 +650,9 @@ public final class NpcNavigationModule {
         }
     }
 
-    private static net.knightsandkings.knk.core.npc.nav.NavPoint feetOf(Player player) {
+    private static net.knightsandkings.knk.core.navigation.shape.NavPoint feetOf(Player player) {
         org.bukkit.Location l = player.getLocation();
-        return new net.knightsandkings.knk.core.npc.nav.NavPoint(l.getWorld().getName(), l.getBlockX() + 0.5, l.getBlockY(),
+        return new net.knightsandkings.knk.core.navigation.shape.NavPoint(l.getWorld().getName(), l.getBlockX() + 0.5, l.getBlockY(),
             l.getBlockZ() + 0.5);
     }
 

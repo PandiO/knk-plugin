@@ -3,8 +3,8 @@ package net.knightsandkings.knk.core.npc.nav.crowd;
 import java.util.HashSet;
 import java.util.Set;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 
 /** A test world for crowd tests: a flat floor at 64, walls two blocks high, everything loaded; it counts reads. */
 final class CrowdWorld implements NavWorld {

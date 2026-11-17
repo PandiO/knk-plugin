@@ -3,6 +3,8 @@ package net.knightsandkings.knk.core.npc.nav;
 import java.util.List;
 import java.util.Optional;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+
 /**
  * The engine's side of one NPC that moves (DESIGN §2 platform-adapter boundary): K&K decides where to go, the mover
  * moves the body. On Paper the adapter is Citizens ({@code paper.npc.citizens.CitizensNpcMover}). Main thread unless

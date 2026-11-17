@@ -3,7 +3,7 @@ package net.knightsandkings.knk.core.npc.nav.crowd;
 import java.util.HashMap;
 import java.util.Map;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * Who stands where (implementation plan 4c.3 decision 3.1, link M4; BEHAVIOR_MODEL NAV-26): the feet cell of every

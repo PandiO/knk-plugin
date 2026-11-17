@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * Link B2 (PandiO/knk-workspace#671, decision 34.1): the NPC's place on its waypoint list, the handover's 3D measure

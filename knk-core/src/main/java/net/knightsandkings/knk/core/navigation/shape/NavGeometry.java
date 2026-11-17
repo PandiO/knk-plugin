@@ -1,4 +1,4 @@
-package net.knightsandkings.knk.core.npc.nav;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import java.util.Locale;
 
@@ -20,10 +20,45 @@ public final class NavGeometry {
      * block is a step, a full block is a jump (link B4, PandiO/knk-workspace#673).
      */
     public static final double STEP_UP = 0.6;
+    /** A route waypoint's floor is at most this far above or below the previous one (no jump to another flight). */
+    public static final int CONTINUITY_RANGE = 2;
     /** Samples per block along a straight walk. */
     private static final int SAMPLES_PER_BLOCK = 4;
 
     private NavGeometry() {
+    }
+
+    /** The feet position of a body standing on a floor point. */
+    public static NavPoint feet(NavPoint floor) {
+        return new NavPoint(floor.world(), floor.x(), floor.y() + 1, floor.z());
+    }
+
+    /** The floor point under a feet position. */
+    public static NavPoint floor(NavPoint feet) {
+        return new NavPoint(feet.world(), feet.x(), Math.floor(feet.y()) - 1, feet.z());
+    }
+
+    /**
+     * The floor for a point within {@link #CONTINUITY_RANGE} blocks of {@code refY}, the one nearest {@code refY}
+     * (the same height first); null when there is none or the chunk is not loaded. Unlike the NPC hop planner's
+     * {@code snapNear} it never falls back to a floor further away, so a chain of points built with it stays on one
+     * floor (implementation plan 4b.2 item 5.2).
+     */
+    public static NavPoint floorNear(NavWorld world, NavPoint p, int refY) {
+        int x = p.blockX();
+        int z = p.blockZ();
+        if (!world.isLoaded(p.world(), x, z)) {
+            return null;
+        }
+        for (int d = 0; d <= CONTINUITY_RANGE; d++) {
+            if (world.isStandableFloor(p.world(), x, refY + d, z)) {
+                return new NavPoint(p.world(), p.x(), refY + d, p.z());
+            }
+            if (d > 0 && world.isStandableFloor(p.world(), x, refY - d, z)) {
+                return new NavPoint(p.world(), p.x(), refY - d, p.z());
+            }
+        }
+        return null;
     }
 
     /** Whether a wall stops a body in the cell at feet height {@code feetY}: at feet or at head height. */
@@ -139,7 +174,7 @@ public final class NavGeometry {
                 continue;
             }
             seen = c;
-            NavPoint floor = HopPlanner.floorNear(world, new NavPoint(a.world(), at.x(), refY, at.z()), refY);
+            NavPoint floor = floorNear(world, new NavPoint(a.world(), at.x(), refY, at.z()), refY);
             if (floor == null) {
                 continue;
             }
@@ -181,9 +216,9 @@ public final class NavGeometry {
                 if (!checked.add(((long) bx << 32) ^ (bz & 0xffffffffL))) {
                     continue;
                 }
-                NavPoint floor = HopPlanner.floorNear(world, new NavPoint(fromFeet.world(), bx + 0.5, fromFloor, bz + 0.5),
+                NavPoint floor = floorNear(world, new NavPoint(fromFeet.world(), bx + 0.5, fromFloor, bz + 0.5),
                     fromFloor);
-                if (floor == null || Math.abs(floor.blockY() - toFloor) > HopPlanner.CONTINUITY_RANGE
+                if (floor == null || Math.abs(floor.blockY() - toFloor) > CONTINUITY_RANGE
                     || !hasHeadroom(world, floor)) {
                     return false;
                 }

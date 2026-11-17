@@ -14,9 +14,10 @@ import java.util.function.Predicate;
 import org.bukkit.Bukkit;
 import org.bukkit.block.data.BlockData;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 import net.knightsandkings.knk.core.npc.nav.AccessRules;
 import net.knightsandkings.knk.core.npc.nav.AccessSubject;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.RoadPlanner;
 import net.knightsandkings.knk.core.npc.nav.snapshot.NavSnapshot;
@@ -197,10 +198,10 @@ public final class SnapshotReplay {
     }
 
     /** The plaza junctions on the stored line, in the scene. */
-    public List<RoadPlanner.PlazaCrossing> plazas(ScenarioScene scene) {
-        List<RoadPlanner.PlazaCrossing> out = new ArrayList<>();
+    public List<PlazaCrossing> plazas(ScenarioScene scene) {
+        List<PlazaCrossing> out = new ArrayList<>();
         for (NavSnapshot.Plaza p : snapshot().route().plazas()) {
-            out.add(new RoadPlanner.PlazaCrossing(inScene(scene, p.centre()), p.radius()));
+            out.add(new PlazaCrossing(inScene(scene, p.centre()), p.radius()));
         }
         return out;
     }

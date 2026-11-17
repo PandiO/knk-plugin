@@ -3,6 +3,10 @@ package net.knightsandkings.knk.core.npc.nav;
 import java.util.ArrayList;
 import java.util.List;
 
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+
 /**
  * Cuts a line of floor points into hops the engine's local path search walks one at a time (BEHAVIOR_MODEL NAV-01;
  * since decision Q8 only for off-road bits and stuck recovery): points every N blocks, each moved onto a floor an NPC
@@ -13,19 +17,19 @@ public final class HopPlanner {
     /** How far up or down a hop is moved to find a floor (the engine only moves a target up two blocks). */
     public static final int SNAP_RANGE = 12;
     /** A route waypoint's floor is at most this far above or below the previous one (no jump to another flight). */
-    public static final int CONTINUITY_RANGE = 2;
+    public static final int CONTINUITY_RANGE = NavGeometry.CONTINUITY_RANGE;
 
     private HopPlanner() {
     }
 
     /** The feet position of an NPC standing on a floor point. */
     public static NavPoint feet(NavPoint floor) {
-        return new NavPoint(floor.world(), floor.x(), floor.y() + 1, floor.z());
+        return NavGeometry.feet(floor);
     }
 
     /** The floor point under a feet position. */
     public static NavPoint floor(NavPoint feet) {
-        return new NavPoint(feet.world(), feet.x(), Math.floor(feet.y()) - 1, feet.z());
+        return NavGeometry.floor(feet);
     }
 
     /**
@@ -107,20 +111,7 @@ public final class HopPlanner {
      * (implementation plan 4b.2 item 5.2).
      */
     public static NavPoint floorNear(NavWorld world, NavPoint p, int refY) {
-        int x = p.blockX();
-        int z = p.blockZ();
-        if (!world.isLoaded(p.world(), x, z)) {
-            return null;
-        }
-        for (int d = 0; d <= CONTINUITY_RANGE; d++) {
-            if (world.isStandableFloor(p.world(), x, refY + d, z)) {
-                return new NavPoint(p.world(), p.x(), refY + d, p.z());
-            }
-            if (d > 0 && world.isStandableFloor(p.world(), x, refY - d, z)) {
-                return new NavPoint(p.world(), p.x(), refY - d, p.z());
-            }
-        }
-        return null;
+        return NavGeometry.floorNear(world, p, refY);
     }
 
     /**

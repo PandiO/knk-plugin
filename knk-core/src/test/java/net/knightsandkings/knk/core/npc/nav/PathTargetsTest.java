@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /** Targets on the NPC's own floor (implementation plan 4b.2 item 5; test plan item 16.3, the #492 cases). */
 class PathTargetsTest {

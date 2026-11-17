@@ -5,6 +5,9 @@ import java.util.Set;
 import java.util.function.BiPredicate;
 import java.util.function.IntBinaryOperator;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+
 /** A test world: one floor height per column (plus extra floors), everything loaded unless told otherwise. */
 final class FakeNavWorld implements NavWorld {
 

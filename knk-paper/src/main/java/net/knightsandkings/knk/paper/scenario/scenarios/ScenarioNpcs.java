@@ -11,11 +11,12 @@ import java.util.function.Consumer;
 import org.bukkit.Bukkit;
 import org.bukkit.scheduler.BukkitTask;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 import net.knightsandkings.knk.core.npc.nav.AccessRules;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
 import net.knightsandkings.knk.core.npc.nav.LocalLeg;
 import net.knightsandkings.knk.core.npc.nav.LocalLegPreparer;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
@@ -147,11 +148,11 @@ public final class ScenarioNpcs {
 
     private NpcMover traced;
     /** The junctions on the scene's road that may be plazas, handed out with every road plan (link M5). */
-    private List<RoadPlanner.PlazaCrossing> plazas = List.of();
+    private List<PlazaCrossing> plazas = List.of();
     private final List<Runnable> watchers = new ArrayList<>();
 
     /** The junctions on the scene's road that may be plazas (link M5): each road plan names them, as the router does. */
-    public void plazas(List<RoadPlanner.PlazaCrossing> crossings) {
+    public void plazas(List<PlazaCrossing> crossings) {
         plazas = List.copyOf(crossings);
     }
     private final Map<NavGroup, List<NpcMover>> groupMembers = new HashMap<>();

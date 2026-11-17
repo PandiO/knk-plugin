@@ -1,4 +1,4 @@
-package net.knightsandkings.knk.core.npc.nav.corridor;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -10,8 +10,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 
 /**
  * Corridor steering's shaped line (implementation plan 4c.4 item 2.2, link M2): it keeps {@code wall-clearance} where

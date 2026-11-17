@@ -5,7 +5,7 @@ import java.util.Locale;
 import org.bukkit.Bukkit;
 import org.bukkit.scheduler.BukkitTask;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.paper.scenario.ScenarioPlayer;
 import net.knightsandkings.knk.paper.scenario.ScenarioScene;
 

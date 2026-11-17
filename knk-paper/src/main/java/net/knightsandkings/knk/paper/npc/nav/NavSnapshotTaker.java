@@ -36,7 +36,7 @@ import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.gates.GateManager;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;

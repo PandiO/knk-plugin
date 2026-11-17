@@ -16,6 +16,8 @@ import net.knightsandkings.knk.core.domain.roads.RoadEdgeFlag;
 import net.knightsandkings.knk.core.domain.roads.RoadEdgeSource;
 import net.knightsandkings.knk.core.domain.roads.RoadNode;
 import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 import net.knightsandkings.knk.core.npc.nav.snapshot.NavSnapshot;
 import net.knightsandkings.knk.core.npc.nav.snapshot.SnapshotBox;
 import net.knightsandkings.knk.core.npc.nav.snapshot.SnapshotParts;
@@ -63,7 +65,7 @@ class SnapshotPartsTest {
     void theRouteKeepsEveryWaypointGateAndPlaza() {
         RoadPlanner.RoadPlan plan = new RoadPlanner.RoadPlan(RoadPlanner.Status.FOUND, straight(3), null, null,
             List.of(new RoadPlanner.GateCrossing(7, new NavPoint(FakeNavWorld.WORLD, 2.5, 64, 0.5))), null,
-            List.of(new RoadPlanner.PlazaCrossing(new NavPoint(FakeNavWorld.WORLD, 1, 64, 0), 0)));
+            List.of(new PlazaCrossing(new NavPoint(FakeNavWorld.WORLD, 1, 64, 0), 0)));
         NavSnapshot.RouteLine route = SnapshotParts.route("r", straight(1).get(0), straight(3).get(3), plan, List.of(),
             "none");
         assertEquals(4, route.line().size());

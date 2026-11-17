@@ -44,6 +44,7 @@ class ArchitectureGuardTest {
 
     private static final Pattern BUKKIT_IMPORT = Pattern.compile("^\\s*import\\s+(static\\s+)?org\\.bukkit\\b");
     private static final Pattern BUKKIT_REFERENCE = Pattern.compile("\\borg\\.bukkit\\.");
+    private static final Pattern NPC_REFERENCE = Pattern.compile("\\bnet\\.knightsandkings\\.knk\\.core\\.npc\\.");
 
     @Test
     void sourceRootIsWhereThisGuardExpectsIt() {
@@ -87,6 +88,38 @@ class ArchitectureGuardTest {
         assertTrue(violations.isEmpty(),
             "org.bukkit must not be used in the Bukkit-free part of knk-core:\n  "
                 + String.join("\n  ", violations));
+    }
+
+    /**
+     * The shared shaping package is used by NPC navigation and the players' trail alike (off-road navigation design
+     * O11, acceptance A26, PandiO/knk-workspace#704): it must not depend on the NPC packages.
+     */
+    @Test
+    void sharedShapingPackageDoesNotUseNpcPackages() throws IOException {
+        Path dir = CORE_ROOT.resolve("navigation/shape");
+        assertTrue(Files.isDirectory(dir), "shared shaping package is missing: " + dir);
+        List<Path> sources;
+        try (Stream<Path> walk = Files.walk(dir)) {
+            sources = walk.filter(p -> p.toString().endsWith(".java")).sorted().toList();
+        }
+        assertTrue(!sources.isEmpty(), "shared shaping package has no sources: " + dir);
+
+        List<String> violations = new ArrayList<>();
+        for (Path source : sources) {
+            List<String> lines = Files.readAllLines(source);
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (isCommentLine(line)) {
+                    continue;
+                }
+                if (NPC_REFERENCE.matcher(line).find()) {
+                    violations.add(CORE_ROOT.relativize(source) + ":" + (i + 1) + ": " + line.trim());
+                }
+            }
+        }
+
+        assertTrue(violations.isEmpty(),
+            "core/navigation/shape must not import or reference core/npc:\n  " + String.join("\n  ", violations));
     }
 
     private static boolean isCommentLine(String line) {

@@ -5,6 +5,9 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Predicate;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
+
 /**
  * Plans the road part of a route on the K&K road graph for a subject (paper: the road router with the subject's
  * access policy, judged from where the subject stands). Needs no chunks (NAV-14). Called on the main thread; the
@@ -38,23 +41,6 @@ public interface RoadPlanner {
     record GateCrossing(int doorId, NavPoint at) {
         public GateCrossing {
             Objects.requireNonNull(at, "at");
-        }
-    }
-
-    /**
-     * A junction the route passes that may be a plaza (implementation plan 4c.3 decision 6, link M5): the road-graph
-     * builder collapses a plaza into one junction, so the route runs to its middle and out again.
-     *
-     * @param centre the junction's floor point (on the route line)
-     * @param radius a designed plaza's radius in blocks, or 0 for a junction whose open floor the corridor measures
-     *               (an automatic plaza, or no plaza at all)
-     */
-    record PlazaCrossing(NavPoint centre, int radius) {
-        public PlazaCrossing {
-            Objects.requireNonNull(centre, "centre");
-            if (radius < 0) {
-                throw new IllegalArgumentException("radius must be >= 0 (0 = measure)");
-            }
         }
     }
 

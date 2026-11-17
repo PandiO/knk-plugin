@@ -8,9 +8,10 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.navigation.shape.CorridorShaper;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower.Kind;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower.Stretch;
-import net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper;
 
 /**
  * Corridor steering in the route follower (implementation plan 4c.3 decisions 1 and 4, link M2): with the key off a

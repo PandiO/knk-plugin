@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * The places of the NPC movement scenarios (implementation plan 4c.5, link M1, PandiO/knk-workspace#621), each a
@@ -405,8 +405,8 @@ public final class NpcMovementScene {
     }
 
     /** The plaza junction in the middle (box 15.5 15.5), as the road graph's plaza node: its open floor is measured. */
-    public net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing plazaJunction() {
-        return new net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing(floor(15.5, FLAT, 15.5), 0);
+    public net.knightsandkings.knk.core.navigation.shape.PlazaCrossing plazaJunction() {
+        return new net.knightsandkings.knk.core.navigation.shape.PlazaCrossing(floor(15.5, FLAT, 15.5), 0);
     }
 
     /** The horizontal distance from feet to the plaza junction. */

@@ -14,7 +14,7 @@ import java.util.function.IntUnaryOperator;
 
 import org.junit.jupiter.api.Test;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;

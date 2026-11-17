@@ -16,9 +16,10 @@ import java.util.logging.Logger;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 import net.knightsandkings.knk.core.npc.nav.AccessSubject;
 import net.knightsandkings.knk.core.npc.nav.BlockingElement;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;
 import net.knightsandkings.knk.core.npc.nav.RoadPlanner;
@@ -115,7 +116,7 @@ class NpcRoadPlanningTest {
     void theJunctionsTheRoutePassesComeWithThePlanAsPossiblePlazas() {
         // link M5: West End -> B -> Cinix Keep passes the junction B; its open floor is measured on the NPC side
         RoadPlan plan = plan(floor(0, 0), floor(200, 0));
-        assertEquals(List.of(new RoadPlanner.PlazaCrossing(new NavPoint(NavigationTestNetwork.WORLD, 100, 64, 0), 0)),
+        assertEquals(List.of(new PlazaCrossing(new NavPoint(NavigationTestNetwork.WORLD, 100, 64, 0), 0)),
             plan.plazas());
         assertTrue(plan.line().contains(plan.plazas().get(0).centre()), "on the route's polyline");
     }

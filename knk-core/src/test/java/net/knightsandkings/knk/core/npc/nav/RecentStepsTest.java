@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /** Footsteps for the back-off and the fall check (implementation plan 4b.2 items 6.1 and 12). */
 class RecentStepsTest {

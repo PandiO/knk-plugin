@@ -1,42 +1,40 @@
-package net.knightsandkings.knk.core.npc.nav.corridor;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
-
 /**
  * A test world for corridor tests: one floor per column (64 unless set), walls two blocks high, holes (a drop), regions
- * per column, everything loaded; it counts every read.
+ * per column, everything loaded; it counts every read. Shared by the shaping tests and the NPC local-leg tests
+ * (PandiO/knk-workspace#704).
  */
-final class GridWorld implements NavWorld {
+public final class GridWorld implements NavWorld {
 
-    static final String W = "w";
+    public static final String W = "w";
 
-    final Map<Long, Integer> floors = new HashMap<>();
-    final Set<Long> walls = new HashSet<>();
-    final Set<Long> holes = new HashSet<>();
-    final Map<Long, Set<String>> regions = new HashMap<>();
-    long reads;
+    public final Map<Long, Integer> floors = new HashMap<>();
+    public final Set<Long> walls = new HashSet<>();
+    public final Set<Long> holes = new HashSet<>();
+    public final Map<Long, Set<String>> regions = new HashMap<>();
+    public long reads;
 
-    static long key(int x, int z) {
+    public static long key(int x, int z) {
         return ((long) x << 32) | (z & 0xffffffffL);
     }
 
-    int floor(int x, int z) {
+    public int floor(int x, int z) {
         return floors.getOrDefault(key(x, z), 64);
     }
 
-    GridWorld wall(int x, int z) {
+    public GridWorld wall(int x, int z) {
         walls.add(key(x, z));
         return this;
     }
 
     /** Walls on every column from (x1, z1) to (x2, z2), both included. */
-    GridWorld walls(int x1, int z1, int x2, int z2) {
+    public GridWorld walls(int x1, int z1, int x2, int z2) {
         for (int x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) {
             for (int z = Math.min(z1, z2); z <= Math.max(z1, z2); z++) {
                 wall(x, z);
@@ -45,12 +43,12 @@ final class GridWorld implements NavWorld {
         return this;
     }
 
-    GridWorld hole(int x, int z) {
+    public GridWorld hole(int x, int z) {
         holes.add(key(x, z));
         return this;
     }
 
-    GridWorld floorAt(int x, int z, int y) {
+    public GridWorld floorAt(int x, int z, int y) {
         floors.put(key(x, z), y);
         return this;
     }
@@ -88,7 +86,7 @@ final class GridWorld implements NavWorld {
     }
 
     /** Feet at a position on its column's floor. */
-    NavPoint feet(double x, double z) {
+    public NavPoint feet(double x, double z) {
         return new NavPoint(W, x, floor((int) Math.floor(x), (int) Math.floor(z)) + 1, z);
     }
 }

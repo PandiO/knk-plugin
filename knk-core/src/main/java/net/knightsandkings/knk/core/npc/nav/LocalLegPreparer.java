@@ -3,6 +3,8 @@ package net.knightsandkings.knk.core.npc.nav;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+
 /**
  * Prepares one local leg for the engine's path search: captures the terrain box around it and decides the subject's
  * access inside it (paper: the walk capture and {@code WalkAccessFactory}). Called on the main thread; the future

@@ -2,6 +2,8 @@ package net.knightsandkings.knk.core.npc.nav;
 
 import java.util.Optional;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+
 /** Creates movers on the running engine; absent when the engine adapter is unavailable (no Citizens). */
 public interface NpcMoverFactory {
 

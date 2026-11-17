@@ -7,8 +7,7 @@ import java.util.List;
 
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /** PandiO/knk-workspace#361: the rest of the engine's path, for the recheck of a local leg. */
 class CitizensNpcMoverPathTest {

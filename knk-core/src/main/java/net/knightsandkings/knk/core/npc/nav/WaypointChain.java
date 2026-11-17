@@ -6,6 +6,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+
 /**
  * Keeps a list of waypoints walkable step by step (PandiO/knk-workspace#592; BEHAVIOR_MODEL NAV-19): the engine walks
  * straight from one waypoint to the next, so every step must be a straight walk on floor

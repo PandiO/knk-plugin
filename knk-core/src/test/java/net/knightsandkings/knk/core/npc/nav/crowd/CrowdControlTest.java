@@ -14,7 +14,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.Decision;
 import net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.Kind;
 

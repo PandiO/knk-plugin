@@ -9,9 +9,11 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.navigation.shape.CorridorShaper;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower.Kind;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower.Stretch;
-import net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper;
 
 /**
  * Plaza lines in the route follower (implementation plan 4c.3 decision 6, link M5): the junction is placed on the line,
@@ -27,7 +29,7 @@ class RouteFollowerPlazaTest {
     /** An open square: the V from (0, 30) east to the junction (20, 30), then north to (20, 0). */
     private RouteFollower vRoute() {
         return new RouteFollower(List.of(floor(0.5, 64, 30.5), floor(20.5, 64, 30.5), floor(20.5, 64, 0.5)),
-            List.of(new RoadPlanner.PlazaCrossing(floor(20.6, 64, 30.4), 8)));
+            List.of(new PlazaCrossing(floor(20.6, 64, 30.4), 8)));
     }
 
     private static List<NavPoint> all(RouteFollower f, RouteFollower.Steering steering, FakeNavWorld world) {
@@ -65,7 +67,7 @@ class RouteFollowerPlazaTest {
         assertEquals(at, f.plazas().get(0).crossing().centre());
         // a junction off the line is left out
         assertEquals(0, new RouteFollower(List.of(floor(0.5, 64, 30.5), floor(20.5, 64, 30.5)),
-            List.of(new RoadPlanner.PlazaCrossing(floor(10.5, 64, 20.5), 0))).plazas().size());
+            List.of(new PlazaCrossing(floor(10.5, 64, 20.5), 0))).plazas().size());
     }
 
     @Test
@@ -81,9 +83,9 @@ class RouteFollowerPlazaTest {
     @Test
     void junctionsCloseTogetherDoNotChainIntoALongStretch() {
         // a street grid: a junction every 6 blocks along 200 blocks
-        List<RoadPlanner.PlazaCrossing> junctions = new ArrayList<>();
+        List<PlazaCrossing> junctions = new ArrayList<>();
         for (int x = 6; x < 200; x += 6) {
-            junctions.add(new RoadPlanner.PlazaCrossing(floor(x + 0.5, 64, 0.5), 0));
+            junctions.add(new PlazaCrossing(floor(x + 0.5, 64, 0.5), 0));
         }
         RouteFollower f = new RouteFollower(List.of(floor(0.5, 64, 0.5), floor(200.5, 64, 0.5)), junctions);
         Stretch s = f.next(world, 24, 64, 0, new RouteFollower.Steering(shaper,

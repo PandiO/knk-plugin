@@ -4,10 +4,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
-import net.knightsandkings.knk.core.npc.nav.NavGeometry;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
 
 /**
@@ -561,13 +561,13 @@ final class GroupPath {
             int found = Integer.MIN_VALUE;
             for (int candidate : stair ? new int[] {floorY, floorY + 1, floorY - 1} : new int[] {y, y + 1, y - 1}) {
                 if (world.isStandableFloor(c.world(), cx, candidate, cz)
-                    && world.freeHeight(c.world(), cx, candidate, cz) >= net.knightsandkings.knk.core.npc.nav.NavGeometry.BODY_HEIGHT) {
+                    && world.freeHeight(c.world(), cx, candidate, cz) >= net.knightsandkings.knk.core.navigation.shape.NavGeometry.BODY_HEIGHT) {
                     found = candidate;
                     break;
                 }
             }
             if (found == Integer.MIN_VALUE) {
-                boolean wall = net.knightsandkings.knk.core.npc.nav.NavGeometry.wallAt(world, c.world(), cx, y + 1, cz);
+                boolean wall = net.knightsandkings.knk.core.navigation.shape.NavGeometry.wallAt(world, c.world(), cx, y + 1, cz);
                 return new double[] {t, (wall ? Stop.WALL : Stop.DROP).ordinal()};
             }
             if (stair && found != floorY) {

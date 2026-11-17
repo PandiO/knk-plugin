@@ -10,6 +10,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower.Kind;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower.Stretch;
 

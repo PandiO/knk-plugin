@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
@@ -105,7 +105,7 @@ public final class NpcMovementReport {
      * The 1-wide places on a road line (plan 4c.4 item 3.3): runs of points, every half block along the line, where
      * the free width across it (M1's {@code FreeWidth}, the trace's measure) is under {@link #ONE_WIDE}.
      */
-    static int oneWidePlaces(net.knightsandkings.knk.core.npc.nav.NavWorld world, List<NavPoint> floorLine) {
+    static int oneWidePlaces(net.knightsandkings.knk.core.navigation.shape.NavWorld world, List<NavPoint> floorLine) {
         List<NavPoint> points = net.knightsandkings.knk.core.npc.nav.HopPlanner.resampleKeepingCorners(floorLine, 0.5);
         int places = 0;
         boolean in = false;
@@ -113,7 +113,7 @@ public final class NpcMovementReport {
             NavPoint before = points.get(Math.max(0, i - 1));
             NavPoint after = points.get(Math.min(points.size() - 1, i + 1));
             NavPoint feet = net.knightsandkings.knk.core.npc.nav.HopPlanner.feet(points.get(i));
-            boolean narrow = net.knightsandkings.knk.core.npc.nav.corridor.FreeWidth.at(world, feet,
+            boolean narrow = net.knightsandkings.knk.core.navigation.shape.FreeWidth.at(world, feet,
                 after.x() - before.x(), after.z() - before.z()).total() < ONE_WIDE;
             places += narrow && !in ? 1 : 0;
             in = narrow;

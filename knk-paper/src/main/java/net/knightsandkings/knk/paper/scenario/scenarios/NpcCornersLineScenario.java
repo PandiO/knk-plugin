@@ -2,9 +2,9 @@ package net.knightsandkings.knk.paper.scenario.scenarios;
 
 import java.util.List;
 
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
-import net.knightsandkings.knk.core.npc.nav.NavGeometry;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.PathTargets;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower;
 import net.knightsandkings.knk.core.scenario.Scenario;

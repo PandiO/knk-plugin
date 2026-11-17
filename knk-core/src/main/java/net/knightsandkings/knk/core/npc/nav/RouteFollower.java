@@ -4,7 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper;
+import net.knightsandkings.knk.core.navigation.shape.CorridorShaper;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 
 /**
  * One NPC's progress along a K&K route (BEHAVIOR_MODEL NAV-14, NAV-15; decision Q8): the road line as floor points
@@ -78,7 +82,7 @@ public final class RouteFollower {
      * @param index    the line point at the junction
      * @param crossing the crossing, its centre moved onto that line point
      */
-    public record PlazaOnLine(int index, RoadPlanner.PlazaCrossing crossing) {
+    public record PlazaOnLine(int index, PlazaCrossing crossing) {
     }
 
     /** @param roadLine the route as floor points (the road's polyline), at least one */
@@ -91,14 +95,14 @@ public final class RouteFollower {
      * @param plazas   the junctions the route passes that may be plazas (link M5; a junction further than
      *                 {@link #PLAZA_ON_LINE} blocks from the line is left out)
      */
-    public RouteFollower(List<NavPoint> roadLine, List<RoadPlanner.PlazaCrossing> plazas) {
+    public RouteFollower(List<NavPoint> roadLine, List<PlazaCrossing> plazas) {
         Objects.requireNonNull(roadLine, "roadLine");
         if (roadLine.isEmpty()) {
             throw new IllegalArgumentException("a route needs at least one point");
         }
         this.line = List.copyOf(HopPlanner.resampleKeepingCorners(roadLine, STEP));
         List<PlazaOnLine> onLine = new ArrayList<>();
-        for (RoadPlanner.PlazaCrossing p : plazas == null ? List.<RoadPlanner.PlazaCrossing>of() : plazas) {
+        for (PlazaCrossing p : plazas == null ? List.<PlazaCrossing>of() : plazas) {
             int best = -1;
             double bestD = Double.MAX_VALUE;
             for (int i = 0; i < line.size(); i++) {
@@ -110,7 +114,7 @@ public final class RouteFollower {
                 }
             }
             if (best >= 0 && bestD <= PLAZA_ON_LINE) {
-                onLine.add(new PlazaOnLine(best, new RoadPlanner.PlazaCrossing(line.get(best), p.radius())));
+                onLine.add(new PlazaOnLine(best, new PlazaCrossing(line.get(best), p.radius())));
             }
         }
         onLine.sort(java.util.Comparator.comparingInt(PlazaOnLine::index));
@@ -183,8 +187,8 @@ public final class RouteFollower {
     }
 
     /** The plaza crossings whose junction lies at a line index in [from, to). */
-    public List<RoadPlanner.PlazaCrossing> plazasBetween(int from, int to) {
-        List<RoadPlanner.PlazaCrossing> out = new ArrayList<>();
+    public List<PlazaCrossing> plazasBetween(int from, int to) {
+        List<PlazaCrossing> out = new ArrayList<>();
         for (PlazaOnLine p : plazas) {
             if (p.index() >= from && p.index() < to) {
                 out.add(p.crossing());
@@ -332,7 +336,7 @@ public final class RouteFollower {
             return new Stretch(Kind.DONE, List.of());
         }
         int chokepoints = 0;
-        List<RoadPlanner.PlazaCrossing> here = plazaBlocks > 0 ? plazasBetween(start, end) : List.of();
+        List<PlazaCrossing> here = plazaBlocks > 0 ? plazasBetween(start, end) : List.of();
         boolean shape = steering != null && points.size() >= 2
             && (!steering.options().plazaOnly() || !here.isEmpty());
         if (shape) {

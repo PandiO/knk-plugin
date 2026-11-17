@@ -8,8 +8,8 @@ import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.AccessRules;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;

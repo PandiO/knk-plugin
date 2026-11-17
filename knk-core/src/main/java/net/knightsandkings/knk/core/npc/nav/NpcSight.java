@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.core.npc.nav;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+
 /**
  * Whether any player can see a place (implementation plan 4c.4 item 7, link M7): a pushed NPC that could not walk
  * back teleports home only where no player sees it go or arrive. Main thread; an implementation never loads a chunk.
