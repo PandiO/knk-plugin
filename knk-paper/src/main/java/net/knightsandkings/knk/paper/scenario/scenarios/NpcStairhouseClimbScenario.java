@@ -33,8 +33,9 @@ import net.knightsandkings.knk.paper.scenario.SizedScene;
  * a landing, a skipped flight, and the queue let go by the guard. Since link B2 (PandiO/knk-workspace#671) it fails on
  * a fall from a flight or landing, a handover onto another level, a turn released by the 30 s guard after its holder
  * fell, a group leader that does not arrive and a lost follower ({@link ClimbWatch#failures}); since link B4
- * (PandiO/knk-workspace#673) also on a real jump (by upward speed) on a flight or its entry; the rest stays report
- * only. Needs Citizens.
+ * (PandiO/knk-workspace#673) also on a real jump (by upward speed) on a flight or its entry; since link B3
+ * (PandiO/knk-workspace#672) also on any NPC a queue let go by the crowd's 30 s guard, with why ({@link
+ * ClimbWatch#releases}); the rest stays report only. Needs Citizens.
  */
 public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>, SizedScene {
 
@@ -174,6 +175,13 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
                     failures.add("jumps toward a waypoint on the flights and their entries "
                         + ClimbWatch.first(watch.get().jumpsOnClimb(), 3));
                 }
+                var crowd = npcs.get().service().crowd();
+                if (crowd.overdue() > 0) {
+                    // link B3 (PandiO/knk-workspace#672): turns judged in 3D, so no queue waits for a holder on
+                    // another flight and the 30 s guard lets nobody go
+                    failures.add(crowd.overdue() + " NPCs let go by the crowd's 30 s guard "
+                        + ClimbWatch.first(watch.get().releases(npcs.get()::nameOf), 3));
+                }
                 npcs.get().dismiss(group.get());
                 npcs.get().remove(walkers);
                 return failures.isEmpty() ? null : String.join("; ", failures);
@@ -199,6 +207,8 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
             .add("engine stair hops (off a stair's step)", watch.stairHops().size())
             .add("jumps toward a waypoint on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
+            .add("why the guard let them go (B3)", ClimbWatch.first(watch.releases(npcs::nameOf), 6))
+            .add("waits of 10 s or more (B3)", ClimbWatch.first(watch.longWaits(npcs::nameOf), 4))
             .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))
             .add("line steps walked as local legs", npcs.service().gapLegs())

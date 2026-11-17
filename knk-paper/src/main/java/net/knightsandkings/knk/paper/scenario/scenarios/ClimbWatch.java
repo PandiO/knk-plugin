@@ -296,6 +296,56 @@ final class ClimbWatch {
         body.fellInTurn = false;
     }
 
+    /**
+     * The queue releases by the crowd's 30 s guard (link B3, PandiO/knk-workspace#672) in real coordinates: the NPC let
+     * go and where it stood, the place (its middle and its cells' feet levels), and each holder of a turn there with
+     * its feet, its height above the place's first cell, its progress and its distance across the place's axis.
+     */
+    List<String> releases(java.util.function.IntFunction<String> names) {
+        List<String> out = new ArrayList<>();
+        for (net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.Release r : service.crowd().releases()) {
+            StringBuilder b = new StringBuilder();
+            b.append(String.format(Locale.ROOT, "%s at %s (y %+.2f) let go at the place %s (feet levels %+d..%+d, half "
+                    + "length %.1f, dir %+d), %d earlier waiting", names.apply(r.npc()), house.realBlock(r.at()),
+                r.at().y() - r.place().y(), house.realBlock(r.place()), r.minY() - (int) r.place().y(),
+                r.maxY() - (int) r.place().y(), r.halfLength(), r.dir(), r.earlier()));
+            if (r.holders().isEmpty()) {
+                b.append(", nobody holds a turn");
+            }
+            for (var h : r.holders()) {
+                b.append(String.format(Locale.ROOT, "; holder %s at %s (y %+.2f, progress %+.1f, lateral %.1f, dir %+d, "
+                        + "held %.1f s%s%s%s)", names.apply(h.npc()), house.realBlock(h.at()), h.at().y() - r.place().y(),
+                    h.progress(), h.lateral(), h.dir(), h.heldTicks() / 20.0, h.blocks() ? ", blocks" : "",
+                    h.passed() ? ", passed" : "",
+                    h.membersIn() == 0 ? "" : String.format(Locale.ROOT, ", %d followers keep it, first at %s (y %+.2f)",
+                        h.membersIn(), house.realBlock(h.memberAt()), h.memberAt().y() - r.place().y())));
+            }
+            b.append(why(r.why(), names));
+            out.add(b.toString());
+        }
+        return out;
+    }
+
+    /** Waits of 10 s or more that ended in a normal turn, with what held them (link B3). */
+    List<String> longWaits(java.util.function.IntFunction<String> names) {
+        List<String> out = new ArrayList<>();
+        for (var w : service.crowd().longWaits()) {
+            out.add(String.format(Locale.ROOT, "%s waited %.1f s at %s%s", names.apply(w.npc()), w.waitedTicks() / 20.0,
+                house.realBlock(w.place()), why(w.why(), names)));
+        }
+        return out;
+    }
+
+    private String why(List<net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl.Block> blocks,
+                       java.util.function.IntFunction<String> names) {
+        StringBuilder b = new StringBuilder();
+        for (var k : blocks) {
+            b.append(String.format(Locale.ROOT, "; held by %s %s %d looks, last at %s (level %+.2f, progress %+.1f)",
+                k.kind(), names.apply(k.npc()), k.looks(), house.realBlock(k.at()), k.levelGap(), k.progress()));
+        }
+        return b.toString();
+    }
+
     /** "x y z" of a world position's block in real coordinates. */
     String realBlock(NavPoint at) {
         return house.realBlock(at);

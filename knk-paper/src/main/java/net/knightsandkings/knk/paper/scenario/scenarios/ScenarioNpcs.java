@@ -391,6 +391,16 @@ public final class ScenarioNpcs {
         return log;
     }
 
+    /** A mover's name by its id ("#id" when it is gone). */
+    public String nameOf(int id) {
+        for (NpcMover m : movers) {
+            if (m.id() == id) {
+                return m.name();
+            }
+        }
+        return "#" + id;
+    }
+
     public List<NpcMover> movers() {
         return movers;
     }
