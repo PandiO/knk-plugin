@@ -29,9 +29,11 @@ import net.knightsandkings.knk.paper.scenario.SizedScene;
  * <p>
  * It reports what {@link ClimbWatch} sees: falls (from where to where), places of the climb skipped or walked back to,
  * stretch handovers and those onto another level, the queue releases by the crowd's 30 s guard ("let go"), stuck
- * spells and where each NPC got to. On {@code next} before link B2 these show the smoke test's failures: a fall under
- * a landing, a skipped flight, and the queue let go by the guard. It never fails on them; links B2 to B4 turn the
- * numbers into checks. Needs Citizens.
+ * spells and where each NPC got to. On {@code next} before link B2 these showed the smoke test's failures: a fall under
+ * a landing, a skipped flight, and the queue let go by the guard. Since link B2 (PandiO/knk-workspace#671) it fails on
+ * a fall from a flight or landing, a handover onto another level, a turn released by the 30 s guard after its holder
+ * fell, a group leader that does not arrive and a lost follower ({@link ClimbWatch#failures}); the rest stays report
+ * only. Needs Citizens.
  */
 public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>, SizedScene {
 
@@ -54,7 +56,7 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
 
     @Override
     public String description() {
-        return "Report: a group of 20 with 20 singles from the street east of the stair house up all five flights "
+        return "A group of 20 with 20 singles from the street east of the stair house up all five flights "
             + "with short stretches (the smoke test's crowd of 2026-11-16)";
     }
 
@@ -158,9 +160,16 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
                 all.addAll(walkers);
                 report(report.get(), npcs.get(), watch.get(), all, groupResult.get(), took[0], GROUP_TICKS,
                     built.get(), group.get(), house).log(label);
+                List<String> failures = new ArrayList<>(watch.get().failures());
+                if (!(groupResult.get() instanceof NavigationResult.Arrived)) {
+                    failures.add("the group's leader did not arrive: " + groupResult.get());
+                }
+                if (group.get().lost() > 0) {
+                    failures.add(group.get().lost() + " followers lost");
+                }
                 npcs.get().dismiss(group.get());
                 npcs.get().remove(walkers);
-                return null;
+                return failures.isEmpty() ? null : String.join("; ", failures);
             });
     }
 
@@ -177,14 +186,18 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
             .add("places skipped or walked back to", ClimbWatch.first(watch.skips(), 4))
             .add("stretch handovers", watch.handovers())
             .add("handovers onto another level", ClimbWatch.first(watch.crossLevel(), 4))
+            .add("new stretches starting off the feet level (B1's measure)", watch.stretchOffLevel().size())
+            .add("falls from the climb", watch.fallsFromClimb().size())
             .add("queue let go by the 30 s guard", crowd.overdue())
             .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))
+            .add("line steps walked as local legs", npcs.service().gapLegs())
             .add("stuck spells", report.count(npcs, Event.STUCK_ENGINE) + report.count(npcs, Event.STUCK_NO_PROGRESS))
             .add("longest still", String.format(Locale.ROOT, "%.1f s, %s", npcs.longestStillTicks() / 20.0,
                 house.realPosition(npcs.longestStillWho())));
         if (group != null) {
-            report.add("width now", group.width().describe()).add("lost", group.lost());
+            report.add("width now", group.width().describe()).add("lost", group.lost())
+                .add("leader falls kept out of the group path", group.leaderFalls());
         }
         return report.crowd(npcs);
     }
