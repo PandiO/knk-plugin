@@ -7,8 +7,9 @@ import java.util.Locale;
 
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.domain.roads.RoadNode;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 import net.knightsandkings.knk.core.npc.nav.RoadPlanner;
 import net.knightsandkings.knk.core.npc.nav.RouteFollower;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
@@ -57,7 +58,7 @@ public final class SnapshotParts {
             gates.add(new NavSnapshot.GateCrossing(gate.doorId(), xyz(gate.at())));
         }
         List<NavSnapshot.Plaza> plazas = new ArrayList<>();
-        for (RoadPlanner.PlazaCrossing plaza : plan.plazas()) {
+        for (PlazaCrossing plaza : plan.plazas()) {
             plazas.add(new NavSnapshot.Plaza(xyz(plaza.centre()), plaza.radius()));
         }
         return new NavSnapshot.RouteLine(name, xyz(from), xyz(to), plan.status().name(), plan.reason(), line,
@@ -70,7 +71,7 @@ public final class SnapshotParts {
      * (corridor steering is not applied: the replay's own settings decide that). Stops at a chunk that is not
      * loaded, with a note in {@code notes}.
      */
-    public static List<List<double[]>> stretches(List<NavPoint> line, List<RoadPlanner.PlazaCrossing> plazas,
+    public static List<List<double[]>> stretches(List<NavPoint> line, List<PlazaCrossing> plazas,
                                                  NavWorld world, double stretchBlocks, double cornerClearance,
                                                  List<String> notes) {
         List<List<double[]>> out = new ArrayList<>();

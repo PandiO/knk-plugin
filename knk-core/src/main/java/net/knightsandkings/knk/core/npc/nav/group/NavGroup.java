@@ -12,15 +12,15 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import net.knightsandkings.knk.core.gates.target.GateBox;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.BlockingElement;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcNavState;
-import net.knightsandkings.knk.core.npc.nav.NavGeometry;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
 import net.knightsandkings.knk.core.npc.nav.PathTargets;
@@ -1047,12 +1047,12 @@ public final class NavGroup {
         Formation.Width widest = formation.widths().get(0);
         double half = widest.ring() ? Formation.RING_RADIUS * formation.lateralSpacing()
             : (widest.abreast() - 1) / 2.0 * formation.lateralSpacing();
-        return Math.min(net.knightsandkings.knk.core.npc.nav.corridor.Corridor.CAP,
+        return Math.min(net.knightsandkings.knk.core.navigation.shape.Corridor.CAP,
             half + settings.keeping().wallClearance());
     }
 
     /** The plaza-line options of the group path: its leader's {@code plaza-lines}, or null when off (link M5). */
-    private net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options plazaOptions() {
+    private net.knightsandkings.knk.core.navigation.shape.CorridorShaper.Options plazaOptions() {
         return ports.navigation().plazaOptions(leader.id());
     }
 
@@ -1062,7 +1062,7 @@ public final class NavGroup {
         int from = Math.max(0, first - 1);
         int to = Math.min(line.size(), first + SHAPE_CHUNK + 1);
         var plazas = plazaOptions();
-        List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing> crossings = List.of();
+        List<net.knightsandkings.knk.core.navigation.shape.PlazaCrossing> crossings = List.of();
         if (plazas != null) {
             // a chunk holds the whole way across a plaza it reaches into, so both chunks place the same plaza line
             int reach = (int) Math.ceil(plazas.plazaBlocks() / RouteFollower.STEP) + 2;
@@ -1100,11 +1100,11 @@ public final class NavGroup {
         if (feet.size() < 2) {
             return List.of();
         }
-        var options = new net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options(
+        var options = new net.knightsandkings.knk.core.navigation.shape.CorridorShaper.Options(
             NavigationSettingsDefaults.HALF_WIDTH, settings.keeping().wallClearance());
         if (plazas != null) {
             options = elastic ? options.withPlazas(plazas.plazaBlocks(), plazaClearance())
-                : net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper.Options.plazasOnly(
+                : net.knightsandkings.knk.core.navigation.shape.CorridorShaper.Options.plazasOnly(
                     NavigationSettingsDefaults.HALF_WIDTH, settings.keeping().wallClearance(), plazas.plazaBlocks(),
                     plazaClearance());
         }

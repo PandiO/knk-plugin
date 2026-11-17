@@ -11,8 +11,7 @@ import java.util.List;
 
 import org.bukkit.World;
 import org.junit.jupiter.api.Test;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * The NPC movement scenes (plan 4c.5, link M1, PandiO/knk-workspace#621): every road-line point and every start or

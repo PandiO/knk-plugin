@@ -11,6 +11,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
 import net.knightsandkings.knk.core.npc.nav.RecoveryLadder.Report;
 import net.knightsandkings.knk.core.npc.nav.RecoveryLadder.Reporter;

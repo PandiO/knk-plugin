@@ -1,8 +1,8 @@
 package net.knightsandkings.knk.core.npc.nav.push;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
 
 /**
  * The edge guard (implementation plan 4c.4 item 7, research report § 6.5 item 5): with collision on an NPC never stands

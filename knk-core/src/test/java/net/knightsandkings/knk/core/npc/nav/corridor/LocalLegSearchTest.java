@@ -9,9 +9,11 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.navigation.shape.Corridor;
+import net.knightsandkings.knk.core.navigation.shape.GridWorld;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.LocalLeg;
-import net.knightsandkings.knk.core.npc.nav.NavGeometry;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.roads.walk.CellAccess;
 
 /**

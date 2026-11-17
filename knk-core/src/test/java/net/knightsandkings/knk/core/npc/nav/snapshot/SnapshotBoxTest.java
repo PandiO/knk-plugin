@@ -9,8 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /** The box of a snapshot (link B1, PandiO/knk-workspace#670) and the region files it touches. */
 class SnapshotBoxTest {

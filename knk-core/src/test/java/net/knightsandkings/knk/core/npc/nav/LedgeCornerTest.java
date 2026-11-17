@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * A 90° turn at a ledge (PandiO/knk-workspace#592, the #491 stair corner at 1411 73 -537): a 2-wide flight comes south

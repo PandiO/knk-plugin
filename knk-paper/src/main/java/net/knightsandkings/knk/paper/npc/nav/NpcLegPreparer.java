@@ -9,10 +9,10 @@ import java.util.logging.Logger;
 
 import org.bukkit.World;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.AccessSubject;
 import net.knightsandkings.knk.core.npc.nav.LocalLeg;
 import net.knightsandkings.knk.core.npc.nav.LocalLegPreparer;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;
 import net.knightsandkings.knk.paper.navigation.walk.WalkBox;
 import net.knightsandkings.knk.paper.navigation.walk.WalkLegPreparer;

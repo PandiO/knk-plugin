@@ -1,4 +1,4 @@
-package net.knightsandkings.knk.core.npc.nav.corridor;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -10,9 +10,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing;
 
 /**
  * Plaza lines (implementation plan 4c.4 item 5.2, link M5): on the scenario's plaza (15 × 15, x and z 8..22, walled,

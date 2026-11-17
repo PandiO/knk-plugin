@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * Corner clearance and the shortcut check (implementation plan 4b.2 items 1, 3 and 4; test plan item 16.1 and 16.2):

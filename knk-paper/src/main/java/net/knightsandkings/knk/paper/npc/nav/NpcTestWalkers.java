@@ -15,7 +15,7 @@ import org.bukkit.block.data.Waterlogged;
 
 import io.papermc.paper.block.fluid.FluidData;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcMoverFactory;

@@ -19,6 +19,7 @@ import java.util.function.Predicate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.LocalLegPreparer.Prepared;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings;

@@ -11,8 +11,7 @@ import java.util.logging.Logger;
 
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * The test routes of {@code /knk npc nav} on disk, {@code plugins/<plugin>/npc-routes.yml}, so they survive a

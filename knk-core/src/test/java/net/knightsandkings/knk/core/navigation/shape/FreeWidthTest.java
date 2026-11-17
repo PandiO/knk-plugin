@@ -1,4 +1,4 @@
-package net.knightsandkings.knk.core.npc.nav.corridor;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -7,9 +7,6 @@ import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
 
 /** The free width across a line for the trace's {@code # corridor:} lines (plan 4c.4 item 1, link M1). */
 class FreeWidthTest {

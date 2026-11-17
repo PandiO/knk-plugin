@@ -5,6 +5,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.function.Predicate;
 
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+
 /**
  * The small moves of the recovery ladder (implementation plan 4b.2 items 6.2 and 13): the blocking face beside a
  * stuck NPC, whether it is "near a wall", and the side-step away from that face. Pure; main thread (asks the world).

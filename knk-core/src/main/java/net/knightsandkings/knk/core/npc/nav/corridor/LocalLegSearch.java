@@ -5,11 +5,12 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.PriorityQueue;
 
+import net.knightsandkings.knk.core.navigation.shape.Corridor;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
 import net.knightsandkings.knk.core.npc.nav.LocalLeg;
-import net.knightsandkings.knk.core.npc.nav.NavGeometry;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
 
 /**
  * K&K's own search for a local leg (implementation plan 4c.3 decision 8, add-on D, link M6; BEHAVIOR_MODEL NAV-24): a

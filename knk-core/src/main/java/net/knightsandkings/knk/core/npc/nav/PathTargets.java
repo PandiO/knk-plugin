@@ -3,6 +3,10 @@ package net.knightsandkings.knk.core.npc.nav;
 import java.util.List;
 import java.util.function.Predicate;
 
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+
 /**
  * Where a stuck NPC or a follower's own leg back aims (implementation plan 4b.2 item 5; BEHAVIOR_MODEL NAV-20): a
  * point <b>along the path</b>, ahead of the NPC's place on it, on the NPC's own floor. One rule for the recovery leg,

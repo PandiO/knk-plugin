@@ -1,4 +1,4 @@
-package net.knightsandkings.knk.core.npc.nav.corridor;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,8 +8,6 @@ import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 
 /**
  * The corridor's clearance map, a distance transform over the strip round the road line (implementation plan 4c.4 item

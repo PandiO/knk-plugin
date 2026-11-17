@@ -10,7 +10,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
@@ -40,7 +41,7 @@ class NavGroupPlazaTest {
             d.wallClearance(), d.localLegsClearance(), plazaLines, 16);
         // the road graph's V through a plaza junction on an open square: east to (20.5, 0.5), then north
         sim.road = (subject, from, to) -> RoadPlanner.RoadPlan.found(List.of(floor(0.5, 0.5), floor(JX, JZ),
-            floor(JX, -24.5))).withPlazas(List.of(new RoadPlanner.PlazaCrossing(floor(JX, JZ), 10)));
+            floor(JX, -24.5))).withPlazas(List.of(new PlazaCrossing(floor(JX, JZ), 10)));
     }
 
     private static GroupSettings ranks(boolean elastic) {

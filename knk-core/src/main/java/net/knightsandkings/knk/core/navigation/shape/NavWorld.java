@@ -1,4 +1,4 @@
-package net.knightsandkings.knk.core.npc.nav;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import java.util.Set;
 

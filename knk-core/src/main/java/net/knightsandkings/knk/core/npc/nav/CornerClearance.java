@@ -6,6 +6,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+
 /**
  * Corner clearance on a route line (implementation plan 4b.2 item 1; BEHAVIOR_MODEL NAV-19): at a turn, the waypoints
  * keep a distance from walls on the inside of the turn, so an NPC walks round a wall corner instead of brushing it

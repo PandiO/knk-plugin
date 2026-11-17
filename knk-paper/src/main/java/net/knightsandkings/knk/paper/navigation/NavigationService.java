@@ -559,8 +559,8 @@ public final class NavigationService implements SiegeMatchObserver {
      */
     public CompletableFuture<net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan> planRoadFor(
             net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
-            net.knightsandkings.knk.core.npc.nav.NavPoint fromFloor,
-            net.knightsandkings.knk.core.npc.nav.NavPoint toFloor) {
+            net.knightsandkings.knk.core.navigation.shape.NavPoint fromFloor,
+            net.knightsandkings.knk.core.navigation.shape.NavPoint toFloor) {
         CompletableFuture<net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan> out = new CompletableFuture<>();
         String world = fromFloor.world();
         RoadNetworkSnapshot snapshot = deps.snapshots().apply(world);
@@ -632,10 +632,10 @@ public final class NavigationService implements SiegeMatchObserver {
      */
     static net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan roadPlanOf(String world, RouteResult result,
             Function<RoadEdge, Predicate<net.knightsandkings.knk.core.npc.nav.AccessSubject>> stillBlocked) {
-        List<net.knightsandkings.knk.core.npc.nav.NavPoint> line = new ArrayList<>();
+        List<net.knightsandkings.knk.core.navigation.shape.NavPoint> line = new ArrayList<>();
         List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.GateCrossing> gates = new ArrayList<>();
         result.routeToGuide().ifPresent(route -> {
-            route.polyline().forEach(p -> line.add(new net.knightsandkings.knk.core.npc.nav.NavPoint(world, p[0], p[1], p[2])));
+            route.polyline().forEach(p -> line.add(new net.knightsandkings.knk.core.navigation.shape.NavPoint(world, p[0], p[1], p[2])));
             // a step's distances are road lengths; the polyline may be a little longer or shorter
             double scale = route.length() <= 0 ? 1 : route.polylineLength() / route.length();
             for (Route.Step step : route.steps()) {
@@ -645,7 +645,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 double[] end = route.pointAt((step.startDistance() + step.length()) * scale);
                 for (int doorId : step.edge().gateDoorIds()) {
                     gates.add(new net.knightsandkings.knk.core.npc.nav.RoadPlanner.GateCrossing(doorId,
-                        new net.knightsandkings.knk.core.npc.nav.NavPoint(world, end[0], end[1], end[2])));
+                        new net.knightsandkings.knk.core.navigation.shape.NavPoint(world, end[0], end[1], end[2])));
                 }
             }
         });
@@ -667,15 +667,15 @@ public final class NavigationService implements SiegeMatchObserver {
      * plaza's centre with its radius, and every other junction with radius 0, whose open floor the NPC side measures
      * (the road data does not mark automatic plazas). Empty without a route.
      */
-    static List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing> plazaCrossingsOf(String world,
+    static List<net.knightsandkings.knk.core.navigation.shape.PlazaCrossing> plazaCrossingsOf(String world,
             RouteResult result, RoadNetworkSnapshot snapshot) {
-        List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing> out = new ArrayList<>();
+        List<net.knightsandkings.knk.core.navigation.shape.PlazaCrossing> out = new ArrayList<>();
         result.routeToGuide().ifPresent(route -> {
             for (int id : route.nodeIds()) {
                 snapshot.node(id).ifPresent(node -> {
                     if (node.isPlazaCentre() || node.kind() == RoadNodeKind.JUNCTION) {
-                        out.add(new net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing(
-                            new net.knightsandkings.knk.core.npc.nav.NavPoint(world, node.x(), node.y(), node.z()),
+                        out.add(new net.knightsandkings.knk.core.navigation.shape.PlazaCrossing(
+                            new net.knightsandkings.knk.core.navigation.shape.NavPoint(world, node.x(), node.y(), node.z()),
                             node.plazaRadius())); // as the polyline gives the node: its floor block
                     }
                 });

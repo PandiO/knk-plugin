@@ -9,7 +9,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.scheduler.BukkitTask;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.scenario.Scenario;

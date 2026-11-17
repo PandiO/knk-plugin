@@ -7,8 +7,7 @@ import java.util.Objects;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.data.type.Slab;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * The two spots of the developer's L3 retest (PandiO/knk-workspace#592) rebuilt in their real geometry and orientation,

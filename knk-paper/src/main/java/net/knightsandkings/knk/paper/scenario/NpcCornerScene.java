@@ -7,8 +7,7 @@ import java.util.Objects;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.data.type.Slab;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * The corner test scene of implementation plan 4b.2 item 19 (PandiO/knk-workspace#521): one loop of about 90 blocks

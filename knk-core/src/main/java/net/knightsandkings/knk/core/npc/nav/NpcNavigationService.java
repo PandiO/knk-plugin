@@ -16,8 +16,12 @@ import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 
+import net.knightsandkings.knk.core.navigation.shape.CorridorShaper;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+import net.knightsandkings.knk.core.navigation.shape.PlazaCrossing;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;
-import net.knightsandkings.knk.core.npc.nav.corridor.CorridorShaper;
 import net.knightsandkings.knk.core.npc.nav.corridor.LocalLegSearch;
 import net.knightsandkings.knk.core.npc.nav.crowd.CrowdControl;
 import net.knightsandkings.knk.core.npc.nav.crowd.Occupancy;
@@ -1122,7 +1126,7 @@ public final class NpcNavigationService {
      * a blocking element and ends there.
      */
     private void startRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
-                            List<RoadPlanner.GateCrossing> gates, List<RoadPlanner.PlazaCrossing> plazas,
+                            List<RoadPlanner.GateCrossing> gates, List<PlazaCrossing> plazas,
                             NavPoint from, NavPoint to) {
         nav.follower = new RouteFollower(line, plazas);
         nav.trail = null;

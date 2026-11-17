@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * The box a snapshot covers (link B1, PandiO/knk-workspace#670): the route line's blocks with a margin round them, and

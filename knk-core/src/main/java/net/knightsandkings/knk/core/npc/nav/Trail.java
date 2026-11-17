@@ -4,6 +4,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
+
 /**
  * The waypoint list a mover was last given for the road line, and how far along it the NPC has come (link B2,
  * PandiO/knk-workspace#671; chain report decision 34). The engine does not say which waypoint it walks to, so this

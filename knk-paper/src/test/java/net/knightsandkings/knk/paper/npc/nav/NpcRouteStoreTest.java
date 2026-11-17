@@ -14,7 +14,7 @@ import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.paper.npc.nav.NpcRouteStore.Route;
 
 class NpcRouteStoreTest {

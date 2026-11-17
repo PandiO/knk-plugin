@@ -1,14 +1,10 @@
-package net.knightsandkings.knk.core.npc.nav.corridor;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.LongSupplier;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
-import net.knightsandkings.knk.core.npc.nav.RoadPlanner.PlazaCrossing;
 
 /**
  * Corridor steering, option A (implementation plan 4c.3 decision 1, link M2; BEHAVIOR_MODEL NAV-24): re-places a

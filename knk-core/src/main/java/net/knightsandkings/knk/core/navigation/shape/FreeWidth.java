@@ -1,12 +1,8 @@
-package net.knightsandkings.knk.core.npc.nav.corridor;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-
-import net.knightsandkings.knk.core.npc.nav.NavGeometry;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
 
 /**
  * The free width across a walking line at one point (implementation plan 4c.4 item 1, link M1: diagnostics only,

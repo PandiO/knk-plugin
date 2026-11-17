@@ -12,7 +12,7 @@ import org.bukkit.block.data.Bisected;
 import org.bukkit.block.data.type.Slab;
 import org.bukkit.block.data.type.Stairs;
 
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 import net.knightsandkings.knk.paper.regions.RegionIds;
 
 /** {@link NavWorld} on the Bukkit world: loaded chunks only, never loading one. Main thread. */

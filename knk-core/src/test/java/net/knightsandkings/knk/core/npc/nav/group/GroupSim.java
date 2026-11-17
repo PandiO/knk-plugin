@@ -11,13 +11,13 @@ import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 
 import net.knightsandkings.knk.core.gates.target.GateBox;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.AccessRules;
 import net.knightsandkings.knk.core.npc.nav.AccessSubject;
 import net.knightsandkings.knk.core.npc.nav.LocalLeg;
 import net.knightsandkings.knk.core.npc.nav.LocalLegPreparer;
 import net.knightsandkings.knk.core.npc.nav.LocalLegPreparer.Prepared;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;

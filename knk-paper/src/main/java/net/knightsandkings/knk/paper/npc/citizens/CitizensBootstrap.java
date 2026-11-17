@@ -76,7 +76,7 @@ public final class CitizensBootstrap {
      * a mover that is not a Citizens one.
      */
     public static boolean teleport(net.knightsandkings.knk.core.npc.nav.NpcMover mover,
-                                   net.knightsandkings.knk.core.npc.nav.NavPoint feet) {
+                                   net.knightsandkings.knk.core.navigation.shape.NavPoint feet) {
         if (mover instanceof CitizensNpcMover citizens) {
             citizens.teleport(feet);
             return true;

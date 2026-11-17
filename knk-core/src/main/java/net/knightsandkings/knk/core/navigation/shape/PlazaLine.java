@@ -1,4 +1,4 @@
-package net.knightsandkings.knk.core.npc.nav.corridor;
+package net.knightsandkings.knk.core.navigation.shape;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -57,8 +57,8 @@ public final class PlazaLine {
      * from {@code feet} while the next cell has a standable floor within a step of the last, the body's headroom and
      * the same WorldGuard regions as {@code feet}'s cell. {@code reads[0]} counts the world reads.
      */
-    public static double openRadius(net.knightsandkings.knk.core.npc.nav.NavWorld world,
-                                    net.knightsandkings.knk.core.npc.nav.NavPoint feet, double max, long[] reads) {
+    public static double openRadius(net.knightsandkings.knk.core.navigation.shape.NavWorld world,
+                                    net.knightsandkings.knk.core.navigation.shape.NavPoint feet, double max, long[] reads) {
         String w = feet.world();
         java.util.Set<String> regions = world.regionsAt(w, feet.blockX(), feet.blockY(), feet.blockZ());
         reads[0]++;
@@ -85,7 +85,7 @@ public final class PlazaLine {
                     for (int d : new int[] {0, 1, -1}) {
                         reads[0] += 2;
                         if (world.isStandableFloor(w, nx, floor + d, nz)
-                            && world.freeHeight(w, nx, floor + d, nz) >= net.knightsandkings.knk.core.npc.nav.NavGeometry.BODY_HEIGHT) {
+                            && world.freeHeight(w, nx, floor + d, nz) >= net.knightsandkings.knk.core.navigation.shape.NavGeometry.BODY_HEIGHT) {
                             found = floor + d;
                             break;
                         }

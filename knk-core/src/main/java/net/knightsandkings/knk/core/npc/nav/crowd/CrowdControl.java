@@ -10,11 +10,11 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.IntFunction;
 
+import net.knightsandkings.knk.core.navigation.shape.FreeWidth;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 import net.knightsandkings.knk.core.npc.nav.HopPlanner;
-import net.knightsandkings.knk.core.npc.nav.NavGeometry;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
-import net.knightsandkings.knk.core.npc.nav.corridor.FreeWidth;
 
 /**
  * Narrow places taken in turns (implementation plan 4c.3 decision 3.2 and 3.3, link M4; BEHAVIOR_MODEL NAV-26).

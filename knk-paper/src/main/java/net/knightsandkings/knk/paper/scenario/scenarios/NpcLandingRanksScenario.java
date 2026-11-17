@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-import net.knightsandkings.knk.core.npc.nav.NavGeometry;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NavigationSettings;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;

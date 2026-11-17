@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import net.knightsandkings.knk.core.navigation.shape.NavGeometry;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * Waypoint steps stay straight walks on floor (PandiO/knk-workspace#592): an L-shaped walk at floor 64 round a drop

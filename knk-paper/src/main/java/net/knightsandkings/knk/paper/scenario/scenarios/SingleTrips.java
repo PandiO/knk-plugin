@@ -7,7 +7,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 

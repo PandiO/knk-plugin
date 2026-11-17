@@ -16,8 +16,8 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import net.knightsandkings.knk.core.gates.target.GateBox;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.BlockingElement;
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NpcNavState;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics.Event;

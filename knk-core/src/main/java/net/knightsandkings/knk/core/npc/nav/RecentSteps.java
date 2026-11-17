@@ -6,6 +6,8 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
 
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+
 /**
  * An NPC's last footsteps (implementation plan 4b.2 item 6.1): the last {@link #KEEP} block positions it stood in, with
  * floor continuity between them (a drop of more than {@link HopPlanner#CONTINUITY_RANGE} blocks starts them again), so

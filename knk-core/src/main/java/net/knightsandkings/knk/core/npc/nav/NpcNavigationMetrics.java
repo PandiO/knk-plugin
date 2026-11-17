@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.LongAdder;
 import net.knightsandkings.knk.core.metrics.LabeledHistogram;
 import net.knightsandkings.knk.core.metrics.MetricsCollector;
 import net.knightsandkings.knk.core.metrics.PrometheusWriter;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 
 /**
  * NPC navigation's instruments (NAV-16; series {@code knk_npc_nav_*}), so settings such as the travel-bubble cap,

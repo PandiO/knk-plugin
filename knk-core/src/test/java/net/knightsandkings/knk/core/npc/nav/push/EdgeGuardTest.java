@@ -9,9 +9,8 @@ import java.util.HashSet;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
-
-import net.knightsandkings.knk.core.npc.nav.NavPoint;
-import net.knightsandkings.knk.core.npc.nav.NavWorld;
+import net.knightsandkings.knk.core.navigation.shape.NavPoint;
+import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 
 /**
  * The edge guard (implementation plan 4c.4 item 7.2, link M7): a wall walk 3 wide at floor 70 with the courtyard 6
