@@ -129,4 +129,17 @@ class NavGeometrySurfaceTest {
         List<NavPoint> neighbours = List.of(floor(0.5, 65, 0.5), floor(1.5, 66, 0.5));
         assertSame(neighbours, NavGeometry.onSurface(world, neighbours), "neighbours a block apart: nothing between");
     }
+
+    @Test
+    void theStepFromTheFeetToTheFirstWaypointGoesInToo() {
+        world.floor = (x, z) -> x <= 0 ? 64 : 65;
+        world.tops.put("1,65,0", 0.5);
+        List<NavPoint> planned = List.of(floor(2.5, 66, 0.5));
+
+        List<NavPoint> sent = NavGeometry.onSurface(world, floor(0.5, 65, 0.5), planned);
+
+        assertEquals(2, sent.size(), "the step, then the waypoint: " + sent);
+        assertEquals(65.5, sent.get(0).y(), 1e-9);
+        assertSame(planned, NavGeometry.onSurface(world, null, planned), "without the feet: as it is");
+    }
 }

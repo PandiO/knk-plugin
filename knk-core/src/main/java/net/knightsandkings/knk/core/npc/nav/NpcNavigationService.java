@@ -2028,7 +2028,8 @@ public final class NpcNavigationService {
                 nav.trail = new Trail(split.walk());
                 // the engine gets the waypoints at the real walking surface (link B4, PandiO/knk-workspace#673): a
                 // half-block stair step is walked up, not jumped to a whole-block height; the trail keeps floor + 1
-                nav.mover.follow(NavGeometry.onSurface(ports.world(), split.walk()), nav.settings.marginFor(stretch));
+                nav.mover.follow(NavGeometry.onSurface(ports.world(), nav.mover.onGround() ? at : null, split.walk()),
+                    nav.settings.marginFor(stretch));
             }
             default -> { }
         }

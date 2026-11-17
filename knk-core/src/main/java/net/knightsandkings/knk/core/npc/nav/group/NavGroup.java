@@ -1950,7 +1950,8 @@ public final class NavGroup {
         // every step a straight walk on floor: a lane point across a wall corner or a ledge from the one before it gets
         // the cells between (#592, lanes running into a landing's corner)
         // at the real walking surface (link B4): a slot on a half-block stair is half a block lower than its floor + 1
-        f.mover.follow(NavGeometry.onSurface(ports.world(), WaypointChain.bridged(ports.world(), at, waypoints)));
+        f.mover.follow(NavGeometry.onSurface(ports.world(), f.mover.onGround() ? at : null,
+            WaypointChain.bridged(ports.world(), at, waypoints)));
         f.sentEndArc = endArc;
     }
 

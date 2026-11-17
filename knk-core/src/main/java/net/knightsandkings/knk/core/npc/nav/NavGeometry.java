@@ -89,8 +89,16 @@ public final class NavGeometry {
      * itself when nothing changes.
      */
     public static java.util.List<NavPoint> onSurface(NavWorld world, java.util.List<NavPoint> feet) {
+        return onSurface(world, null, feet);
+    }
+
+    /**
+     * As {@link #onSurface(NavWorld, java.util.List)}, the step from {@code from} (the NPC's feet on the ground, or
+     * null) to the first waypoint included: a first waypoint a whole block above the feet within a block is a jump too.
+     */
+    public static java.util.List<NavPoint> onSurface(NavWorld world, NavPoint from, java.util.List<NavPoint> feet) {
         java.util.List<NavPoint> out = null;
-        NavPoint prev = null;
+        NavPoint prev = from;
         for (int i = 0; i < feet.size(); i++) {
             NavPoint p = feet.get(i);
             NavPoint q = onSurface(world, p);
