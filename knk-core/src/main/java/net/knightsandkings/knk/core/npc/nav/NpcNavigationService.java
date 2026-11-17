@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.core.npc.nav;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -80,6 +81,17 @@ public final class NpcNavigationService {
     static final double ARRIVAL_DISTANCE = 1.5;
     /** The road starts or ends further than this from the NPC or the goal: an off-road leg joins them. */
     static final double ROAD_JOIN_DISTANCE = 3;
+    /**
+     * The walk from an off-road start may join the road at any of its points within this many blocks along it, the
+     * one the walk search reaches first (link C1: the road join by reachability).
+     */
+    static final double JOIN_REACH = 32;
+    /** An off-road walk has joined the road, or reached the goal, within this many blocks of the point (3D, floors). */
+    static final double WALK_ARRIVE = 1.5;
+    /** The walk to an off-road goal is tried from the road's end and at most this many times in all (link C1). */
+    static final int TAIL_TRIES = 4;
+    /** Blocks back along the road between two tries of the walk to an off-road goal. */
+    static final double TAIL_STEP = 8;
     /** Rule checks (recheck of the way ahead, trespass guard, event wake-ups) per tick unless told otherwise. */
     public static final int DEFAULT_RULE_CHECKS_PER_TICK = 10;
     /** With the recheck off ({@code recheck-ticks: 0}) the trespass guard still looks at a walking NPC this often. */
@@ -89,14 +101,28 @@ public final class NpcNavigationService {
     /** A gate is ahead until the NPC is this many route points past the end of the gate's road stretch. */
     static final int GATE_PASSED_POINTS = 2;
 
-    /** What the service needs from outside; {@code log} gets one line per stuck event, with the position. */
+    /**
+     * What the service needs from outside; {@code log} gets one line per stuck event, with the position. {@code walks}
+     * plans the off-road ends and walk-only trips with the walk search (link C1); null: they are walked in hops.
+     */
     public record Ports(RoadPlanner roads, LocalLegPreparer legs, NavWorld world, NpcNavigationMetrics metrics,
-                        LongSupplier nanoTime, Consumer<String> log, AccessRules rules) {
+                        LongSupplier nanoTime, Consumer<String> log, AccessRules rules, OffRoadWalks walks) {
 
         /** Without access rules of its own: everything is allowed while walking ({@link AccessRules#OPEN}). */
         public Ports(RoadPlanner roads, LocalLegPreparer legs, NavWorld world, NpcNavigationMetrics metrics,
                      LongSupplier nanoTime, Consumer<String> log) {
-            this(roads, legs, world, metrics, nanoTime, log, null);
+            this(roads, legs, world, metrics, nanoTime, log, null, null);
+        }
+
+        /** Without the walk search for off-road legs: they are walked in hops, as before link C1. */
+        public Ports(RoadPlanner roads, LocalLegPreparer legs, NavWorld world, NpcNavigationMetrics metrics,
+                     LongSupplier nanoTime, Consumer<String> log, AccessRules rules) {
+            this(roads, legs, world, metrics, nanoTime, log, rules, null);
+        }
+
+        /** The same ports with the walk search for off-road legs (link C1, PandiO/knk-workspace#700). */
+        public Ports withWalks(OffRoadWalks offRoad) {
+            return new Ports(roads, legs, world, metrics, nanoTime, log, rules, offRoad);
         }
 
         public Ports {
@@ -501,6 +527,9 @@ public final class NpcNavigationService {
     private long pushTeleports;
     /** Steps of the line the bridge could not make, walked as local legs (link B2). */
     private long gapLegs;
+    /** Off-road ends and walk-only trips planned with the walk search (link C1), and those walked in hops instead. */
+    private long offRoadWalks;
+    private long offRoadHops;
     /** Main-thread time of push resistance's looks, for its share of the cost. */
     private long pushNanos;
     private java.util.function.IntToDoubleFunction plazaClearance = id -> Double.NaN;
@@ -726,6 +755,16 @@ public final class NpcNavigationService {
     /** Steps of the line the bridge could not make, walked as local legs since start (link B2; diagnostics). */
     public long gapLegs() {
         return gapLegs;
+    }
+
+    /** Off-road ends and walk-only trips walked with the walk search's path since start (link C1). */
+    public long offRoadWalks() {
+        return offRoadWalks;
+    }
+
+    /** Off-road ends and walk-only trips the walk search did not plan, walked in hops (link C1's fallback). */
+    public long offRoadHops() {
+        return offRoadHops;
     }
 
     /** The feet, with the NPC's place on its waypoint list brought up to date. */
@@ -1100,7 +1139,11 @@ public final class NpcNavigationService {
             case DIFFERENT_COMPONENTS -> end(nav, failed("no road connects"
                 + (plan.reason() == null ? "" : " (" + plan.reason() + ")")));
             case NO_NETWORK, OFF_ROAD -> {
-                if (direct <= nav.settings.walkOnlyBlocks()) {
+                if (direct <= nav.settings.walkOnlyBlocks() && ports.walks() != null) {
+                    // an end too far from a road: a walk-only trip with the walk search, walked like a road line
+                    // (link C1); in hops when it finds nothing
+                    walkOnly(nav, generation, at, from, to);
+                } else if (direct <= nav.settings.walkOnlyBlocks()) {
                     // an end too far from a road: a walk-only trip in short hops, each under K&K's cell access
                     nav.hops.addAll(HopPlanner.hops(ports.world(), List.of(from, to), nav.settings.hopBlocks()));
                     planHop(nav, generation, at);
@@ -1128,6 +1171,32 @@ public final class NpcNavigationService {
     private void startRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
                             List<RoadPlanner.GateCrossing> gates, List<PlazaCrossing> plazas,
                             NavPoint from, NavPoint to) {
+        NavPoint roadStart = line.get(0);
+        NavPoint roadEnd = line.get(line.size() - 1);
+        boolean head = roadStart.horizontalDistance(from) > ROAD_JOIN_DISTANCE;
+        if (ports.walks() != null) {
+            // link C1: the off-road ends with the walk search, the goal also when it lies right above or below the end
+            boolean tail = to != null && (roadEnd.horizontalDistance(to) > ARRIVAL_DISTANCE
+                || Math.abs(roadEnd.y() - to.y()) > 2);
+            if (head || tail) {
+                walkRoute(nav, generation, at, line, gates, plazas, from, to, head, tail);
+                return;
+            }
+        }
+        List<NavPoint> headHops = head
+            ? HopPlanner.hops(ports.world(), List.of(from, roadStart), nav.settings.hopBlocks()) : List.of();
+        List<NavPoint> tailHops = to != null && roadEnd.horizontalDistance(to) > ARRIVAL_DISTANCE
+            ? HopPlanner.hops(ports.world(), List.of(roadEnd, to), nav.settings.hopBlocks()) : List.of();
+        takeRoute(nav, generation, at, line, gates, plazas, headHops, tailHops);
+    }
+
+    /**
+     * Takes a route line in hand: the hops before it (an off-road start the walk search did not plan), the line in
+     * stretches, the hops after it (an off-road goal the walk search did not plan).
+     */
+    private void takeRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
+                           List<RoadPlanner.GateCrossing> gates, List<PlazaCrossing> plazas,
+                           List<NavPoint> headHops, List<NavPoint> tailHops) {
         nav.follower = new RouteFollower(line, plazas);
         nav.trail = null;
         nav.gapLeg = null;
@@ -1138,20 +1207,198 @@ public final class NpcNavigationService {
             onLine.add(new GateOnLine(gate.doorId(), nav.follower.indexNearest(gate.at())));
         }
         nav.gates = List.copyOf(onLine);
-        NavPoint roadStart = line.get(0);
-        NavPoint roadEnd = line.get(line.size() - 1);
         nav.hops.clear();
         nav.tail.clear();
-        if (roadStart.horizontalDistance(from) > ROAD_JOIN_DISTANCE) {
-            nav.hops.addAll(HopPlanner.hops(ports.world(), List.of(from, roadStart), nav.settings.hopBlocks()));
-        }
-        if (to != null && roadEnd.horizontalDistance(to) > ARRIVAL_DISTANCE) {
-            nav.tail.addAll(HopPlanner.hops(ports.world(), List.of(roadEnd, to), nav.settings.hopBlocks()));
-        }
+        nav.hops.addAll(headHops);
+        nav.tail.addAll(tailHops);
         if (nav.hops.isEmpty()) {
             sendStretch(nav, true);
         } else {
             planHop(nav, generation, at);
+        }
+    }
+
+    // ==================== off-road walks (link C1, PandiO/knk-workspace#700) ====================
+
+    /** The walk to an off-road goal: from the road point at {@code cut} (an index in the resampled road). */
+    private record TailWalk(int cut, OffRoadWalks.Walk walk) {
+    }
+
+    /**
+     * The off-road ends of a road route with the walk search (link C1): the walk from the NPC to the road joins it at
+     * the first of its points within {@link #JOIN_REACH} blocks along it that the search reaches (the road join by
+     * reachability); the walk to the goal starts at the road's end, else up to {@link #TAIL_TRIES} points further back
+     * every {@link #TAIL_STEP} blocks. Both run at once. A found walk becomes part of the route line, so it is walked
+     * as the road is (stretches, the 3D handover, the join from the feet, the surface heights) and a group's followers
+     * take it as their path; an end the search did not plan is walked in hops, as before.
+     */
+    private void walkRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
+                           List<RoadPlanner.GateCrossing> gates, List<PlazaCrossing> plazas,
+                           NavPoint from, NavPoint to, boolean head, boolean tail) {
+        List<NavPoint> road = HopPlanner.resampleKeepingCorners(line, RouteFollower.STEP);
+        AccessSubject subject = subject(nav, at);
+        long start = ports.nanoTime().getAsLong();
+        inFlight++;
+        CompletableFuture<OffRoadWalks.Walk> headWalk = head
+            ? askWalk(subject, at, joinTargets(road)) : CompletableFuture.completedFuture(null);
+        CompletableFuture<TailWalk> tailWalk = tail
+            ? tailWalk(subject, road, to, road.size() - 1, 1) : CompletableFuture.completedFuture(null);
+        headWalk.thenCombine(tailWalk, (h, t) -> new Object[] {h, t}).whenComplete((both, error) -> timed(() -> {
+            inFlight = Math.max(0, inFlight - 1);
+            ports.metrics().observePlan("walk", (ports.nanoTime().getAsLong() - start) / 1e9);
+            if (!current(nav, generation)) {
+                return;
+            }
+            NavPoint now = nav.mover.position().orElse(null);
+            if (now == null) {
+                nav.state = NpcNavState.PAUSED;
+                return;
+            }
+            OffRoadWalks.Walk h = both == null ? null : (OffRoadWalks.Walk) both[0];
+            TailWalk t = both == null ? null : (TailWalk) both[1];
+            if (error != null) {
+                OffRoadWalks.Walk failed = OffRoadWalks.Walk.none(OffRoadWalks.Status.FAILED, String.valueOf(error));
+                h = head ? failed : null;
+                t = tail ? new TailWalk(road.size() - 1, failed) : null;
+            }
+            List<NavPoint> combined = new ArrayList<>();
+            List<NavPoint> headHops = List.of();
+            List<NavPoint> tailHops = List.of();
+            int first = 0;
+            int last = road.size() - 1;
+            if (head) {
+                if (h.isFound()) {
+                    first = h.reached();
+                    combined.addAll(h.path());
+                    offRoadWalks++;
+                    ports.log().accept(String.format(Locale.ROOT, "%s off-road walk from %s joins the road at %s: %d "
+                        + "cells (%s)", nav.mover.name(), NavGeometry.block(at), NavGeometry.block(HopPlanner.feet(
+                        road.get(first))), h.path().size(), h.detail()));
+                } else {
+                    headHops = HopPlanner.hops(ports.world(), List.of(from, road.get(0)), nav.settings.hopBlocks());
+                    offRoadHops++;
+                    ports.log().accept(String.format(Locale.ROOT, "%s off-road walk from %s to the road: %s (%s), "
+                        + "walked in hops", nav.mover.name(), NavGeometry.block(at), h.status(), h.detail()));
+                }
+            }
+            List<NavPoint> tailPath = List.of();
+            if (tail) {
+                if (t.walk().isFound() && t.cut() >= first) {
+                    last = t.cut();
+                    tailPath = t.walk().path();
+                    offRoadWalks++;
+                    ports.log().accept(String.format(Locale.ROOT, "%s off-road walk to the goal %s from the road at %s:"
+                        + " %d cells (%s)", nav.mover.name(), NavGeometry.block(HopPlanner.feet(to)),
+                        NavGeometry.block(HopPlanner.feet(road.get(last))), tailPath.size(), t.walk().detail()));
+                } else {
+                    tailHops = HopPlanner.hops(ports.world(), List.of(road.get(last), to), nav.settings.hopBlocks());
+                    offRoadHops++;
+                    ports.log().accept(String.format(Locale.ROOT, "%s off-road walk to the goal %s: %s (%s), walked "
+                        + "in hops", nav.mover.name(), NavGeometry.block(HopPlanner.feet(to)), t.walk().status(),
+                        t.walk().detail()));
+                }
+            }
+            appendCells(combined, road.subList(first, last + 1));
+            appendCells(combined, tailPath);
+            takeRoute(nav, generation, now, combined, gates, plazas, headHops, tailHops);
+        }));
+    }
+
+    /** A walk-only trip (no road within reach) with the walk search, walked as a route line; in hops without a path. */
+    private void walkOnly(Nav nav, int generation, NavPoint at, NavPoint from, NavPoint to) {
+        long start = ports.nanoTime().getAsLong();
+        inFlight++;
+        askWalk(subject(nav, at), at, List.of(to)).whenComplete((walk, error) -> timed(() -> {
+            inFlight = Math.max(0, inFlight - 1);
+            ports.metrics().observePlan("walk", (ports.nanoTime().getAsLong() - start) / 1e9);
+            if (!current(nav, generation)) {
+                return;
+            }
+            NavPoint now = nav.mover.position().orElse(null);
+            if (now == null) {
+                nav.state = NpcNavState.PAUSED;
+                return;
+            }
+            if (error == null && walk != null && walk.isFound()) {
+                offRoadWalks++;
+                ports.log().accept(String.format(Locale.ROOT, "%s walk-only trip from %s to %s: %d cells (%s)",
+                    nav.mover.name(), NavGeometry.block(at), NavGeometry.block(HopPlanner.feet(to)), walk.path().size(),
+                    walk.detail()));
+                takeRoute(nav, generation, now, walk.path(), List.of(), List.of(), List.of(), List.of());
+                return;
+            }
+            offRoadHops++;
+            ports.log().accept(String.format(Locale.ROOT, "%s walk-only trip from %s to %s: %s, walked in hops",
+                nav.mover.name(), NavGeometry.block(at), NavGeometry.block(HopPlanner.feet(to)),
+                error != null ? String.valueOf(error) : walk == null ? "no result" : walk.status() + " (" + walk.detail()
+                    + ")"));
+            nav.hops.addAll(HopPlanner.hops(ports.world(), List.of(from, to), nav.settings.hopBlocks()));
+            planHop(nav, generation, now);
+        }));
+    }
+
+    /** One walk search; a port that throws or fails gives {@link OffRoadWalks.Status#FAILED}. */
+    private CompletableFuture<OffRoadWalks.Walk> askWalk(AccessSubject subject, NavPoint feet, List<NavPoint> targets) {
+        CompletableFuture<OffRoadWalks.Walk> asked;
+        try {
+            asked = ports.walks().plan(subject, feet, targets, WALK_ARRIVE);
+        } catch (RuntimeException e) {
+            asked = CompletableFuture.failedFuture(e);
+        }
+        return asked.handle((walk, error) -> error != null || walk == null
+            ? OffRoadWalks.Walk.none(OffRoadWalks.Status.FAILED, error == null ? "no result" : String.valueOf(error))
+            : walk);
+    }
+
+    /** The walk to the goal from the road point at {@code cut}; on no path, again from a point further back. */
+    private CompletableFuture<TailWalk> tailWalk(AccessSubject subject, List<NavPoint> road, NavPoint to, int cut,
+                                                 int tries) {
+        return askWalk(subject, HopPlanner.feet(road.get(cut)), List.of(to)).thenCompose(walk -> {
+            int back = walk.status() == OffRoadWalks.Status.NO_PATH && tries < TAIL_TRIES
+                ? indexBack(road, cut, TAIL_STEP) : -1;
+            return back < 0 ? CompletableFuture.completedFuture(new TailWalk(cut, walk))
+                : tailWalk(subject, road, to, back, tries + 1);
+        });
+    }
+
+    /** The road points within {@link #JOIN_REACH} blocks along the road from its start, the start first. */
+    static List<NavPoint> joinTargets(List<NavPoint> road) {
+        List<NavPoint> out = new ArrayList<>();
+        double along = 0;
+        for (int i = 0; i < road.size(); i++) {
+            if (i > 0) {
+                along += Trail.dist3(road.get(i - 1), road.get(i));
+            }
+            if (along > JOIN_REACH) {
+                break;
+            }
+            out.add(road.get(i));
+        }
+        return out;
+    }
+
+    /** The index at least {@code blocks} back along the road from {@code from} (3D), or -1 when the road is shorter. */
+    static int indexBack(List<NavPoint> road, int from, double blocks) {
+        double back = 0;
+        for (int i = from - 1; i >= 0; i--) {
+            back += Trail.dist3(road.get(i + 1), road.get(i));
+            if (back >= blocks) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Appends floor points, leaving out one in the block (and floor) of the point before it (a joint). */
+    private static void appendCells(List<NavPoint> line, List<NavPoint> points) {
+        for (NavPoint p : points) {
+            if (!line.isEmpty()) {
+                NavPoint q = line.get(line.size() - 1);
+                if (q.blockX() == p.blockX() && q.blockZ() == p.blockZ() && Math.round(q.y()) == Math.round(p.y())) {
+                    continue;
+                }
+            }
+            line.add(p);
         }
     }
 
