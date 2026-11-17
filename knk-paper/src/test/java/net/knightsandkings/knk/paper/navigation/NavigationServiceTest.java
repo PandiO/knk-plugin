@@ -67,6 +67,8 @@ import net.knightsandkings.knk.core.roads.walk.MovementProfile;
 import net.knightsandkings.knk.core.roads.walk.WalkBudget;
 import net.knightsandkings.knk.core.roads.walk.WalkCells;
 import net.knightsandkings.knk.core.roads.walk.WalkGoal;
+import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
+import net.knightsandkings.knk.core.roads.walk.WalkSearchStats;
 import net.knightsandkings.knk.core.roads.walk.WalkPath;
 import net.knightsandkings.knk.core.roads.walk.WalkRequest;
 import net.knightsandkings.knk.core.roads.walk.WalkResult;
@@ -116,6 +118,8 @@ class NavigationServiceTest {
     private final List<Runnable> walkSearches = new ArrayList<>();
     private boolean walkCaptureReady = true;
     private boolean walkCaptureHeld;
+    /** Non-null: the fake preparer reports these capture counters (a {@link NavigationService.PreparedWalk}), #703. */
+    private WalkMeasurements.Capture walkCaptureStats;
     private Function<WalkRequest, WalkResult> walkFinder = request -> found(wellDetour());
 
     @BeforeEach
@@ -163,7 +167,9 @@ class NavigationServiceTest {
             CompletableFuture<Supplier<WalkRequest>> capture = new CompletableFuture<>();
             walkCaptures.add(capture);
             if (!walkCaptureHeld) {
-                capture.complete(walkCaptureReady ? () -> request(from, target, goal) : null);
+                Supplier<WalkRequest> request = () -> request(from, target, goal);
+                capture.complete(!walkCaptureReady ? null
+                    : walkCaptureStats == null ? request : new NavigationService.PreparedWalk(request, walkCaptureStats));
             }
             return capture;
         };
@@ -996,6 +1002,59 @@ class NavigationServiceTest {
     }
 
     // ==================== KNG-51 walk paths (LAST_MILE_PATHFINDING.md §7, §12) ====================
+
+    @Test
+    void walkSearchesAreMeasuredForRoadStatusAndTheTrailIsUnchanged() {
+        // off-road navigation phase 0 (#703): per searched request the search and capture counters
+        walkCaptureStats = new WalkMeasurements.Capture(9, 3, 4_000_000L, 100L);
+        walkFinder = r -> found(wellDetour()).withStats(new WalkSearchStats(42, 90, 7_000_000L,
+            WalkSearchStats.Cap.NONE, false));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        assertEquals(List.of("no searches since the last reset"), walking.walkMeasurementLines(5));
+
+        walking.navigate(player, well());
+        runSearches();
+
+        assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(walking), "measuring changes nothing");
+        ArgumentCaptor<List<double[]>> drawn = pathCaptor();
+        verify(trail).drawPath(any(), drawn.capture());
+        assertEquals(wellDetour().size(), drawn.getValue().size());
+        List<String> lines = walking.walkMeasurementLines(5);
+        assertTrue(lines.get(0).startsWith("1 searches since the last reset; last 1: found 1, no path 0, budget 0"),
+            lines.get(0));
+        assertTrue(lines.get(1).startsWith("search µs: max 7000"), lines.get(1));
+        assertTrue(lines.get(3).startsWith("capture µs: max 4000"), lines.get(3));
+        assertTrue(lines.get(4).contains("FOUND, 20 blocks straight"), lines.get(4));
+        assertTrue(lines.get(4).contains("42 expansions, 90 cells, 9 chunks (3 cached), capture 4000 µs, search 7000 µs"),
+            lines.get(4));
+        WalkMeasurements.Sample sample = walking.walkMeasurements().recent(1).get(0);
+        assertTrue(sample.queueNanos() >= 0);
+
+        walking.resetWalkMeasurements();
+        assertEquals(List.of("no searches since the last reset"), walking.walkMeasurementLines(5));
+    }
+
+    @Test
+    void aPreparerWithoutCountersLeavesTheCaptureUnknown() {
+        walkFinder = r -> WalkResult.fallback("expansion budget", 20_000).withStats(new WalkSearchStats(20_000, 31_000,
+            90_000_000L, WalkSearchStats.Cap.MAX_EXPANSIONS, false));
+        NavigationService walking = walkService(NavigationConfig.defaults());
+
+        walking.navigate(player, well());
+        runSearches();
+
+        List<String> lines = walking.walkMeasurementLines(5);
+        assertTrue(lines.get(0).contains("budget 1 (max-expansions 1, max-length 0)"), lines.get(0));
+        assertTrue(lines.get(3).startsWith("capture µs: max 0"), "no capture counters: " + lines.get(3));
+        assertFalse(lines.get(4).contains("chunks"), lines.get(4));
+        assertTrue(lines.get(4).contains("FALLBACK (max-expansions)"), lines.get(4));
+        assertTrue(walking.walkStatus().contains("budget 1"), "the existing outcome counters are unchanged");
+    }
+
+    @Test
+    void noWalkPathsNoWalkMeasurements() {
+        assertEquals(List.of(), service.walkMeasurementLines(5), "the service without walk paths");
+    }
 
     @Test
     void aDirectLegDrawsTheStraightLineAtOnceThenAdoptsTheWalkPath() {

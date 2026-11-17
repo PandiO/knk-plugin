@@ -65,7 +65,7 @@ import net.kyori.adventure.text.Component;
  * lock|unlock}, {@code record start|stop [street]|cancel}, {@code edge set <id|here> cost|oneway|nogps|close|open|
  * profile|unlabel}, {@code edge delete <id>}, {@code edge confirm|unconfirm <id|here>}, {@code tiles [page]},
  * {@code tile curate|uncurate [@x,z]} and {@code proposal [page]|list|accept|reject|clear|rejected|unreject}
- * (curated tiles, rev. 6 Part B: {@link RoadProposals}), {@code why}, {@code reload}, {@code status},
+ * (curated tiles, rev. 6 Part B: {@link RoadProposals}), {@code why}, {@code reload}, {@code status [reset]},
  * {@code goto <x> <y> <z>} (the target of every clickable teleport).
  */
 public class RoadAdminCommand implements SubcommandExecutor {
@@ -153,7 +153,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "tile" -> withProposals(sender, p -> p.tileCommand(sender, rest));
                 case "proposal" -> withProposals(sender, p -> p.command(sender, rest));
                 case "reload" -> reload(sender);
-                case "status" -> status(sender);
+                case "status" -> status(sender, rest);
                 case "why" -> why(sender, rest);
                 case "goto" -> gotoBlock(sender, rest);
                 default -> sender.sendMessage(RoadMessages.usage(USAGE));
@@ -213,6 +213,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "record" -> prefix(List.of("start", "stop", "cancel"), last);
                 case "edge" -> prefix(List.of("set", "delete", "prune", "confirm", "unconfirm"), last);
                 case "tile" -> prefix(List.of("curate", "uncurate"), last);
+                case "status" -> prefix(List.of("reset"), last);
                 case "proposal" -> prefix(RoadProposals.ACTIONS, last);
                 case "street" -> prefix(streetNames(sender), last);
                 default -> Collections.emptyList();
@@ -1415,7 +1416,28 @@ public class RoadAdminCommand implements SubcommandExecutor {
             }));
     }
 
-    private void status(CommandSender sender) {
+    /** Walk requests listed one by one under "walk recent" in {@code /knk road status} (#703). */
+    static final int WALK_RECENT = 5;
+
+    /**
+     * {@code /knk road status}: the road cache, builders and walk paths; {@code /knk road status reset} forgets the
+     * walk-search measurements (off-road phase 0, PandiO/knk-workspace#703) so one scene can be read on its own.
+     */
+    private void status(CommandSender sender, String[] args) {
+        if (args.length > 0) {
+            if (!"reset".equalsIgnoreCase(args[0])) {
+                sender.sendMessage(RoadMessages.usage("/knk road status [reset]"));
+                return;
+            }
+            net.knightsandkings.knk.paper.navigation.NavigationService nav = navigation.get();
+            if (nav == null) {
+                sender.sendMessage(RoadMessages.bad("/navigate is not running: no walk measurements to reset."));
+                return;
+            }
+            nav.resetWalkMeasurements();
+            sender.sendMessage(RoadMessages.good("Walk-search measurements cleared; /knk road status shows the next searches."));
+            return;
+        }
         RoadNetworkCache c = cache.get();
         sender.sendMessage(RoadMessages.prefixed(Component.text("Road navigation: enabled", RoadMessages.HIGHLIGHT)));
         for (World world : Bukkit.getWorlds()) {
@@ -1447,10 +1469,22 @@ public class RoadAdminCommand implements SubcommandExecutor {
         net.knightsandkings.knk.paper.navigation.NavigationService nav = navigation.get();
         if (nav != null) {
             sender.sendMessage(RoadMessages.field("walk paths", nav.walkStatus()));
+            sendWalkMeasurements(sender, nav.walkMeasurementLines(WALK_RECENT));
         }
         LiveEdgeTags tags = liveTags.get();
         if (tags != null) {
             sender.sendMessage(RoadMessages.field("live tags", tags.describe()));
+        }
+    }
+
+    /**
+     * The walk-search lines of {@link net.knightsandkings.knk.core.roads.walk.WalkMeasurements#describe}: the summary
+     * as "walk search", the spreads as "walk cost", the newest requests as "walk recent".
+     */
+    static void sendWalkMeasurements(CommandSender sender, List<String> lines) {
+        for (int i = 0; i < lines.size(); i++) {
+            String label = i == 0 ? "walk search" : i <= 3 ? "walk cost" : "walk recent";
+            sender.sendMessage(RoadMessages.field(label, lines.get(i)));
         }
     }
 

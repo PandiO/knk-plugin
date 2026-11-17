@@ -18,6 +18,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.build.PassabilityRules;
+import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
 import net.knightsandkings.knk.core.util.BlockKey;
 import net.knightsandkings.knk.paper.config.NavigationConfig;
 import net.knightsandkings.knk.paper.roads.SpanExtractor;
@@ -39,6 +40,9 @@ import net.knightsandkings.knk.paper.utils.TickBudget;
  *       dropped when its gate footprints change (the capture records floors under gates).</li>
  *   <li><b>Only the box's sections</b> ({@link WalkBox}: the leg ± {@code capture-margin}, up and down
  *       too) are read, not the whole column.</li>
+ *   <li><b>Counters per request</b> (off-road phase 0, PandiO/knk-workspace#703): every capture reports its chunks,
+ *       cache hits, the main-thread time spent extracting its chunks and its wait from request to ready
+ *       ({@link WalkCapture#stats()}). Measuring only; nothing reads them to decide.</li>
  * </ul>
  * Main thread only (a single-threaded queue and cache, no locks); the result is safe to read anywhere.
  */
@@ -51,10 +55,12 @@ public final class WalkSnapshotService {
     /** Cached chunks kept at most (≈ 10-20 KB each, see the Phase B measurement). */
     public static final int CACHE_MAX_CHUNKS = 256;
     /**
-     * A box larger than this many chunks is refused: a 96-block leg (KNG-75's walk range) + 16 margin needs at most
-     * 8 × 8 (step 2a measurement, 2026-10-10; 49 refused 15 % of them, the diagonal ones).
+     * The default of {@code navigation.walk.max-chunks-per-request}: a box larger than this many chunks is refused. A
+     * 96-block leg (KNG-75's walk range) + 16 margin needs at most 8 × 8 (step 2a measurement, 2026-10-10; 49 refused
+     * 15 % of them, the diagonal ones). Phase 0 of off-road navigation raises it on the dev server only, to measure
+     * option A's long legs (DESIGN § 5.6).
      */
-    public static final int MAX_CHUNKS_PER_REQUEST = 64;
+    public static final int MAX_CHUNKS_PER_REQUEST = NavigationConfig.WalkConfig.DEFAULT_MAX_CHUNKS_PER_REQUEST;
 
     /** Port: one world's chunks, as the main thread sees them. */
     public interface WorldChunks {
@@ -108,7 +114,7 @@ public final class WalkSnapshotService {
         READY,
         /** A chunk of the box is not loaded (or unloaded before it was captured): no walk path. */
         UNLOADED,
-        /** The box covers more than {@link #MAX_CHUNKS_PER_REQUEST} chunks. */
+        /** The box covers more than {@code navigation.walk.max-chunks-per-request} chunks. */
         TOO_LARGE
     }
 
@@ -117,12 +123,21 @@ public final class WalkSnapshotService {
      *
      * @param terrain    the captured terrain (READY only)
      * @param doorBlocks the hand-openable door blocks inside the box (READY only) — what the door access checks
+     * @param stats      what the capture cost: chunks, cache hits, main-thread µs, wait (READY only; otherwise
+     *                   {@link WalkMeasurements.Capture#UNKNOWN})
      */
-    public record WalkCapture(Status status, WalkBox box, CapturedWalkTerrain terrain, List<Long> doorBlocks) {
+    public record WalkCapture(Status status, WalkBox box, CapturedWalkTerrain terrain, List<Long> doorBlocks,
+                              WalkMeasurements.Capture stats) {
         public WalkCapture {
             Objects.requireNonNull(status, "status");
             Objects.requireNonNull(box, "box");
             doorBlocks = doorBlocks == null ? List.of() : List.copyOf(doorBlocks);
+            stats = stats == null ? WalkMeasurements.Capture.UNKNOWN : stats;
+        }
+
+        /** Without counters. */
+        public WalkCapture(Status status, WalkBox box, CapturedWalkTerrain terrain, List<Long> doorBlocks) {
+            this(status, box, terrain, doorBlocks, null);
         }
 
         public boolean ready() {
@@ -149,12 +164,16 @@ public final class WalkSnapshotService {
         final CompletableFuture<WalkCapture> future = new CompletableFuture<>();
         final Map<Long, WalkChunk> chunks = new HashMap<>();
         final List<Long> needed;
+        final long requestedAt;
+        int cacheHits;
+        long captureNanos;
 
-        Pending(WorldChunks world, GateCells gates, WalkBox box) {
+        Pending(WorldChunks world, GateCells gates, WalkBox box, long requestedAt) {
             this.world = world;
             this.gates = gates;
             this.box = box;
             this.needed = box.chunkKeys();
+            this.requestedAt = requestedAt;
         }
 
         boolean wants(ChunkId id, WalkChunk chunk) {
@@ -175,7 +194,9 @@ public final class WalkSnapshotService {
                 }
             }
             CapturedWalkTerrain terrain = new CapturedWalkTerrain(chunks.values(), gates, world.minY(), world.maxY());
-            future.complete(new WalkCapture(Status.READY, box, terrain, doors));
+            WalkMeasurements.Capture stats = new WalkMeasurements.Capture(needed.size(), cacheHits, captureNanos,
+                Math.max(0L, clockMillis.getAsLong() - requestedAt));
+            future.complete(new WalkCapture(Status.READY, box, terrain, doors, stats));
         }
     }
 
@@ -250,7 +271,7 @@ public final class WalkSnapshotService {
         if (!world.name().equals(box.world())) {
             throw new IllegalArgumentException("box of world " + box.world() + " for world " + world.name());
         }
-        if (box.chunkCount() > MAX_CHUNKS_PER_REQUEST) {
+        if (box.chunkCount() > config.maxChunksPerRequest()) {
             return CompletableFuture.completedFuture(new WalkCapture(Status.TOO_LARGE, box, null, List.of()));
         }
         for (long key : box.chunkKeys()) {
@@ -263,13 +284,14 @@ public final class WalkSnapshotService {
             cache.keySet().removeIf(id -> id.world.equals(world.name()));
         }
 
-        Pending request = new Pending(world, gateCells, box);
         long now = clockMillis.getAsLong();
+        Pending request = new Pending(world, gateCells, box, now);
         for (long key : request.needed) {
             ChunkId id = new ChunkId(world.name(), key);
             WalkChunk cached = cache.get(id);
             if (cached != null && fresh(cached, now) && cached.covers(box.minSection(), box.maxSection())) {
                 request.chunks.put(key, cached);
+                request.cacheHits++;
                 cacheHits++;
                 continue;
             }
@@ -318,11 +340,13 @@ public final class WalkSnapshotService {
             WalkChunk chunk = extractor(job.world()).extract(job.world().blocks(job.chunkX(), job.chunkZ()),
                 job.chunkX(), job.chunkZ(), job.fromSection(), job.toSection(), s -> false, job.gates(),
                 clockMillis.getAsLong());
-            captureNanos += System.nanoTime() - start;
+            long elapsed = System.nanoTime() - start;
+            captureNanos += elapsed;
             chunksCaptured++;
             cache.put(id, chunk);
             for (Pending p : pending) {
                 if (p.wants(id, chunk)) {
+                    p.captureNanos += elapsed; // a chunk two requests wait for counts for both
                     p.chunks.put(id.key, chunk);
                     p.completeIfReady();
                 }
