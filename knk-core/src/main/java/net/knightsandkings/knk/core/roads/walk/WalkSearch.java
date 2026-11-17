@@ -39,7 +39,10 @@ import static net.knightsandkings.knk.core.roads.walk.WalkGrid.NO_LINK;
  * <p><b>Cost</b> of entering a cell = move cost (× water factor) + door cost (door cells; blocked if
  * the profile opens no doors) + wall cost (a standing cell with a wall among its 8 neighbours, so
  * paths round corners a block wide where there is room) + the {@link CellAccess} verdict
- * ({@code +∞} = never entered). The start cell is exempt from access (the mover is already there).
+ * ({@code +∞} = never entered). The start cell is exempt from access (the mover is already there). With a
+ * {@link MovementProfile#clearanceCost() clearance cost} above 0 (off-road phase 6.1, PandiO/knk-workspace#710,
+ * {@code navigation.guidance-v2}) the wall cost is replaced by that cost per block of {@link WalkClearance clearance}
+ * a standing cell lacks to {@link MovementProfile#wallClearance()}; at 0 the search is exactly the one before.
  *
  * <p><b>Search.</b> Start = the nearest cell within {@code startSnap} of the feet; a target with no
  * cell within {@code goalSnap} → NO_PATH. Heuristic = {@code max(horizontal distance, |Δfloor y|)} to
@@ -94,7 +97,7 @@ public final class WalkSearch implements WalkPathfinder {
         return gridFor(terrain.surface(), terrain.cells(), terrain, profile);
     }
 
-    private static WalkGrid gridFor(SurfaceGrid surface, WalkCells cells, WalkTerrain terrain, MovementProfile profile) {
+    static WalkGrid gridFor(SurfaceGrid surface, WalkCells cells, WalkTerrain terrain, MovementProfile profile) {
         return new WalkGrid(surface, terrain.gates(), cells, profile.headroom(),
             (grid, x, y, z) -> !cells.isClimbable(x, y, z) && !cells.isDoor(x, y, z)
                 && PassabilityRules.isWalkFloor(grid.floorMaterial(x, y, z)));
@@ -124,6 +127,8 @@ public final class WalkSearch implements WalkPathfinder {
         private final MovementProfile profile;
         private final CellAccess access;
         private final WalkGrid grid;
+        /** The clearance map of the clearance cost (phase 6.1); null without one. */
+        private final WalkClearance clearance;
         private final LongMap<Node> nodes = new LongMap<>(1024);
         private final PriorityQueue<Entry> open = new PriorityQueue<>((a, b) -> {
             int c = Double.compare(a.f, b.f);
@@ -150,6 +155,9 @@ public final class WalkSearch implements WalkPathfinder {
             this.profile = request.profile();
             this.access = request.access();
             this.grid = gridFor(surface, cells, request.terrain(), profile);
+            this.clearance = profile.usesClearance()
+                ? new WalkClearance((x, y, z) -> isStanding(x, y, z) && access.allows(x, y + 1, z), profile.wallClearance())
+                : null;
         }
 
         WalkResult run() {
@@ -439,7 +447,9 @@ public final class WalkSearch implements WalkPathfinder {
                 }
                 cost += profile.doorCost();
             }
-            if (profile.wallCost() > 0 && besideWall(x, y, z)) {
+            if (clearance != null) {
+                cost += profile.clearanceCost() * clearance.lack(x, y, z, profile.wallClearance());
+            } else if (profile.wallCost() > 0 && besideWall(x, y, z)) {
                 cost += profile.wallCost();
             }
             relax(u, BlockKey.pack(x, y, z), false, cost + accessCost, stepLength);
