@@ -8,8 +8,8 @@ import org.bukkit.util.BoundingBox;
 import org.junit.jupiter.api.Test;
 
 /**
- * The walking surface of a floor block (link B4, PandiO/knk-workspace#673): the top of its collision boxes under the
- * body's footprint. The real blocks are checked by {@code npc-stairhouse-climb} and {@code npc-replay-quarry-to-keep}.
+ * The walking surface of a floor block (link B4, PandiO/knk-workspace#673): the top of its step, the collision box
+ * that spans the whole cell. The real blocks are checked by {@code npc-stairhouse-climb} and {@code npc-replay-quarry-to-keep}.
  */
 class BukkitNavWorldSurfaceTest {
 
@@ -21,25 +21,35 @@ class BukkitNavWorldSurfaceTest {
 
     @Test
     void aFullBlockIsWhole() {
-        assertEquals(1.0, BukkitNavWorld.surfaceTop(List.of(FULL), 0.5, 0.5), 1e-9);
+        assertEquals(1.0, BukkitNavWorld.surfaceTop(List.of(FULL)), 1e-9);
     }
 
     @Test
     void aBottomSlabIsHalfABlock() {
-        assertEquals(0.5, BukkitNavWorld.surfaceTop(List.of(BOTTOM_SLAB), 0.5, 0.5), 1e-9);
+        assertEquals(0.5, BukkitNavWorld.surfaceTop(List.of(BOTTOM_SLAB)), 1e-9);
     }
 
     @Test
-    void aStairGivesThePartTheBodyStandsOn() {
-        assertEquals(1.0, BukkitNavWorld.surfaceTop(STAIR_NORTH, 0.5, 0.5), 1e-9,
-            "the middle: the footprint reaches the upper half");
-        assertEquals(0.5, BukkitNavWorld.surfaceTop(STAIR_NORTH, 0.5, 0.9), 1e-9, "on the step, clear of the upper half");
+    void anUprightStairGivesItsStepNotItsUpperHalf() {
+        assertEquals(0.5, BukkitNavWorld.surfaceTop(STAIR_NORTH), 1e-9,
+            "a waypoint a whole block up makes the engine jump; the step is walked");
+    }
+
+    @Test
+    void anUpsideDownStairIsWhole() {
+        assertEquals(1.0, BukkitNavWorld.surfaceTop(List.of(new BoundingBox(0, 0.5, 0, 1, 1, 1),
+            new BoundingBox(0, 0, 0, 1, 0.5, 0.5))), 1e-9);
+    }
+
+    @Test
+    void aPathBlockIsItsOwnHeight() {
+        assertEquals(0.9375, BukkitNavWorld.surfaceTop(List.of(new BoundingBox(0, 0, 0, 1, 0.9375, 1))), 1e-9);
     }
 
     @Test
     void noBoxOrATallOneCountsAsAWholeBlock() {
-        assertEquals(1.0, BukkitNavWorld.surfaceTop(List.of(), 0.5, 0.5), 1e-9);
-        assertEquals(1.0, BukkitNavWorld.surfaceTop(List.of(new BoundingBox(0, 0, 0, 1, 1.5, 1)), 0.5, 0.5), 1e-9,
+        assertEquals(1.0, BukkitNavWorld.surfaceTop(List.of()), 1e-9);
+        assertEquals(1.0, BukkitNavWorld.surfaceTop(List.of(new BoundingBox(0, 0, 0, 1, 1.5, 1))), 1e-9,
             "a fence's 1.5 is no floor height navigation plans with");
     }
 }

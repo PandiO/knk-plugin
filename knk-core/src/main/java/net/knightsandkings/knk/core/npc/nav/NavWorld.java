@@ -40,11 +40,11 @@ public interface NavWorld {
     }
 
     /**
-     * The height a body's feet rest at when it stands at {@code (x, z)} on the floor block at {@code floorY} (link B4,
-     * PandiO/knk-workspace#673): the top of that block's collision boxes under the body's footprint, so a bottom slab
-     * gives {@code floorY + 0.5} and a full block {@code floorY + 1}. A stair gives the top of the part the body stands
-     * on (its upper half where the footprint reaches it, the step's half block elsewhere). The default, for worlds
-     * that cannot tell, is the whole block: {@code floorY + 1}.
+     * The walking surface of the floor block at {@code floorY} where a body stands at {@code (x, z)} (link B4,
+     * PandiO/knk-workspace#673): the top of the block's step, so a bottom slab and an upright stair give
+     * {@code floorY + 0.5} and a full block {@code floorY + 1}. A stair's upper half is not counted: it is walked up
+     * from the step, while a waypoint a whole block above the feet makes the engine jump. The default, for worlds that
+     * cannot tell, is the whole block: {@code floorY + 1}.
      */
     default double surfaceY(String world, double x, int floorY, double z) {
         return floorY + 1;

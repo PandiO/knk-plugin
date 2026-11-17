@@ -232,7 +232,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
                 // since link B4 (PandiO/knk-workspace#673) a lost follower fails the walk: the rear rows' slots on
                 // flight 5's half-block steps are at the real surface height now (B2 left it report only)
                 if (group.get().lost() > 0) {
-                    failures.add(group.get().lost() + " followers lost");
+                    failures.add(group.get().lost() + " followers lost:" + lostLines(npcs.get(), 12));
                 }
                 npcs.get().stop();
                 return failures.isEmpty() ? null : String.join("; ", failures);
@@ -268,5 +268,30 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
                 .add("leader falls kept out of the group path", group.leaderFalls());
         }
         return report.crowd(npcs);
+    }
+
+    /**
+     * The run-log lines of the followers that ended lost (why each could not get back, and the spells before it), at
+     * most {@code n}: a failed walk says where and why without the NPC log files.
+     */
+    static String lostLines(ScenarioNpcs npcs, int n) {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            if (line.text().contains("could not get back to the group's path")) {
+                names.add(line.text().substring(0, line.text().indexOf(' ')));
+            }
+        }
+        List<String> lines = new ArrayList<>();
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            String text = line.text();
+            if (!text.startsWith("trace ") && names.stream().anyMatch(name -> text.startsWith(name + " "))) {
+                lines.add(line.tick() + ": " + text);
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        for (String line : lines.subList(Math.max(0, lines.size() - n), lines.size())) {
+            out.append("\n  ").append(line);
+        }
+        return out.toString();
     }
 }
