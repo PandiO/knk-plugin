@@ -85,8 +85,9 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
             WalkAccessFactory.WalkAccess walkAccess = access.prepare(player, world, gates, captured, profile.headroom(),
                 destinationRegions);
             WalkTerrain terrain = captured.terrain().terrain();
-            return () -> new WalkRequest(terrain, walkAccess.resolve(), profile, from[0], from[1], from[2],
-                to[0], to[1], to[2], goal, budget);
+            Supplier<WalkRequest> request = () -> new WalkRequest(terrain, walkAccess.resolve(), profile, from[0], from[1],
+                from[2], to[0], to[1], to[2], goal, budget);
+            return new NavigationService.PreparedWalk(request, captured.stats());
         });
         prepared.whenComplete((ignored, error) -> {
             if (prepared.isCancelled()) {

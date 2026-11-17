@@ -62,6 +62,7 @@ import net.knightsandkings.knk.core.roads.route.RouterParameters;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
 import net.knightsandkings.knk.core.roads.route.Snapper;
 import net.knightsandkings.knk.core.roads.walk.WalkGoal;
+import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
 import net.knightsandkings.knk.core.roads.walk.WalkPath;
 import net.knightsandkings.knk.core.roads.walk.WalkPathfinder;
 import net.knightsandkings.knk.core.roads.walk.WalkRequest;
@@ -205,6 +206,24 @@ public final class NavigationService implements SiegeMatchObserver {
     }
 
     /**
+     * What a {@link WalkPreparer} may complete with to report its capture's counters (off-road phase 0,
+     * PandiO/knk-workspace#703): the request, plus chunks, cache hits, main-thread µs and wait of the capture. A plain
+     * supplier works as before; its capture counts as unknown.
+     */
+    public record PreparedWalk(Supplier<WalkRequest> request, WalkMeasurements.Capture capture)
+        implements Supplier<WalkRequest> {
+        public PreparedWalk {
+            Objects.requireNonNull(request, "request");
+            capture = capture == null ? WalkMeasurements.Capture.UNKNOWN : capture;
+        }
+
+        @Override
+        public WalkRequest get() {
+            return request.get();
+        }
+    }
+
+    /**
      * KNG-51: what a walk leg needs - the capture, the search and the executor it runs on (bounded:
      * {@code max-concurrent-searches} threads). Absent ({@code null} in {@link Deps}) = straight lines only.
      */
@@ -286,6 +305,8 @@ public final class NavigationService implements SiegeMatchObserver {
 
     private final Map<UUID, Active> active = new HashMap<>();
     private final long[] walkCounts = new long[WalkCount.values().length];
+    /** Phase 0 counters per searched walk request (#703); recorded on the walk threads, read on the main thread. */
+    private final WalkMeasurements walkMeasurements = new WalkMeasurements();
     private BukkitTask ticker;
 
     /** Walk request outcomes, for {@code /knk road status}. */
@@ -1268,14 +1289,19 @@ public final class NavigationService implements SiegeMatchObserver {
                 return;
             }
             try {
+                long queuedAt = System.nanoTime();
                 walk.searches().execute(() -> {
+                    long queueNanos = System.nanoTime() - queuedAt;
                     WalkResult result;
+                    WalkRequest searched = null;
                     try {
-                        result = walk.pathfinder().find(request.get());
+                        searched = request.get();
+                        result = walk.pathfinder().find(searched);
                     } catch (RuntimeException e) {
                         deps.logger().log(Level.WARNING, "[Navigation] Walk search failed for " + a.player.getName(), e);
                         result = null; // FALLBACK (decision L3-8)
                     }
+                    measureWalk(searched, result, request, queueNanos);
                     WalkResult delivered = result;
                     deps.mainThread().execute(() -> walkDelivered(a, leg, generation, delivered, null));
                 });
@@ -1283,6 +1309,28 @@ public final class NavigationService implements SiegeMatchObserver {
                 walkDelivered(a, leg, generation, null, WalkCount.FAILED); // shutting down
             }
         });
+    }
+
+    /**
+     * Walk thread: records a searched request's counters (#703). Measuring only - a failure here is logged and
+     * changes nothing for the player.
+     */
+    private void measureWalk(WalkRequest searched, WalkResult result, Supplier<WalkRequest> request, long queueNanos) {
+        if (searched == null || result == null) {
+            return;
+        }
+        try {
+            WalkMeasurements.Capture capture = request instanceof PreparedWalk prepared ? prepared.capture()
+                : WalkMeasurements.Capture.UNKNOWN;
+            double pathLength = result.path().or(result::partialPath).map(WalkPath::length).orElse(0.0);
+            WalkMeasurements.Sample sample = walkMeasurements.record(result.status(), result.stats(), capture, queueNanos,
+                searched.straightDistance(), pathLength);
+            if (deps.logger().isLoggable(Level.FINE)) {
+                deps.logger().fine("[Navigation] Walk search " + sample.describe());
+            }
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.FINE, "[Navigation] Walk measurement skipped", e);
+        }
     }
 
     /** A region is reached at its edge (arrival is WorldGuard containment) or within arrive-distance of the target. */
@@ -1522,6 +1570,24 @@ public final class NavigationService implements SiegeMatchObserver {
             + "; partial " + walkCounts[WalkCount.PARTIAL.ordinal()];
         String capture = deps.walk().preparer().describe();
         return "on; " + walking + " walking, " + inFlight + " computing; " + counts + (capture.isEmpty() ? "" : "; " + capture);
+    }
+
+    /**
+     * The walk-search measurement lines for {@code /knk road status} (#703): aggregates over the recent searches, then
+     * the {@code recent} newest requests. Empty when walk paths are off.
+     */
+    public List<String> walkMeasurementLines(int recent) {
+        return walkEnabled() ? walkMeasurements.describe(recent) : List.of();
+    }
+
+    /** Forgets the walk-search measurements ({@code /knk road status reset}): one scene at a time. */
+    public void resetWalkMeasurements() {
+        walkMeasurements.reset();
+    }
+
+    /** The recorder itself, for tests. */
+    WalkMeasurements walkMeasurements() {
+        return walkMeasurements;
     }
 
     /** The direct-mode target for a player at this floor position. */

@@ -244,15 +244,34 @@ public record NavigationConfig(
      * @param maxConcurrentSearches walk searches running at once, server-wide
      * @param climbables            material names climbed like a ladder
      * @param wallCost              extra cost of a cell beside a wall: paths keep a block from walls (0 = hug them)
+     * @param maxChunksPerRequest   a capture box larger than this many chunks is refused (64; raised on the dev server
+     *                              only to measure long legs, off-road phase 0, PandiO/knk-workspace#703)
      */
     public record WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
                              double detourAllowance, double climbAllowance, int maxDrop, double dropPenalty,
                              int captureMargin, int chunkTtlSeconds, double recomputeDistance, int maxConcurrentSearches,
-                             List<String> climbables, double wallCost) {
+                             List<String> climbables, double wallCost, int maxChunksPerRequest) {
+
+        /** Default of {@code max-chunks-per-request}: the capture's limit before #703 (KNG-75 step 2a). */
+        public static final int DEFAULT_MAX_CHUNKS_PER_REQUEST = 64;
+
+        /** Upper bound of {@code max-chunks-per-request}: 1024 chunks, about 12 MB of captured terrain (DESIGN § 9.3). */
+        public static final int MAX_CHUNKS_PER_REQUEST_LIMIT = 1024;
+
         public WalkConfig {
             climbables = climbables == null ? List.of("LADDER") : climbables.stream()
                 .map(name -> name == null ? "" : name.trim().toUpperCase(Locale.ROOT))
                 .toList();
+        }
+
+        /** Without {@code max-chunks-per-request} (callers from before #703): the default 64. */
+        public WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
+                          double detourAllowance, double climbAllowance, int maxDrop, double dropPenalty,
+                          int captureMargin, int chunkTtlSeconds, double recomputeDistance, int maxConcurrentSearches,
+                          List<String> climbables, double wallCost) {
+            this(enabled, maxExpansions, maxLengthFactor, maxLength, detourAllowance, climbAllowance, maxDrop, dropPenalty,
+                captureMargin, chunkTtlSeconds, recomputeDistance, maxConcurrentSearches, climbables, wallCost,
+                DEFAULT_MAX_CHUNKS_PER_REQUEST);
         }
 
         public static WalkConfig defaults() {
@@ -298,6 +317,10 @@ public record NavigationConfig(
             }
             if (maxConcurrentSearches < 1) {
                 throw new IllegalArgumentException("navigation.walk.max-concurrent-searches must be at least 1 (got: " + maxConcurrentSearches + ")");
+            }
+            if (maxChunksPerRequest < 1 || maxChunksPerRequest > MAX_CHUNKS_PER_REQUEST_LIMIT) {
+                throw new IllegalArgumentException("navigation.walk.max-chunks-per-request must be 1.."
+                    + MAX_CHUNKS_PER_REQUEST_LIMIT + " (got: " + maxChunksPerRequest + ")");
             }
             for (String name : climbables) {
                 if (name.isEmpty()) {

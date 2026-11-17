@@ -65,9 +65,28 @@ class ConfigLoaderNavigationTest {
         assertNotNull(walk, "config.yml has a navigation.walk block (KNG-51 §9)");
         assertEquals(java.util.Set.of("enabled", "max-expansions", "max-length-factor", "max-length", "detour-allowance",
             "climb-allowance", "max-drop", "drop-penalty", "capture-margin", "chunk-ttl-seconds", "recompute-distance",
-            "max-concurrent-searches", "climbables", "wall-cost"), walk.getKeys(false));
-        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 5, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0),
-            ConfigLoader.load(yaml).navigation().walk());
+            "max-concurrent-searches", "climbables", "wall-cost", "max-chunks-per-request"), walk.getKeys(false));
+        assertEquals(new NavigationConfig.WalkConfig(true, 20_000, 1.75, 144, 48, 5, 3, 10, 16, 10, 6, 2, List.of("LADDER"), 1.0,
+            64), ConfigLoader.load(yaml).navigation().walk());
+    }
+
+    @Test
+    void theChunkLimitPerWalkRequestCanBeRaisedWithinBounds() {
+        // off-road navigation phase 0 (#703): raised on a test server to measure long legs
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.walk.max-chunks-per-request", 400);
+        NavigationConfig.WalkConfig walk = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).walk();
+
+        assertEquals(400, walk.maxChunksPerRequest());
+        assertEquals(64, NavigationConfig.WalkConfig.defaults().maxChunksPerRequest());
+        walk.validate();
+        yaml.set("navigation.walk.max-chunks-per-request", 0);
+        NavigationConfig.WalkConfig zero = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).walk();
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, zero::validate);
+        assertTrue(e.getMessage().contains("max-chunks-per-request"), e.getMessage());
+        yaml.set("navigation.walk.max-chunks-per-request", 1025);
+        assertThrows(IllegalArgumentException.class,
+            ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation")).walk()::validate);
     }
 
     @Test

@@ -457,7 +457,8 @@ public class ConfigLoader {
                 walk.getDouble("recompute-distance", walkDefaults.recomputeDistance()),
                 walk.getInt("max-concurrent-searches", walkDefaults.maxConcurrentSearches()),
                 walk.contains("climbables") ? walk.getStringList("climbables") : walkDefaults.climbables(),
-                walk.getDouble("wall-cost", walkDefaults.wallCost()));
+                walk.getDouble("wall-cost", walkDefaults.wallCost()),
+                walk.getInt("max-chunks-per-request", walkDefaults.maxChunksPerRequest()));
 
         return new NavigationConfig(
             section.getBoolean("enabled", defaults.enabled()),
