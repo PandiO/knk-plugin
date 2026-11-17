@@ -417,7 +417,7 @@ public final class RouteFollower {
     public NavPoint recoveryTarget(NavWorld world, NavPoint feet, double maxAlong,
                                    java.util.function.Predicate<NavPoint> mayStand) {
         PathTargets.Target target = PathTargets.ahead(world, line, nearestIndex(feet), line.size() - 1,
-            feet.blockY() - 1, maxAlong, mayStand);
+            NavGeometry.floorYOf(feet.y()), maxAlong, mayStand);
         if (target == null) {
             return null;
         }

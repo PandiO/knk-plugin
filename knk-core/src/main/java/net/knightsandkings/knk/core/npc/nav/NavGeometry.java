@@ -15,6 +15,11 @@ public final class NavGeometry {
     public static final double BODY_HEIGHT = 1.8;
     /** Free blocks above the take-off cell a jump up a full block needs (implementation plan 4b.2 item 4). */
     public static final double JUMP_HEADROOM = 3.0;
+    /**
+     * How far a body walks up without jumping (the engine's step height): a half-block stair step or a slab's half
+     * block is a step, a full block is a jump (link B4, PandiO/knk-workspace#673).
+     */
+    public static final double STEP_UP = 0.6;
     /** Samples per block along a straight walk. */
     private static final int SAMPLES_PER_BLOCK = 4;
 
@@ -38,7 +43,58 @@ public final class NavGeometry {
      */
     public static boolean jumpFits(NavWorld world, NavPoint from, NavPoint to) {
         return to.blockY() <= from.blockY()
+            || surfaceY(world, to) - surfaceY(world, from) <= STEP_UP + 1e-6 // a half-block step up: no jump (B4)
             || world.freeHeight(from.world(), from.blockX(), from.blockY(), from.blockZ()) >= JUMP_HEADROOM;
+    }
+
+    /**
+     * The floor block a feet height stands on: the block under whole-block feet ({@code 73} stands on {@code 72}),
+     * the block the feet are in on a slab or a stair's half block ({@code 72.5} stands on {@code 72}). Link B4.
+     */
+    public static int floorYOf(double feetY) {
+        return (int) Math.ceil(feetY - 0.01) - 1;
+    }
+
+    /** The height the feet rest at on a floor point ({@link NavWorld#surfaceY}): its block's top under the body. */
+    public static double surfaceY(NavWorld world, NavPoint floor) {
+        return world.surfaceY(floor.world(), floor.x(), floor.blockY(), floor.z());
+    }
+
+    /**
+     * A feet position at the real walking surface (link B4, PandiO/knk-workspace#673): on a bottom slab half a block
+     * lower than the whole-block feet height navigation plans with ({@code floor + 1}), on a full block unchanged.
+     * Waypoints go to the engine this way, so it walks up a half-block stair step by step instead of jumping to a
+     * whole-block height, and a body that stands on its waypoint is at it. A position whose floor is not standable
+     * (in the air, an unloaded chunk) is left as it is. Idempotent.
+     */
+    public static NavPoint onSurface(NavWorld world, NavPoint feet) {
+        if (feet == null) {
+            return null;
+        }
+        int floorY = floorYOf(feet.y());
+        int x = feet.blockX();
+        int z = feet.blockZ();
+        if (!world.isStandableFloor(feet.world(), x, floorY, z)) {
+            return feet;
+        }
+        double y = world.surfaceY(feet.world(), feet.x(), floorY, feet.z());
+        return Math.abs(y - feet.y()) < 1e-9 ? feet : new NavPoint(feet.world(), feet.x(), y, feet.z());
+    }
+
+    /** {@link #onSurface(NavWorld, NavPoint)} for every waypoint of a list; the list itself when none changes. */
+    public static java.util.List<NavPoint> onSurface(NavWorld world, java.util.List<NavPoint> feet) {
+        java.util.List<NavPoint> out = null;
+        for (int i = 0; i < feet.size(); i++) {
+            NavPoint p = feet.get(i);
+            NavPoint q = onSurface(world, p);
+            if (q != p && out == null) {
+                out = new java.util.ArrayList<>(feet.subList(0, i));
+            }
+            if (out != null) {
+                out.add(q);
+            }
+        }
+        return out == null ? feet : java.util.List.copyOf(out);
     }
 
     /**

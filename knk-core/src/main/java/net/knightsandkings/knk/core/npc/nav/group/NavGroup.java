@@ -1741,7 +1741,7 @@ public final class NavGroup {
             case BACK_OFF, SIDE_STEP -> {
                 f.recoveryMove = true;
                 f.sentEndArc = Double.NaN;
-                f.mover.follow(move, settings.waypointMargin());
+                f.mover.follow(NavGeometry.onSurface(ports.world(), move), settings.waypointMargin());
             }
             case LOCAL_LEG, REPLAN -> rejoin(f, slotArc, step == RecoveryLadder.Step.LOCAL_LEG ? "is stuck"
                 : "is still stuck (steps used up)");
@@ -1815,7 +1815,7 @@ public final class NavGroup {
                     continue;
                 }
                 if (feet.blockX() != at.blockX() || feet.blockZ() != at.blockZ()) {
-                    f.mover.follow(List.of(feet), settings.waypointMargin());
+                    f.mover.follow(NavGeometry.onSurface(ports.world(), List.of(feet)), settings.waypointMargin());
                 }
                 return;
             }
@@ -1902,7 +1902,8 @@ public final class NavGroup {
         }
         // every step a straight walk on floor: a lane point across a wall corner or a ledge from the one before it gets
         // the cells between (#592, lanes running into a landing's corner)
-        f.mover.follow(WaypointChain.bridged(ports.world(), at, waypoints));
+        // at the real walking surface (link B4): a slot on a half-block stair is half a block lower than its floor + 1
+        f.mover.follow(NavGeometry.onSurface(ports.world(), WaypointChain.bridged(ports.world(), at, waypoints)));
         f.sentEndArc = endArc;
     }
 
@@ -2107,7 +2108,7 @@ public final class NavGroup {
             f.leavingDoor = false;
             return;
         }
-        f.mover.follow(List.of(back), settings.waypointMargin());
+        f.mover.follow(NavGeometry.onSurface(ports.world(), List.of(back)), settings.waypointMargin());
         f.sentEndArc = path.arc(k);
         f.leavingDoor = true; // not interrupted on its way back
     }
@@ -2204,12 +2205,12 @@ public final class NavGroup {
         }
         Set<String> here = regionsAt(at);
         PathTargets.Target ahead = from > last ? null : PathTargets.ahead(ports.world(), path.floors(), place, from,
-            last, at.blockY() - 1, reach, feet -> mayStand(f, here, feet));
+            last, NavGeometry.floorYOf(at.y()), reach, feet -> mayStand(f, here, feet));
         if (ahead == null && from > place) {
             // every point ahead failed from here: start over with them rather than aim at nothing
             f.failedTarget = -1;
-            ahead = PathTargets.ahead(ports.world(), path.floors(), place, place, last, at.blockY() - 1, reach,
-                feet -> mayStand(f, here, feet));
+            ahead = PathTargets.ahead(ports.world(), path.floors(), place, place, last, NavGeometry.floorYOf(at.y()),
+                reach, feet -> mayStand(f, here, feet));
         }
         int target = ahead != null ? ahead.index() : Math.max(place, 0);
         if (target > leaderIdx) {
@@ -2474,7 +2475,8 @@ public final class NavGroup {
             f.progressTick = now; // waiting at a door or an edge is not being stuck
             return;
         }
-        f.mover.follow(WaypointChain.bridged(ports.world(), f.mover.position().orElse(null), waypoints),
+        f.mover.follow(NavGeometry.onSurface(ports.world(),
+                WaypointChain.bridged(ports.world(), f.mover.position().orElse(null), waypoints)),
             settings.waypointMargin());
     }
 

@@ -116,4 +116,26 @@ class PathTargetsTest {
         assertEquals(10, PathTargets.ahead(world, path, 0, 10, path.size() - 1, 64, 16, null).index(),
             "not before minIndex (a target that failed from here)");
     }
+
+    @Test
+    void upAHalfBlockStairUnderALowFlightEveryStepIsOnTheNpcsFloor() {
+        // link B4 (PandiO/knk-workspace#673), the Keep stair's flight 5: a bottom slab, a full block, a slab, ...
+        // each step half a block up, under the flight above (2 blocks of headroom: no whole-block jump fits)
+        world.floor = (x, z) -> x <= 0 ? 64 : 64 + (x + 1) / 2;
+        List<NavPoint> path = new ArrayList<>();
+        for (int x = 0; x <= 9; x++) {
+            int y = world.floor.applyAsInt(x, 0);
+            path.add(floor(x + 0.5, y, 0.5));
+            world.headroom.put(x + ",y,0".replace("y", String.valueOf(y)), 2.0);
+            if (x % 2 == 1) {
+                world.tops.put(x + "," + y + ",0", 0.5);
+            }
+        }
+
+        PathTargets.Target target = PathTargets.ahead(world, path, 0, path.size() - 1, 64, 16, null);
+
+        assertNotNull(target, "a point ahead on the stair it stands on");
+        assertEquals(3, target.index(), "the first point 3 blocks ahead: a half-block step up is no jump");
+        assertEquals(66, target.floor().blockY());
+    }
 }

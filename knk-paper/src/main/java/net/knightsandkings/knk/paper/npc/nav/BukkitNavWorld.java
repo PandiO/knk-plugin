@@ -89,6 +89,37 @@ public final class BukkitNavWorld implements NavWorld {
     }
 
     /**
+     * The height the feet rest at on a floor (link B4, PandiO/knk-workspace#673): the top of the floor block's
+     * collision boxes under the body's footprint at {@code (x, z)} (a bottom slab 0.5, a stair's step 0.5 or its upper
+     * half 1.0), at most a whole block; {@code floorY + 1} where the floor is not standable or no box is under it.
+     */
+    @Override
+    public double surfaceY(String world, double x, int floorY, double z) {
+        if (!isStandableFloor(world, (int) Math.floor(x), floorY, (int) Math.floor(z))) {
+            return floorY + 1;
+        }
+        World w = Bukkit.getWorld(world);
+        Block floor = w.getBlockAt((int) Math.floor(x), floorY, (int) Math.floor(z));
+        return floorY + surfaceTop(floor.getCollisionShape().getBoundingBoxes(), x - floor.getX(), z - floor.getZ());
+    }
+
+    /**
+     * The top of the boxes (block-relative, 0 to 1) a body's footprint at block-relative {@code (rx, rz)} rests on: the
+     * highest box overlapping a square of the body's width round the point, clamped to (0, 1]; 1 without any.
+     */
+    static double surfaceTop(java.util.Collection<org.bukkit.util.BoundingBox> boxes, double rx, double rz) {
+        double half = net.knightsandkings.knk.core.npc.nav.NavGeometry.BODY_WIDTH / 2;
+        double top = -1;
+        for (org.bukkit.util.BoundingBox box : boxes) {
+            if (box.getMinX() < rx + half && box.getMaxX() > rx - half && box.getMinZ() < rz + half
+                && box.getMaxZ() > rz - half) {
+                top = Math.max(top, box.getMaxY());
+            }
+        }
+        return top <= 0 || top > 1 ? 1.0 : top;
+    }
+
+    /**
      * Whether a block stops a walking body (implementation plan 4b.2 items 1 and 13): anything not passable, except a
      * step the body walks up (a bottom slab, a stair that is not upside down). False in an unloaded chunk.
      */
