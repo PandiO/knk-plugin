@@ -79,6 +79,11 @@ public final class NavGroup {
     /** A follower this far behind its slot walks faster, until it is within {@link #CAUGHT_UP_LAG}. */
     static final double CATCH_UP_LAG = 1.0;
     static final double CAUGHT_UP_LAG = 0.25;
+    /**
+     * A follower this close to its slot's point (across) once the leader's trip ended is at its slot (link B4): the
+     * engine's own default distance margin for a waypoint list.
+     */
+    static final double SLOT_REACHED = 1.0;
     /** A follower this far ahead of its slot waits for it. */
     static final double AHEAD_TOLERANCE = 0.75;
     /** Failed own legs in a row before the group goes on without a follower. */
@@ -1521,6 +1526,26 @@ public final class NavGroup {
         double a = path.arcOf(at, f.pathIdx);
         f.lag = slotArc - a;
         speed(f);
+        if (leaderDoneTick >= 0 && atSlotPoint(at, slot, slotArc)) {
+            // link B4 (PandiO/knk-workspace#673): it stands at its slot, judged in place, not along the path. Where
+            // the group path passes a place twice (the leader went back and forth on a stair), the arc says it is
+            // blocks behind while it stands next to its slot; it was sent along the loop and never got there.
+            spellFreed(f, at);
+            f.recoveryMove = false;
+            f.engineStuck = null;
+            if (f.mover.isMoving()) {
+                f.mover.stop();
+            }
+            f.lag = 0;
+            f.settled = true;
+            f.sentEndArc = targetArc;
+            f.progressArc = a;
+            f.progressTick = now;
+            f.failures = 0;
+            f.lost = false;
+            f.lostRetryTicks = 0;
+            return;
+        }
         if (f.ladder.isOpen() && recoveryTick(f, slot, slotArc, at, a)) {
             return; // on a step of its ladder, or waiting before the next
         }
@@ -1586,6 +1611,21 @@ public final class NavGroup {
                 stuck(f, slot, slotArc, at, a, RecoveryLadder.Reporter.NO_PROGRESS);
             }
         }
+    }
+
+    /**
+     * Whether a follower stands at its slot's point (link B4): within {@link #SLOT_REACHED} blocks across and less
+     * than a block above or below it at the real walking surface, as the engine judges a waypoint reached. A slot on a
+     * half-block stair is half a block under its floor + 1, so the height is compared at the surface.
+     */
+    private boolean atSlotPoint(NavPoint at, Formation.Slot slot, double slotArc) {
+        if (path.isEmpty() || slotArc < 0) {
+            return false;
+        }
+        int idx = path.indexAtArc(slotArc);
+        NavPoint point = NavGeometry.onSurface(ports.world(), lanePoint(idx, Math.max(0, slotArc - path.arc(idx)),
+            slot.side()));
+        return at.horizontalDistance(point) <= SLOT_REACHED && Math.abs(point.y() - at.y()) < 1;
     }
 
     /**
