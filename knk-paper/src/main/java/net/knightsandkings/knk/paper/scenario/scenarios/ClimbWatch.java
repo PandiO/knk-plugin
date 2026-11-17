@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import net.knightsandkings.knk.core.npc.nav.JumpDetector;
 import net.knightsandkings.knk.core.npc.nav.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationService;
@@ -31,6 +32,9 @@ import net.knightsandkings.knk.paper.scenario.NpcMovementScene;
  *   horizontally, is still counted ({@link #stretchOffLevel()}, report only): with stretches handed out by 3D progress
  *   a stretch going up the next flight is a flight above the NPC before it gets there.</li>
  *   <li><b>Turns dropped by the 30 s guard</b>, and of those the ones whose holder fell while it held the turn.</li>
+ *   <li><b>Jumps</b> (link B4, PandiO/knk-workspace#673): a body leaving the ground at a jump's upward speed
+ *   ({@link JumpDetector}), not a step up a half-block stair; and of those the jumps that took off on a place of the
+ *   climb, the flights and their entries ({@link #jumpsOnClimb()}).</li>
  * </ol>
  * Since link B2 (PandiO/knk-workspace#671) the climb and the replay fail on falls from a flight or landing, on
  * handovers onto another level and on turns dropped after a fall ({@link #failures}).
@@ -63,6 +67,8 @@ final class ClimbWatch {
     private final List<String> fallsFromClimb = new ArrayList<>();
     private final List<String> fallenTurns = new ArrayList<>();
     private final List<String> staleTurns = new ArrayList<>();
+    private final List<String> jumps = new ArrayList<>();
+    private final List<String> jumpsOnClimb = new ArrayList<>();
     private int handovers;
     private long tick;
 
@@ -119,6 +125,7 @@ final class ClimbWatch {
         long turnTicks;
         NavPoint turnAt;
         boolean fellInTurn;
+        final JumpDetector jumps = new JumpDetector();
         final Map<List<NavPoint>, Boolean> seen = new IdentityHashMap<>();
     }
 
@@ -132,6 +139,7 @@ final class ClimbWatch {
             }
             Body body = bodies.computeIfAbsent(mover.id(), id -> new Body());
             fall(mover, body, at);
+            jump(mover, body, at);
             place(mover, body, at);
             handover(mover, body, at);
             turn(mover, body, at);
@@ -161,6 +169,19 @@ final class ClimbWatch {
             body.fellInTurn |= body.turnTicks > 0;
         }
         body.falling = fallen;
+    }
+
+    private void jump(NpcMover mover, Body body, NavPoint at) {
+        if (!body.jumps.sample(at.y(), mover.onGround(), mover.verticalSpeed())) {
+            return;
+        }
+        int p = house.place(at);
+        String line = String.format(Locale.ROOT, "%s at %s (%s)", mover.name(), house.realBlock(at),
+            NpcMovementScene.climbPlaceName(p));
+        jumps.add(line);
+        if (p >= 0) { // from a flight, a landing, the corridor or the hall: the flights and their entries
+            jumpsOnClimb.add(line);
+        }
     }
 
     private void place(NpcMover mover, Body body, NavPoint at) {
@@ -272,6 +293,16 @@ final class ClimbWatch {
     /** Falls that started on a place of the climb (a flight, a landing, the hall or the street). */
     List<String> fallsFromClimb() {
         return fallsFromClimb;
+    }
+
+    /** Real jumps (by upward speed, {@link JumpDetector}), anywhere. */
+    List<String> jumps() {
+        return jumps;
+    }
+
+    /** Real jumps that took off on a place of the climb: a flight or the landing, hall or street at its entry. */
+    List<String> jumpsOnClimb() {
+        return jumpsOnClimb;
     }
 
     /** Turns dropped by the 30 s guard whose holder fell while it held the turn. */

@@ -252,6 +252,8 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .add("handovers onto another level", ClimbWatch.first(watch.crossLevel(), 4))
             .add("new stretches starting off the feet level (B1's measure)", watch.stretchOffLevel().size())
             .add("falls from the climb", watch.fallsFromClimb().size())
+            .add("jumps (by upward speed)", watch.jumps().size())
+            .add("jumps on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
             .add("turns dropped by the 30 s guard", ClimbWatch.first(watch.staleTurns(), 3))
             .add("fell (service count)", report.count(npcs, Event.FELL))

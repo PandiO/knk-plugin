@@ -136,6 +136,8 @@ public final class NpcNavRunner {
     private Path traceFile;
     private NavPoint tracePrev;
     private boolean tracePrevGround;
+    /** Real jumps of the traced NPC, by upward speed (link B4, PandiO/knk-workspace#673). */
+    private net.knightsandkings.knk.core.npc.nav.JumpDetector traceJumps;
     /** The traced NPC's stretch last written to its trace. */
     private java.util.List<NavPoint> traceSent;
 
@@ -565,7 +567,7 @@ public final class NpcNavRunner {
 
     /**
      * Traces one NPC every tick for {@code seconds} into its own file: position, on ground, movement since the last
-     * tick, navigation state, and JUMP when it leaves the ground upwards (for the staircases). {@code name} null:
+     * tick, navigation state, and JUMP when it leaves the ground at a jump's upward speed (for the staircases; link B4). {@code name} null:
      * the NPC nearest {@code near}.
      */
     public String startTrace(NavPoint near, String name, int seconds) {
@@ -594,10 +596,12 @@ public final class NpcNavRunner {
         traceId = pick.mover.id();
         traceUntil = tick + seconds * 20L;
         tracePrev = null;
+        traceJumps = new net.knightsandkings.knk.core.npc.nav.JumpDetector();
         traceSent = null;
         traceFile = log.newFile("trace_" + pick.mover.name());
         log.append(traceFile, "# trace " + pick.mover.name() + " for " + seconds
-            + " s; columns: tick x y z onGround dx dy dz | state bestIndex nearestIndex | JUMP when it leaves the ground upwards;"
+            + " s; columns: tick x y z onGround dx dy dz | state bestIndex nearestIndex | JUMP when it leaves the ground"
+            + " at a jump's upward speed (a step up a half-block stair is no jump);"
             + " '# waypoints:' lines list each stretch's waypoints (feet blocks) when it is handed out;"
             + " '# corridor:' lines follow with each waypoint's free width across the line: x y z total left right"
             + " (blocks, to a wall, post or drop, at most " + (int) FreeWidth.MAX_HALF + " per side)");
@@ -637,7 +641,8 @@ public final class NpcNavRunner {
             }
             log.append(traceFile, corridor.substring(0, corridor.length() - 1));
         }
-        boolean jump = tracePrev != null && tracePrevGround && dy > 0.2;
+        // by upward speed, not by the rise: a step up a slab or a half-block stair rises 0.5 with no jump (link B4)
+        boolean jump = traceJumps.sample(at.y(), ground, walker.mover.verticalSpeed());
         log.append(traceFile, String.format(Locale.ROOT, "%d %.2f %.2f %.2f %s %.3f %.3f %.3f | %s %d %d%s", tick,
             at.x(), at.y(), at.z(), ground ? "G" : "-", dx, dy, dz, service.state(traceId),
             follower == null ? -1 : follower.bestIndex(), follower == null ? -1 : follower.nearestIndex(at),
