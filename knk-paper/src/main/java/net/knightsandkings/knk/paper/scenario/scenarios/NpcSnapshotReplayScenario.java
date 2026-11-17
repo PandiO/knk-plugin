@@ -35,8 +35,9 @@ import net.knightsandkings.knk.paper.scenario.SnapshotReplay;
  * settings (the merged dev config: {@code elastic}, spacing 1.5, 40/40, stretches of 32 blocks) and with the settings
  * of the failed smoke test (decision 35.3: {@code levels}, spacing 2.0, 60/60). Since link B2 (PandiO/knk-workspace#671)
  * each walk fails on a fall from a flight or landing, a handover onto another level, a turn released by the 30 s guard
- * after its holder fell ({@link ClimbWatch#failures}) and a leader that does not arrive. Lost followers stay report
- * only: on the real blocks they come from slots on flight 5's half-block steps (link B4, #673), not from the handover.
+ * after its holder fell ({@link ClimbWatch#failures}) and a leader that does not arrive. Since link B4
+ * (PandiO/knk-workspace#673) the group also fails on a lost follower: on the real blocks they came from slots on flight
+ * 5's half-block steps at whole-block heights.
  */
 public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>, SizedScene {
 
@@ -228,9 +229,11 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
                 if (!(groupResult.get() instanceof NavigationResult.Arrived)) {
                     failures.add("the group's leader did not arrive: " + groupResult.get());
                 }
-                // lost followers stay report only here (link B2, PandiO/knk-workspace#671): on the real blocks the
-                // rear rows' slots fall on flight 5's half-block steps, where a follower never settles at a slot at a
-                // whole-block height; a separate cause from the handover, left to link B4 (#673)
+                // since link B4 (PandiO/knk-workspace#673) a lost follower fails the walk: the rear rows' slots on
+                // flight 5's half-block steps are at the real surface height now (B2 left it report only)
+                if (group.get().lost() > 0) {
+                    failures.add(group.get().lost() + " followers lost");
+                }
                 npcs.get().stop();
                 return failures.isEmpty() ? null : String.join("; ", failures);
             });

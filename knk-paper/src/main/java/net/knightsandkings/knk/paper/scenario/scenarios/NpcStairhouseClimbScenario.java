@@ -32,7 +32,8 @@ import net.knightsandkings.knk.paper.scenario.SizedScene;
  * spells and where each NPC got to. On {@code next} before link B2 these showed the smoke test's failures: a fall under
  * a landing, a skipped flight, and the queue let go by the guard. Since link B2 (PandiO/knk-workspace#671) it fails on
  * a fall from a flight or landing, a handover onto another level, a turn released by the 30 s guard after its holder
- * fell, a group leader that does not arrive and a lost follower ({@link ClimbWatch#failures}); the rest stays report
+ * fell, a group leader that does not arrive and a lost follower ({@link ClimbWatch#failures}); since link B4
+ * (PandiO/knk-workspace#673) also on a real jump (by upward speed) on a flight or its entry; the rest stays report
  * only. Needs Citizens.
  */
 public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>, SizedScene {
@@ -166,6 +167,11 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
                 }
                 if (group.get().lost() > 0) {
                     failures.add(group.get().lost() + " followers lost");
+                }
+                if (!watch.get().jumpsOnClimb().isEmpty()) {
+                    // link B4 (PandiO/knk-workspace#673): waypoints at the real surface, no jump onto a flight
+                    failures.add("real jumps on the flights and their entries "
+                        + ClimbWatch.first(watch.get().jumpsOnClimb(), 3));
                 }
                 npcs.get().dismiss(group.get());
                 npcs.get().remove(walkers);
