@@ -70,7 +70,8 @@ public final class NavigationModelSnapshot {
     }
 
     record LandmarkFile(int id, String name, String world, double x, double y, double z, String extent,
-                        String regionId, Double radius, Integer domainId, String domainName, boolean navigationEnabled) {
+                        String regionId, Double radius, Integer domainId, String domainName, boolean navigationEnabled,
+                        Double preference) {
     }
 
     record SnapshotFile(int schema, String asOf, List<DomainFile> domains, List<PointFile> locations,
@@ -161,7 +162,7 @@ public final class NavigationModelSnapshot {
             c.item().nameMatch().name(), c.siegeEnabled(), c.generalEnabled(), c.generalTargets());
         List<LandmarkFile> landmarks = model.landmarks().stream()
             .map(l -> new LandmarkFile(l.id(), l.name(), l.world(), l.x(), l.y(), l.z(), l.extent().name(), l.regionId(),
-                l.radius(), l.domainId(), l.domainName(), l.navigationEnabled()))
+                l.radius(), l.domainId(), l.domainName(), l.navigationEnabled(), l.preference()))
             .toList();
         return new SnapshotFile(SCHEMA, model.asOf().toString(), domains, locations, compass, landmarks);
     }
@@ -195,7 +196,8 @@ public final class NavigationModelSnapshot {
         for (LandmarkFile l : stored.landmarks() == null ? List.<LandmarkFile>of() : stored.landmarks()) {
             if (l != null && l.name() != null && l.world() != null) {
                 landmarks.add(new Landmark(l.id(), l.name(), l.world(), l.x(), l.y(), l.z(), Landmark.Extent.parse(l.extent()),
-                    l.regionId(), l.radius(), l.domainId(), l.domainName(), l.navigationEnabled()));
+                    l.regionId(), l.radius(), l.domainId(), l.domainName(), l.navigationEnabled(),
+                    Landmark.preference(l.preference())));
             }
         }
         return new NavigationModel(asOf, domains, locations, compass, landmarks);

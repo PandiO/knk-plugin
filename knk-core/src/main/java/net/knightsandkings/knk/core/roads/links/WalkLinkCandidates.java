@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.domain.roads.RoadNode;
 import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
+import net.knightsandkings.knk.core.landmarks.LandmarkConnections;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.WalkLinkSource;
 
@@ -27,6 +28,13 @@ import net.knightsandkings.knk.core.roads.route.WalkLinkSource;
  * boundaries} are plumbing, as for the maneuvers; pruned nodes are not routed on. Road distance is the walked length
  * ({@link RoadEdge#length()}), one-way edges From → To only, as the router walks them.
  *
+ * <p><b>Landmark nodes</b> (off-road phase 5.2, PandiO/knk-workspace#709, DESIGN § 5.2.1, § 6.2.2; only with
+ * {@code navigation.landmarks} on): the road nodes landmarks stand on ({@code LandmarkLinkNodes}) also take part, even a
+ * tile boundary; a pair of landmark nodes that {@link LandmarkConnections} marks blocked is no candidate. In v1
+ * connections are inferred ({@link LandmarkConnections#INFERRED}: no stored links, decision O05), so landmark pairs are
+ * candidates by the same range and ratio rule as every other pair. Without landmark nodes the candidates are exactly
+ * the ones before.
+ *
  * <p>Thread-safe: the per-node lists are computed on demand from any routing thread.
  */
 public final class WalkLinkCandidates {
@@ -36,12 +44,28 @@ public final class WalkLinkCandidates {
     private final double ratio;
     private final Map<Long, List<Integer>> grid = new HashMap<>();
     private final Map<Integer, List<WalkLinkSource.Candidate>> byNode = new ConcurrentHashMap<>();
+    /** Road node id → the landmark it stands for (phase 5.2); empty without landmarks. */
+    private final Map<Integer, Integer> landmarkNodes;
+    private final LandmarkConnections connections;
 
     /**
      * @param range {@code walk-link-range}: the longest straight distance of a link (blocks, positive)
      * @param ratio {@code walk-link-ratio}: the road must be longer than this times the straight distance (above 1)
      */
     public WalkLinkCandidates(RoadNetworkSnapshot snapshot, double range, double ratio) {
+        this(snapshot, range, ratio, Map.of(), LandmarkConnections.INFERRED);
+    }
+
+    /**
+     * With landmark nodes (phase 5.2, #709).
+     *
+     * @param landmarkNodes road node id → landmark id, the nodes landmarks stand on (empty: none)
+     * @param connections   the landmark-to-landmark links ({@link LandmarkConnections#INFERRED} in v1)
+     */
+    public WalkLinkCandidates(RoadNetworkSnapshot snapshot, double range, double ratio,
+                              Map<Integer, Integer> landmarkNodes, LandmarkConnections connections) {
+        this.landmarkNodes = Map.copyOf(Objects.requireNonNull(landmarkNodes, "landmarkNodes"));
+        this.connections = Objects.requireNonNull(connections, "connections");
         this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
         if (!(range > 0) || !(ratio > 1)) {
             throw new IllegalArgumentException("walk-link-range must be positive and walk-link-ratio above 1 (got: "
@@ -50,7 +74,7 @@ public final class WalkLinkCandidates {
         this.range = range;
         this.ratio = ratio;
         for (RoadNode node : snapshot.nodes()) {
-            if (takesPart(node)) {
+            if (takesPart(node) || isLandmarkNode(node)) {
                 grid.computeIfAbsent(cell(node.x(), node.z()), k -> new ArrayList<>()).add(node.id());
             }
         }
@@ -68,6 +92,35 @@ public final class WalkLinkCandidates {
         return ratio;
     }
 
+    /** The landmark nodes these candidates were made with (road node id → landmark id). */
+    public Map<Integer, Integer> landmarkNodes() {
+        return landmarkNodes;
+    }
+
+    /** Whether {@code node} stands for a landmark and is not a tombstone. */
+    private boolean isLandmarkNode(RoadNode node) {
+        return landmarkNodes.containsKey(node.id()) && !node.kind().isTombstone() && node.kind() != RoadNodeKind.SPLIT;
+    }
+
+    /** Whether the stored landmark links block the pair (never in v1: connections are inferred). */
+    private boolean blockedPair(int fromNode, int toNode) {
+        Integer from = landmarkNodes.get(fromNode);
+        Integer to = landmarkNodes.get(toNode);
+        if (from == null || to == null) {
+            return false;
+        }
+        for (LandmarkConnections.Link link : connections.linksOf(from)) {
+            if (!link.blocked()) {
+                continue;
+            }
+            if (link.fromLandmarkId() == from && link.toLandmarkId() == to
+                || !link.oneWay() && link.fromLandmarkId() == to && link.toLandmarkId() == from) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Whether a node can be the end of a link. */
     static boolean takesPart(RoadNode node) {
         return switch (node.kind()) {
@@ -83,7 +136,7 @@ public final class WalkLinkCandidates {
 
     private List<WalkLinkSource.Candidate> compute(int nodeId) {
         RoadNode from = snapshot.node(nodeId).orElse(null);
-        if (from == null || !takesPart(from)) {
+        if (from == null || !(takesPart(from) || isLandmarkNode(from))) {
             return List.of();
         }
         Map<Integer, Double> road = roadDistances(nodeId, ratio * range);
@@ -105,7 +158,7 @@ public final class WalkLinkCandidates {
                         continue;
                     }
                     Double byRoad = road.get(otherId);
-                    if (byRoad == null || byRoad > ratio * straight) {
+                    if ((byRoad == null || byRoad > ratio * straight) && !blockedPair(nodeId, otherId)) {
                         out.add(new WalkLinkSource.Candidate(nodeId, otherId, straight));
                     }
                 }

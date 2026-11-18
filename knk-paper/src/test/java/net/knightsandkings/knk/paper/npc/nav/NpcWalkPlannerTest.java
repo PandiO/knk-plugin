@@ -4,12 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import net.knightsandkings.knk.core.landmarks.LandmarkWeights;
 import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.OffRoadWalks;
 import net.knightsandkings.knk.core.roads.build.GateCells;
@@ -17,7 +19,12 @@ import net.knightsandkings.knk.core.roads.build.SurfaceGrid;
 import net.knightsandkings.knk.core.roads.walk.CellAccess;
 import net.knightsandkings.knk.core.roads.walk.MovementProfile;
 import net.knightsandkings.knk.core.roads.walk.WalkBudget;
+import net.knightsandkings.knk.core.roads.route.RegionShape;
+import net.knightsandkings.knk.core.roads.walk.WalkCellWeights;
 import net.knightsandkings.knk.core.roads.walk.WalkCells;
+import net.knightsandkings.knk.core.roads.walk.WalkPathfinder;
+import net.knightsandkings.knk.core.roads.walk.WalkRequest;
+import net.knightsandkings.knk.core.roads.walk.WalkResult;
 import net.knightsandkings.knk.core.roads.walk.WalkSearch;
 import net.knightsandkings.knk.core.roads.walk.WalkTerrain;
 import net.knightsandkings.knk.paper.navigation.walk.WalkBox;
@@ -198,5 +205,57 @@ class NpcWalkPlannerTest {
             new WalkSearch());
         assertTrue(walk.isFound(), walk.toString());
         assertTrue(walk.path().stream().noneMatch(p -> p.blockX() == 5 && p.blockZ() == 0), "not through the gap");
+    }
+
+    // ==================== off-road phase 5.2 (PandiO/knk-workspace#709): no landmark weights for NPCs ====================
+
+    /** Runs the NPC search and keeps the request it sent and the result it got. */
+    private static final class Recording implements WalkPathfinder {
+        final List<WalkRequest> requests = new ArrayList<>();
+        final List<WalkResult> results = new ArrayList<>();
+
+        @Override
+        public WalkResult find(WalkRequest request) {
+            requests.add(request);
+            WalkResult result = new WalkSearch().find(request);
+            results.add(result);
+            return result;
+        }
+    }
+
+    private static OffRoadWalks.Walk npcWalk(Grid grid, Recording pathfinder) {
+        WalkTerrain terrain = new WalkTerrain(grid, GateCells.NONE, WalkCells.NONE);
+        List<NavPoint> targets = List.of(floor(20.5, 0.5));
+        return NpcWalkPlanner.search(terrain, CellAccess.OPEN, NpcWalkPlanner.npcProfile(MovementProfile.PLAYER, true),
+            WalkBudget.DEFAULTS, new NavPoint(W, 0.5, 65, 0.5), targets, targets.get(0), 1.5, pathfinder);
+    }
+
+    @Test
+    void anNpcWalkLegHasTheSameCostAndPathWithLandmarkWeightsOnOrOff() {
+        // navigation.landmarks on: a landmark of preference 4.0 lies across the NPC's straight way. Its weights reach
+        // a player's walk leg only through NavigationService.forMode in the preferred mode; NpcWalkPlanner builds its
+        // own requests, which carry none.
+        LandmarkWeights hall = LandmarkWeights.of(List.of(new LandmarkWeights.Area(1,
+            new LandmarkWeights.RegionArea(RegionShape.cuboid(5, 60, -3, 15, 80, 3)), 4.0)), 4.0);
+        Recording off = new Recording();
+        Recording on = new Recording();
+
+        OffRoadWalks.Walk withoutLandmarks = npcWalk(new Grid(), off);
+        OffRoadWalks.Walk withLandmarks = npcWalk(new Grid(), on);
+
+        assertTrue(withLandmarks.isFound(), withLandmarks.toString());
+        assertTrue(on.requests.stream().allMatch(r -> r.weights() == WalkCellWeights.NONE), "no weights on an NPC request");
+        assertEquals(withoutLandmarks.path(), withLandmarks.path(), "the same path");
+        assertEquals(off.results.get(0).path().orElseThrow().cost(), on.results.get(0).path().orElseThrow().cost(), 0.0,
+            "the same cost");
+
+        // the weight would change the walk: the same request as a weighted player leg goes round the hall
+        WalkRequest request = on.requests.get(0);
+        WalkResult weighted = new WalkSearch().find(request.withWeights(hall.within(request.reachBox())));
+        assertTrue(weighted.isFound());
+        assertTrue(weighted.path().orElseThrow().cost() > off.results.get(0).path().orElseThrow().cost(),
+            "weighted, the walk costs more (it goes round)");
+        assertFalse(weighted.path().orElseThrow().length() == off.results.get(0).path().orElseThrow().length(),
+            "and is longer");
     }
 }

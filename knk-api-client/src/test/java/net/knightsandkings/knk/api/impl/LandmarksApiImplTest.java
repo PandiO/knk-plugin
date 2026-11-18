@@ -91,7 +91,7 @@ class LandmarksApiImplTest {
         assertEquals(0.8, throne.preference());
         Landmark model = throne.toModel();
         assertEquals(new Landmark(41, "Throne room", "world", 100.5, 72.0, -40.5, Landmark.Extent.RADIUS, null, 6.5, 9, "Keep",
-            true), model);
+            true, 0.8), model, "phase 5.2 (#709): the preference reaches the model");
         assertFalse(landmarks.get(1).navigationEnabled());
         assertEquals(Landmark.Extent.NONE, landmarks.get(1).extent());
         assertEquals(1.0, landmarks.get(1).preference(), "missing: the API's default");

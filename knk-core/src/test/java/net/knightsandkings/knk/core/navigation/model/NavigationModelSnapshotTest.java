@@ -158,4 +158,44 @@ class NavigationModelSnapshotTest {
         assertTrue(model.landmarks().isEmpty());
         assertEquals("world", model.domain(1).orElseThrow().spawn().world());
     }
+
+    // ==================== off-road phase 5.2 (#709): the landmark's preference ====================
+
+    @Test
+    void aLandmarksPreferenceSurvivesTheRoundTrip() throws Exception {
+        Landmark hall = new Landmark(14, "Great Hall", "world", 3.5, 70, 8.5, Landmark.Extent.REGION, "great_hall", null,
+            null, null, true, 2.5);
+        Landmark garden = new Landmark(15, "Garden", "world", 30.5, 64, 8.5, Landmark.Extent.RADIUS, null, 6.0, null, null,
+            false, 0.5);
+        NavigationModel model = new NavigationModel(T0, List.of(), List.of(), null, List.of(hall, garden));
+        NavigationModelSnapshot snapshot = snapshot();
+
+        snapshot.write(model);
+        JsonNode written = new ObjectMapper().readTree(snapshot.file().toFile());
+        NavigationModel read = snapshot.read().model();
+
+        assertEquals(2.5, written.get("landmarks").get(0).get("preference").asDouble(), "the field is in the file");
+        assertEquals(1, written.get("schema").asInt(), "still schema 1: the field is additive");
+        assertEquals(model, read);
+        assertEquals(List.of(2.5, 0.5), read.landmarks().stream().map(Landmark::preference).toList());
+    }
+
+    @Test
+    void aSchemaOneFileWrittenBeforePhaseFiveTwoReadsTheMissingPreferenceAsOne() throws Exception {
+        NavigationModelSnapshot snapshot = snapshot();
+        Files.createDirectories(snapshot.file().getParent());
+        Files.writeString(snapshot.file(), """
+            {"schema":1,"asOf":"2026-11-18T12:00:00Z","domains":[],"locations":[],
+             "landmarks":[{"id":12,"name":"Throne Room","world":"world","x":1.5,"y":70,"z":-3,"extent":"RADIUS",
+                           "radius":4.0,"domainId":1,"domainName":"Kardenna","navigationEnabled":true},
+                          {"id":13,"name":"Broken","world":"world","x":1.5,"y":70,"z":-3,"extent":"RADIUS",
+                           "radius":4.0,"navigationEnabled":true,"preference":-2}]}
+            """);
+
+        List<Landmark> landmarks = snapshot.read().model().landmarks();
+
+        assertEquals(List.of(1.0, 1.0), landmarks.stream().map(Landmark::preference).toList(),
+            "missing = no weight; a broken value as well");
+        assertFalse(landmarks.get(0).weighted());
+    }
 }
