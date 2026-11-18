@@ -1109,9 +1109,12 @@ regions:
 # the API over the game hub: after every managed-region repair (startup, /knk regions repair), after a world task's
 # region is renamed or redefined, and again on every game hub (re)connect. Needs realtime.enabled: true. Off by default:
 # off, nothing is read or sent and the plugin behaves as before.
+# Live players (PandiO/knk-workspace#738): with reporting on, every interval-ticks the plugin also reports each online
+# player's world, position, yaw, AFK, active mode and running minigame match; the API decides who may see whom.
 map:
   reporting:
     enabled: false
+    interval-ticks: 40       # live player report interval (40 ticks = 2 s; 10..1200)
 
 # What players see when they type "/" (KNG-107). Commands are only left out of the suggestions; typing one still
 # works as before (each command still checks its own permission). Ops see everything.

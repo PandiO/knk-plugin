@@ -2265,6 +2265,19 @@ public final class SiegeService {
                 .filter(m -> m.roster().contains(playerId));
     }
 
+    /**
+     * Overview map L4 (PandiO/knk-workspace#738, O13): the API id of the player's running match, or null when the
+     * player plays in none or the API has not answered the match start yet. Use with {@link #runningMatchOf}.
+     */
+    public Long runningMatchApiId(UUID playerId) {
+        return lobbyOf(playerId)
+                .filter(rt -> rt.phase() == SiegePhase.IN_PROGRESS)
+                .map(SiegeLobbyRuntime::matchIdFuture)
+                .filter(f -> f != null && f.isDone() && !f.isCompletedExceptionally())
+                .map(f -> f.getNow(null))
+                .orElse(null);
+    }
+
     /** Tokens of every match running now (5c: siege markers of other tokens are stale). */
     public Set<String> activeMatchTokens() {
         Set<String> tokens = new HashSet<>();

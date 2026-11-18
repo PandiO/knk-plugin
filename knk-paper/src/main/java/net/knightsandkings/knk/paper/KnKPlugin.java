@@ -603,7 +603,15 @@ public class KnKPlugin extends JavaPlugin {
             WgRegionIdTaskHandler wgRegionIdHandler = new WgRegionIdTaskHandler(worldTasksApi, this);
             worldTaskHandlerRegistry.registerHandler(wgRegionIdHandler);
 
+            // Overview map L4 (PandiO/knk-workspace#738): the live player snapshot reads these services when it runs.
             this.mapReporting = net.knightsandkings.knk.paper.map.MapReporting.create(getConfig(), () -> realtimeService,
+                new net.knightsandkings.knk.paper.map.PaperOnlinePlayerSnapshot(() -> getServer().getOnlinePlayers(),
+                    uuid -> statisticsService != null && statisticsService.isAfk(uuid),
+                    player -> modeService != null ? modeService.getActiveMode(player)
+                        : net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
+                    uuid -> siegeService == null || siegeService.runningMatchOf(uuid).isEmpty() ? null
+                        : new net.knightsandkings.knk.paper.map.PaperOnlinePlayerSnapshot.MinigameMatch("siege",
+                            siegeService.runningMatchApiId(uuid))),
                 getLogger());
             // Managed WorldGuard regions: parent + priority + category flags for Town/District/Structure/Gate regions,
             // applied when a world task's region gets its final name and repaired at every startup
@@ -1262,6 +1270,8 @@ public class KnKPlugin extends JavaPlugin {
 
             // Last, so every refresh path the resync calls exists (PandiO/knk-workspace#178).
             initializeRealtime();
+            // Overview map L4 (PandiO/knk-workspace#738): live player report, only with map.reporting.enabled.
+            net.knightsandkings.knk.paper.map.MapReporting.startPlayerReports(this, mapReporting);
 
             getLogger().info("KnightsAndKings Plugin Enabled!");
             
