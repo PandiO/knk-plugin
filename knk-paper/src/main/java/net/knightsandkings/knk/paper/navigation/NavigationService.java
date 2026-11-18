@@ -724,17 +724,24 @@ public final class NavigationService implements SiegeMatchObserver {
     static List<net.knightsandkings.knk.core.navigation.shape.PlazaCrossing> plazaCrossingsOf(String world,
             RouteResult result, RoadNetworkSnapshot snapshot) {
         List<net.knightsandkings.knk.core.navigation.shape.PlazaCrossing> out = new ArrayList<>();
-        result.routeToGuide().ifPresent(route -> {
-            for (int id : route.nodeIds()) {
-                snapshot.node(id).ifPresent(node -> {
-                    if (node.isPlazaCentre() || node.kind() == RoadNodeKind.JUNCTION) {
-                        out.add(new net.knightsandkings.knk.core.navigation.shape.PlazaCrossing(
-                            new net.knightsandkings.knk.core.navigation.shape.NavPoint(world, node.x(), node.y(), node.z()),
-                            node.plazaRadius())); // as the polyline gives the node: its floor block
-                    }
-                });
-            }
-        });
+        result.routeToGuide().ifPresent(route -> plazaNodesOf(route, snapshot).forEach(node ->
+            out.add(new net.knightsandkings.knk.core.navigation.shape.PlazaCrossing(
+                new net.knightsandkings.knk.core.navigation.shape.NavPoint(world, node.x(), node.y(), node.z()),
+                node.plazaRadius())))); // as the polyline gives the node: its floor block
+        return out;
+    }
+
+    /** The nodes of a route that may be plazas: designed plaza centres and junctions, in route order. */
+    static List<net.knightsandkings.knk.core.domain.roads.RoadNode> plazaNodesOf(
+            net.knightsandkings.knk.core.roads.route.Route route, RoadNetworkSnapshot snapshot) {
+        List<net.knightsandkings.knk.core.domain.roads.RoadNode> out = new ArrayList<>();
+        for (int id : route.nodeIds()) {
+            snapshot.node(id).ifPresent(node -> {
+                if (node.isPlazaCentre() || node.kind() == RoadNodeKind.JUNCTION) {
+                    out.add(node);
+                }
+            });
+        }
         return out;
     }
 
@@ -1771,6 +1778,38 @@ public final class NavigationService implements SiegeMatchObserver {
             }
             default -> leg.target;
         };
+    }
+
+    // ==================== plaza-line preview (off-road phase 7 step 1, #712) ====================
+
+    /**
+     * The player's route for the plaza-line preview ({@code /knk road plazaline}): its world, its polyline (floor
+     * points) and the nodes it passes that may be plazas, or empty without a route. Reads only; the session, the trail
+     * and the route are not touched. Main thread.
+     */
+    public Optional<RoutePlazas> routePlazas(Player player) {
+        Active a = active.get(player.getUniqueId());
+        if (a == null || a.session == null || a.snapshot == null) {
+            return Optional.empty();
+        }
+        RoadNetworkSnapshot snapshot = a.snapshot;
+        return a.session.route().filter(route -> route.polyline().size() >= 2)
+            .map(route -> new RoutePlazas(snapshot.world(), route.polyline(), plazaNodesOf(route, snapshot)));
+    }
+
+    /**
+     * A route for the plaza-line preview.
+     *
+     * @param world    the world
+     * @param polyline the route polyline, floor points
+     * @param nodes    the nodes it passes that may be plazas, in route order
+     */
+    public record RoutePlazas(String world, List<double[]> polyline,
+                              List<net.knightsandkings.knk.core.domain.roads.RoadNode> nodes) {
+        public RoutePlazas {
+            polyline = List.copyOf(polyline);
+            nodes = List.copyOf(nodes);
+        }
     }
 
     // ==================== ticking ====================

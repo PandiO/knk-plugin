@@ -485,7 +485,11 @@ public class ConfigLoader {
             builderConfig,
             walkConfig,
             section.getBoolean("guidance-v2", defaults.guidanceV2()),
-            section.getDouble("cursor-jump", defaults.cursorJump()));
+            section.getDouble("cursor-jump", defaults.cursorJump()),
+            new NavigationConfig.PlazaLinesConfig(
+                section.getBoolean("plaza-lines", defaults.plazaLines().enabled()),
+                section.getDouble("plaza-pull", defaults.plazaLines().pull()),
+                section.getDouble("plaza-guide-cost", defaults.plazaLines().guideCost())));
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */
