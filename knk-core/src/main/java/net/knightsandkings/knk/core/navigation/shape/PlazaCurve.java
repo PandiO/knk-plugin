@@ -53,15 +53,22 @@ public final class PlazaCurve {
     private PlazaCurve() {
     }
 
+    /** Default {@code plaza-curve-clearance}: the developer's decision on #712 (2026-11-18), a player is 0.6 wide. */
+    public static final double DEFAULT_CURVE_CLEARANCE = 0.65;
+
     /**
-     * @param halfWidth   {@code corridor-half-width}: the corridor's strip round the route, and the open radius a
-     *                    junction must exceed to be a plaza (O19)
-     * @param clearance   the clearance the line keeps from obstacles where the plaza allows ({@code wall-clearance})
-     * @param plazaBlocks {@code plaza-corridor-blocks}: the largest footprint radius
-     * @param pull        {@code plaza-pull}, 0 to 1
-     * @param guideCost   {@code plaza-guide-cost}, at least 0
+     * @param halfWidth      {@code corridor-half-width}: the corridor's strip round the route, and the open radius a
+     *                       junction must exceed to be a plaza (O19)
+     * @param clearance      the clearance the A* line keeps from obstacles where the plaza allows ({@code wall-clearance};
+     *                       never under the hard minimum)
+     * @param plazaBlocks    {@code plaza-corridor-blocks}: the largest footprint radius
+     * @param pull           {@code plaza-pull}, 0 to 1
+     * @param guideCost      {@code plaza-guide-cost}, at least 0
+     * @param curveClearance {@code plaza-curve-clearance}: the least clearance the curve must keep to be taken (where the
+     *                       entry and exit allow it), from the hard minimum to {@link Corridor#CAP}
      */
-    public record Options(double halfWidth, double clearance, int plazaBlocks, double pull, double guideCost) {
+    public record Options(double halfWidth, double clearance, int plazaBlocks, double pull, double guideCost,
+                          double curveClearance) {
         public Options {
             if (!(halfWidth >= 1) || !(clearance >= CorridorShaper.HARD_MINIMUM)) {
                 throw new IllegalArgumentException("corridor-half-width >= 1 and a clearance >= "
@@ -76,17 +83,35 @@ public final class PlazaCurve {
             if (!(guideCost >= 0)) {
                 throw new IllegalArgumentException("plaza-guide-cost must be >= 0 (got " + guideCost + ")");
             }
+            if (!(curveClearance >= CorridorShaper.HARD_MINIMUM && curveClearance <= Corridor.CAP)) {
+                throw new IllegalArgumentException("plaza-curve-clearance must be " + CorridorShaper.HARD_MINIMUM + ".."
+                    + Corridor.CAP + " (got " + curveClearance + ")");
+            }
             clearance = Math.min(clearance, Corridor.CAP);
         }
 
-        /** The design defaults with the given corridor half width and clearance. */
+        /** Step 1's options: the curve keeps the same clearance as the A* line. */
+        public Options(double halfWidth, double clearance, int plazaBlocks, double pull, double guideCost) {
+            this(halfWidth, clearance, plazaBlocks, pull, guideCost, Math.min(clearance, Corridor.CAP));
+        }
+
+        /**
+         * The design defaults with the given corridor half width and clearance; the curve is taken down to
+         * {@link #DEFAULT_CURVE_CLEARANCE} (or the clearance, when that is less).
+         */
         public static Options defaults(double halfWidth, double clearance) {
-            return new Options(halfWidth, clearance, DEFAULT_PLAZA_BLOCKS, DEFAULT_PULL, DEFAULT_GUIDE_COST);
+            return new Options(halfWidth, clearance, DEFAULT_PLAZA_BLOCKS, DEFAULT_PULL, DEFAULT_GUIDE_COST,
+                Math.max(CorridorShaper.HARD_MINIMUM, Math.min(DEFAULT_CURVE_CLEARANCE, clearance)));
         }
 
         /** These options with another pull. */
         public Options withPull(double pull) {
-            return new Options(halfWidth, clearance, plazaBlocks, pull, guideCost);
+            return new Options(halfWidth, clearance, plazaBlocks, pull, guideCost, curveClearance);
+        }
+
+        /** These options with another curve clearance. */
+        public Options withCurveClearance(double curveClearance) {
+            return new Options(halfWidth, clearance, plazaBlocks, pull, guideCost, curveClearance);
         }
     }
 
@@ -198,7 +223,7 @@ public final class PlazaCurve {
 
         double clearance = options.clearance();
         List<PlazaLine.Point> curve = curve(corridor, entry, exit, cx, cz, options.pull());
-        String failure = check(corridor, disc, curve, clearance);
+        String failure = check(corridor, disc, curve, options.curveClearance());
         if (failure == null) {
             return new Result(Kind.CURVE, curve, curve, plaza.centre(), radius, entry.along(), exit.along(),
                 length(curve), chord, routeLength, minClearance(corridor, curve), null, 0);
@@ -436,7 +461,7 @@ public final class PlazaCurve {
             }
             double have = corridor.clearanceAt(q.x(), q.z(), clearance);
             double near = Math.min(ca + along[k], cb + (total - along[k]));
-            double want = Math.min(clearance, near) - SLACK;
+            double want = Math.min(clearance, near - SLACK);
             boolean interior = along[k] > SAMPLE && total - along[k] > SAMPLE;
             if (interior && have < CorridorShaper.HARD_MINIMUM - 1e-9) {
                 return String.format(java.util.Locale.ROOT, "%.2f from an obstacle (under the hard minimum %.2f) at %s",
@@ -444,7 +469,7 @@ public final class PlazaCurve {
             }
             if (have < want - 1e-9) {
                 return String.format(java.util.Locale.ROOT, "%.2f from an obstacle (wanted %.2f) at %s", have,
-                    want + SLACK, where);
+                    want, where);
             }
             prev = f;
         }
