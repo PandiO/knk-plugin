@@ -158,7 +158,8 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
     @Override
     public Predicate<String> mayEnter(AccessSubject subject) {
         // PandiO/knk-workspace#593: shared with the core tests; each region is judged on its own
-        return DomainEntryRule.of(subject, evaluator, resolver::getDomainByRegionIdNoRefresh, roadRule);
+        // PandiO/knk-workspace#724: the last known answers while the map is warmed again after a clear
+        return DomainEntryRule.of(subject, evaluator, resolver::getLastKnownDomain, roadRule);
     }
 
     /** PandiO/knk-workspace#361: the router's gate rule for one door, read now. */

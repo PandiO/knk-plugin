@@ -57,6 +57,11 @@ public final class NpcExitDeniedLeaderScenario implements Scenario<ScenarioScene
         double[] furthestX = {Double.NEGATIVE_INFINITY};
         boolean[] denied = {false};
         NavPoint goal = corners.feet(18.5, NpcCornerScene.GROUND, 26.5);
+        domains.onBeforeSwitch(() -> { // #724: the guards look before the re-warm's answers switch, as on a server
+            if (npcs.get() != null) {
+                npcs.get().lookBeforeRulesChange();
+            }
+        });
         domains.onEvent(() -> npcs.get().rulesChanged()); // road navigation's availability event, handed on
 
         plan.act("build the corner scene, a town and a district over the north road west of x 24", () -> {

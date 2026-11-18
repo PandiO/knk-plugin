@@ -234,6 +234,20 @@ public final class NpcNavigationModule {
         return new BukkitNavWorld(regionIds.get());
     }
 
+    /**
+     * PandiO/knk-workspace#724: the region → domain map was warmed again after a clear and the NPCs are about to switch
+     * to its answers: every NPC's and follower's trespass guard looks under the answers still in force first. Main
+     * thread; nothing while route following does not run.
+     */
+    public void lookBeforeRulesChange() {
+        if (service != null) {
+            service.lookBeforeRulesChange();
+        }
+        if (groups != null) {
+            groups.lookBeforeRulesChange();
+        }
+    }
+
     /** Whether NPC route following runs (built on first use of {@code /knk npc nav}; PandiO/knk-workspace#506). */
     public boolean navigating() {
         return service != null;

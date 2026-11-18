@@ -24,6 +24,7 @@ import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupRealtimeEntryScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcExitDeniedLeaderScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupCacheRefreshHeldScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupExitDeniedScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupGateFinishTripScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupNarrowsScenario;
@@ -103,6 +104,7 @@ public final class PaperScenarios {
             // exit denied mid-trip, for an NPC alone and for a group half inside (PandiO/knk-workspace#701)
             .register(new NpcExitDeniedLeaderScenario())
             .register(new NpcGroupExitDeniedScenario())
+            .register(new NpcGroupCacheRefreshHeldScenario())
             // the two spots of the developer's L3 retest in their real geometry (PandiO/knk-workspace#592)
             .register(new NpcLedgeCornerScenario())
             .register(new NpcLandingRanksScenario())

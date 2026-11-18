@@ -62,6 +62,11 @@ public final class NpcGroupExitDeniedScenario implements Scenario<ScenarioScene>
         Map<Integer, Double> furthestZ = new HashMap<>();
         double edge = scene.worldX(EDGE_X);
         NavPoint goal = corners.feet(18.5, NpcCornerScene.GROUND, 26.5);
+        domains.onBeforeSwitch(() -> { // #724: the guards look before the re-warm's answers switch, as on a server
+            if (npcs.get() != null) {
+                npcs.get().lookBeforeRulesChange();
+            }
+        });
         domains.onEvent(() -> {
             if (domains.events() == 1) {
                 // the first event: the denial reaches the NPCs now; who is inside and outside from here on

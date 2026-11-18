@@ -571,6 +571,22 @@ public final class NavGroup {
         }
     }
 
+    /**
+     * PandiO/knk-workspace#724: the rules are about to change all at once (the map was warmed again after a clear and
+     * the event follows): the trespass guard looks at every follower it watches under the rules still in force, so a
+     * region entered or left since its last look is judged by them before {@link #rulesChanged} takes a fresh look.
+     */
+    void lookBeforeRulesChange() {
+        if (goal == null && finishing() == 0) {
+            return;
+        }
+        for (Follower f : followers) {
+            if (f.state != FollowerState.REJOINING && f.regions != null) {
+                f.mover.position().ifPresent(feet -> guard(f, feet, regionsAt(feet)));
+            }
+        }
+    }
+
     // ==================== the leader's order ====================
 
     private void orderLeader() {

@@ -36,6 +36,18 @@ class DomainCacheRewarmTest {
         }, mainThread::add, () -> events++, Logger.getLogger("test"));
     }
 
+    /** PandiO/knk-workspace#724: what the hooks saw, in order. */
+    private final List<String> order = new ArrayList<>();
+    private long generation = 7;
+
+    private DomainCacheRewarm holdingHook(List<String> worlds) {
+        return new DomainCacheRewarm(() -> npcNavigation, () -> worlds, world -> roads.get(world), (world, regions) -> {
+            asked.put(world, regions);
+            return warming.computeIfAbsent(world, w -> new CompletableFuture<>());
+        }, mainThread::add, () -> order.add("event"), Logger.getLogger("test"), () -> generation,
+            () -> order.add("guards look"), g -> order.add("release " + g));
+    }
+
     private void runMainThread() {
         List<Runnable> tasks = List.copyOf(mainThread);
         mainThread.clear();
@@ -93,5 +105,47 @@ class DomainCacheRewarmTest {
 
         assertEquals(0, events);
         assertEquals(Map.of(), asked);
+    }
+
+    @Test
+    void onceTheAnswersAreInTheGuardsLookThenTheHoldTakenAtTheStartEndsThenTheEventComes() {
+        roads.put("world", Set.of("residential"));
+
+        DomainCacheRewarm hook = holdingHook(List.of("world"));
+        hook.run();
+        generation = 8; // a clear after the re-warm started: its own re-warm releases that one
+        warming.get("world").complete(null);
+        assertEquals(List.of(), order, "on the main thread");
+        runMainThread();
+
+        assertEquals(List.of("guards look", "release 7", "event"), order);
+    }
+
+    @Test
+    void aFailingLookStillEndsTheHoldAndSendsTheEvent() {
+        roads.put("world", Set.of("residential"));
+        DomainCacheRewarm hook = new DomainCacheRewarm(() -> true, () -> List.of("world"), world -> roads.get(world),
+            (world, regions) -> CompletableFuture.completedFuture(null), mainThread::add, () -> order.add("event"),
+            Logger.getLogger("test"), () -> generation, () -> {
+                throw new IllegalStateException("guard");
+            }, g -> order.add("release " + g));
+
+        hook.run();
+        runMainThread();
+
+        assertEquals(List.of("release 7", "event"), order);
+    }
+
+    @Test
+    void theHoldEndsAtOnceWhenNothingIsWarmed() {
+        holdingHook(List.of("world")).run(); // no road regions
+        assertEquals(List.of("release 7"), order);
+
+        order.clear();
+        roads.put("world", Set.of("residential"));
+        npcNavigation = false;
+        holdingHook(List.of("world")).run();
+        runMainThread();
+        assertEquals(List.of("release 7"), order, "no NPC navigation: nobody reads the held answers");
     }
 }

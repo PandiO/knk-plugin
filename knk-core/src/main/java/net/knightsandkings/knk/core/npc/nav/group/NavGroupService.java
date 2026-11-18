@@ -133,6 +133,16 @@ public final class NavGroupService {
         }
     }
 
+    /**
+     * PandiO/knk-workspace#724: the rules are about to change all at once; every group's followers' trespass guards
+     * take a look under the rules still in force first ({@link NavGroup#lookBeforeRulesChange}).
+     */
+    public void lookBeforeRulesChange() {
+        for (NavGroup group : groups.values()) {
+            group.lookBeforeRulesChange();
+        }
+    }
+
     /** Once per server tick. */
     public void tick() {
         long start = ports.nanoTime().getAsLong();

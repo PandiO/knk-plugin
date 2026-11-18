@@ -2398,6 +2398,24 @@ public final class NpcNavigationService {
         });
     }
 
+    /**
+     * PandiO/knk-workspace#724: the rules are about to change all at once (the region → domain map was warmed again
+     * after a clear and the availability event follows). The trespass guard of every NPC with an order takes a look
+     * under the rules still in force, so a region entered or left since its last look is judged by them, not by the
+     * new ones, before the event's fresh look; an NPC waiting at its blocking element is looked at too. Counts and
+     * logs only.
+     */
+    public void lookBeforeRulesChange() {
+        timed(() -> {
+            for (Nav nav : npcs.values()) {
+                if (nav.goal == null || nav.regions == null || !nav.mover.isSpawned()) {
+                    continue;
+                }
+                nav.mover.position().ifPresent(at -> trespassed(nav, at, regionsAtFeet(at)));
+            }
+        });
+    }
+
     private static boolean hasEvents(Nav nav) {
         return nav.eventAvailability || nav.eventDoors != null;
     }

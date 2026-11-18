@@ -88,6 +88,9 @@ class NavigationAccessSubjectTest {
         when(resolver.getDomainByRegionIdNoRefresh(NavigationTestNetwork.WORLD, "town_1"))
             .thenReturn(Optional.of(new DomainSnapshot(1, "Town", null, "town_1", true, true, "Town", Set.of(), Set.of(),
                 Set.of(), Set.of())));
+        // PandiO/knk-workspace#724: the NPC checks' lookup is the map's own while no clear's re-warm runs
+        when(resolver.getLastKnownDomain(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenAnswer(call -> resolver.getDomainByRegionIdNoRefresh(call.getArgument(0), call.getArgument(1)));
         GatePassThroughRules.setPermissionCheck((p, node) -> nodes.contains(node));
         access = new NavigationAccess(gates, () -> siege, regionIds, resolver, p -> bypass, new DomainAccessEvaluator());
     }
