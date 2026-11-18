@@ -43,6 +43,7 @@ import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteKeptEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteReason;
 import net.knightsandkings.knk.core.navigation.JoinPoint;
 import net.knightsandkings.knk.core.navigation.NavigationSession;
+import net.knightsandkings.knk.core.navigation.destinations.AllowedDestination;
 import net.knightsandkings.knk.core.navigation.PolylineCursor;
 import net.knightsandkings.knk.core.navigation.SessionParameters;
 import net.knightsandkings.knk.core.roads.route.AStarRouter;
@@ -290,6 +291,8 @@ public final class NavigationService implements SiegeMatchObserver {
     private final Deps deps;
     /** KNG-234: in a minigame match only the match's own destinations may be navigated to; null: no such rule. */
     private volatile MatchNavigationScope matchScope;
+    /** Destination engine phase 3 (#69): only a handle starts a session (navigation.destination-engine on). */
+    private volatile boolean handleOnly;
     private final RouterParameters routerParameters;
     /** Snapping a destination: no height weight by default, its last leg is a walk path (finding N15). */
     private final RouterParameters destinationParameters;
@@ -847,14 +850,14 @@ public final class NavigationService implements SiegeMatchObserver {
      * player is already there; otherwise replaces any current session. Main thread.
      */
     public void navigate(Player player, Destination destination) {
-        NavigationEligibility.Exclusion exclusion = deps.eligibility().exclusion(player);
-        if (exclusion != NavigationEligibility.Exclusion.NONE) {
-            player.sendMessage(switch (exclusion) {
-                case LOADING -> NavigationMessages.loading();
-                case FROZEN -> NavigationMessages.frozen();
-                case SIEGE -> NavigationMessages.inSiege();
-                case NONE -> NavigationMessages.disabled();
-            });
+        if (handleOnly) {
+            // destination engine phase 3 (#69, A20): with navigation.destination-engine on only a handle starts a session
+            deps.logger().warning("[Navigation] A raw destination (" + destination + ") was refused for " + player.getName()
+                + ": with navigation.destination-engine on only an engine handle starts a session");
+            player.sendMessage(NavigationMessages.disabled());
+            return;
+        }
+        if (refusedByEligibility(player)) {
             return;
         }
         MatchNavigationScope scope = matchScope;
@@ -867,6 +870,59 @@ public final class NavigationService implements SiegeMatchObserver {
                 return;
             }
         }
+        begin(player, destination);
+    }
+
+    /**
+     * Destination engine phase 3 (DESIGN § 6, E3, PandiO/knk-workspace#69): start navigating {@code player} to a
+     * destination the engine listed for them. The handle is the proof (only the engine mints one), so there is no
+     * match check here; the hard blocks of {@link NavigationEligibility} still apply until phase 4 (#62) moves them
+     * into the scopes, and the rest is {@link #navigate(Player, Destination)}'s. The routable destination is built
+     * from the handle's place ({@link HandleDestinations}), synchronously. Main thread.
+     */
+    public void navigate(Player player, AllowedDestination handle) {
+        Objects.requireNonNull(handle, "handle");
+        if (!handle.player().equals(player.getUniqueId())) {
+            deps.logger().warning("[Navigation] " + handle + " refused for " + player.getName() + ": issued for another player");
+            player.sendMessage(NavigationMessages.disabled());
+            return;
+        }
+        if (refusedByEligibility(player)) {
+            return;
+        }
+        Destination destination = HandleDestinations.of(handle, player.getWorld().getName());
+        if (destination == null) {
+            player.sendMessage(NavigationMessages.noLocation(handle.candidate().label()));
+            return;
+        }
+        begin(player, destination);
+    }
+
+    /**
+     * Destination engine phase 3 (#69): with {@code navigation.destination-engine} on, only
+     * {@link #navigate(Player, AllowedDestination)} starts a session (A20); the raw entry refuses.
+     */
+    public void setHandleOnly(boolean handleOnly) {
+        this.handleOnly = handleOnly;
+    }
+
+    /** The hard blocks (loading, frozen, in a siege lobby): true, with the message sent, when the player is refused. */
+    private boolean refusedByEligibility(Player player) {
+        NavigationEligibility.Exclusion exclusion = deps.eligibility().exclusion(player);
+        if (exclusion != NavigationEligibility.Exclusion.NONE) {
+            player.sendMessage(switch (exclusion) {
+                case LOADING -> NavigationMessages.loading();
+                case FROZEN -> NavigationMessages.frozen();
+                case SIEGE -> NavigationMessages.inSiege();
+                case NONE -> NavigationMessages.disabled();
+            });
+            return true;
+        }
+        return false;
+    }
+
+    /** Start the session once the destination is allowed: world, network, goals, the start event, the route. */
+    private void begin(Player player, Destination destination) {
         String world = player.getWorld().getName();
         if (!destination.world().equalsIgnoreCase(world)) {
             player.sendMessage(NavigationMessages.otherWorld(destination.name()));

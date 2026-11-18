@@ -830,6 +830,12 @@ navigation:
   # behind navigation.destination-engine). At least 1.
   destinations:
     stale-after-days: 14
+  # Destination engine phase 3 (PandiO/knk-workspace#69, DESIGN E17): true switches /navigate, its tab completion,
+  # the navigation compass and the route start to the destination engine (one list per player from the navigation
+  # model above: type:name and the spawn/region words in a siege match too, no API call when a destination is
+  # chosen), and the road-access answers to the model. false (the default) keeps today's paths unchanged. Read at
+  # start-up: restart the server after a change. Removed in phase 4b (#747) once the engine is the only path.
+  destination-engine: false
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
