@@ -422,6 +422,12 @@ public final class ScenarioNpcs {
         groups.onRulesChanged();
     }
 
+    /** PandiO/knk-workspace#724: the domain answers are about to switch: the trespass guards look first. */
+    public void lookBeforeRulesChange() {
+        service.lookBeforeRulesChange();
+        groups.lookBeforeRulesChange();
+    }
+
     /** A gate door changed state: its event to the navigation and group services. */
     public void gateChanged(int doorId) {
         service.onGateChanged(doorId);

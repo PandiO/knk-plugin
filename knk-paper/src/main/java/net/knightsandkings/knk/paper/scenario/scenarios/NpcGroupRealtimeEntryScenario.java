@@ -93,7 +93,7 @@ public final class NpcGroupRealtimeEntryScenario implements Scenario<ScenarioSce
         AccessRules rules = new AccessRules() {
             @Override
             public Predicate<String> mayEnter(AccessSubject subject) {
-                return DomainEntryRule.of(subject, evaluator, map::getDomainByRegionIdNoRefresh, RoadRule.ALWAYS);
+                return DomainEntryRule.of(subject, evaluator, map::getLastKnownDomain, RoadRule.ALWAYS);
             }
 
             @Override
@@ -129,7 +129,8 @@ public final class NpcGroupRealtimeEntryScenario implements Scenario<ScenarioSce
                     }
                 }
                 npcs.get().rulesChanged(); // road navigation's availability event, as the rule listener hands it on
-            }, Logger.getLogger("npc-group-realtime-entry"));
+            }, Logger.getLogger("npc-group-realtime-entry"), map::holdGeneration,
+            () -> npcs.get().lookBeforeRulesChange(), map::releaseLastKnown); // #724: as KnKPlugin wires it
         EntityChangeRouter router = new EntityChangeRouter();
         for (String type : NavigationDomainChanges.DOMAIN_TYPES) {
             router.on(type, (id, key, op) -> map.clearRegionCache()); // KnKPlugin's own handler

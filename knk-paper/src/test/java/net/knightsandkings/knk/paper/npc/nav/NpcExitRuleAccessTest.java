@@ -61,6 +61,9 @@ class NpcExitRuleAccessTest {
     void setUp() {
         when(resolver.getDomainByRegionIdNoRefresh(WORLD, KEEP)).thenReturn(Optional.of(new DomainSnapshot(KEEP_DOMAIN,
             "Kardenna Keep", null, KEEP, true, false, "Structure", Set.of(), Set.of(), Set.of(), Set.of())));
+        // PandiO/knk-workspace#724: the NPC checks' lookup is the map's own while no clear's re-warm runs
+        when(resolver.getLastKnownDomain(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenAnswer(call -> resolver.getDomainByRegionIdNoRefresh(call.getArgument(0), call.getArgument(1)));
         access = new NavigationAccess(gates, () -> siege, regionIds, resolver, p -> false, new DomainAccessEvaluator());
         rules = new AccessRules() {
             @Override
@@ -118,5 +121,28 @@ class NpcExitRuleAccessTest {
             assertTrue(access.policyFor(subject, snapshot, null).check(in).isOpen(), "staying inside: " + profile.id());
         }
         assertFalse(rules.regionRule(npc(NpcAccessProfile.DEFAULT, KEEP)).mayLeave(KEEP));
+    }
+
+    /**
+     * PandiO/knk-workspace#724: after a clear of the map ({@code /knk cache refresh}) the NPC walking checks keep the
+     * last known answers through Paper's {@link NavigationAccess} until the re-warm releases them.
+     */
+    @Test
+    void afterAClearTheWalkingChecksKeepTheLastKnownRuleUntilTheReWarmReleasesIt() {
+        RegionDomainResolver map = new RegionDomainResolver();
+        map.registerDomain(WORLD, new DomainSnapshot(KEEP_DOMAIN, "Kardenna Keep", null, KEEP, false, false,
+            "Structure", Set.of(), Set.of(), Set.of(), Set.of()));
+        NavigationAccess real = new NavigationAccess(gates, () -> siege, regionIds, map, p -> false,
+            new DomainAccessEvaluator());
+        NpcAccessSubject outside = npc(NpcAccessProfile.DEFAULT);
+        NpcAccessSubject inside = npc(NpcAccessProfile.DEFAULT, KEEP);
+
+        map.clearRegionCache();
+        long generation = map.holdGeneration();
+
+        assertFalse(real.mayEnter(outside).test(KEEP), "entry still denied while the map is warmed again");
+        assertEquals(Set.of(KEEP), ((RegionRule) real.mayEnter(inside)).exitDenied(), "exit too");
+        map.releaseLastKnown(generation); // the re-warm found nothing for the keep
+        assertTrue(real.mayEnter(outside).test(KEEP), "a region of unknown domain is open once the hold ends");
     }
 }

@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -62,6 +63,19 @@ public class RegionDomainResolver {
     /** Regions {@link #refreshIfStale} is asking the API about right now (one request per region at a time). */
     private final Set<RegionKey> refreshing = ConcurrentHashMap.newKeySet();
     private final DomainCache.CacheMetrics domainCacheMetrics = new DomainCache.CacheMetrics();
+
+    /**
+     * PandiO/knk-workspace#724: how long the last known answers are held for the NPC checks after a clear when no
+     * re-warm releases them (NPC navigation off, no roads, a re-warm that never ends).
+     */
+    public static final Duration LAST_KNOWN_HOLD = Duration.ofMinutes(1);
+    /** The map as it was before the clears since the last release ({@link #getLastKnownDomain}); null: none held. */
+    private volatile Map<RegionKey, DomainSnapshot> lastKnown;
+    /** When the hold ends by itself, on {@link #holdClock}'s scale. */
+    private volatile long lastKnownUntil;
+    /** One more with every clear: a re-warm releases the hold only if no clear came after it started. */
+    private long holdGeneration;
+    private LongSupplier holdClock = System::nanoTime;
 
     /**
      * In-memory only (no API, no shared caches) constructor.
@@ -313,9 +327,91 @@ public class RegionDomainResolver {
         return askEach(world, regionIds, Level.WARNING);
     }
 
-    /** KNG-104: forgets every locally cached region (with {@code /knk cache refresh}); the next lookup asks the API. */
-    public void clearRegionCache() {
+    /**
+     * KNG-104: forgets every locally cached region (with {@code /knk cache refresh}, and a realtime domain change); the
+     * next lookup asks the API. PandiO/knk-workspace#724: the NPC checks keep the last known answers meanwhile
+     * ({@link #getLastKnownDomain}) until a re-warm {@linkplain #releaseLastKnown releases} them, or for at most
+     * {@link #LAST_KNOWN_HOLD}; every other lookup sees the cleared map.
+     */
+    public synchronized void clearRegionCache() {
+        Map<RegionKey, DomainSnapshot> known = new java.util.HashMap<>();
+        domainsByRegion.forEach((key, cached) -> known.put(key, cached.value()));
+        Map<RegionKey, DomainSnapshot> held = holding() ? lastKnown : null;
+        if (held != null) {
+            known.putAll(held); // a clear while held: the answers from before the first clear stay the last known
+        }
+        lastKnown = Map.copyOf(known);
+        lastKnownUntil = holdClock.getAsLong() + LAST_KNOWN_HOLD.toNanos();
+        holdGeneration++;
         domainsByRegion.clear();
+    }
+
+    /** PandiO/knk-workspace#724: the clears so far; a re-warm takes it when it starts and hands it to {@link #releaseLastKnown}. */
+    public synchronized long holdGeneration() {
+        return holdGeneration;
+    }
+
+    /**
+     * PandiO/knk-workspace#724: the re-warm that started at {@code generation} is done (its answers are in the map):
+     * the NPC checks read the map again. A clear after it started keeps the hold for that clear's own re-warm.
+     *
+     * @return whether the hold ended
+     */
+    public synchronized boolean releaseLastKnown(long generation) {
+        if (generation != holdGeneration || lastKnown == null) {
+            return false;
+        }
+        lastKnown = null;
+        return true;
+    }
+
+    /** PandiO/knk-workspace#724: whether the NPC checks are kept on the last known answers now. */
+    public boolean holding() {
+        return lastKnown != null && holdClock.getAsLong() - lastKnownUntil < 0;
+    }
+
+    /** Tests: the clock the hold's end is measured on (nanoseconds). */
+    synchronized void holdClock(LongSupplier clock) {
+        this.holdClock = Objects.requireNonNull(clock, "clock");
+    }
+
+    /**
+     * PandiO/knk-workspace#724: a region's domain as the NPC checks read it. While a clear's re-warm runs, a region
+     * known before the clear keeps that answer, whatever the map has learnt since, so the NPCs switch to the new
+     * answers all at once when the re-warm is done and its availability event comes; a region not known before is
+     * read from the map. Otherwise this is {@link #getDomainByRegionIdNoRefresh(String, String)}.
+     */
+    public Optional<DomainSnapshot> getLastKnownDomain(String world, String wgRegionId) {
+        Map<RegionKey, DomainSnapshot> held = lastKnown;
+        if (held != null && wgRegionId != null && holding()) {
+            DomainSnapshot known = lastKnownIn(held, world, wgRegionId);
+            if (known != null) {
+                return Optional.of(known);
+            }
+        }
+        return getDomainByRegionIdNoRefresh(world, wgRegionId);
+    }
+
+    /** The held answer a lookup of {@code wgRegionId} in {@code world} (null: world-blind) finds, as the map's lookups do. */
+    private static DomainSnapshot lastKnownIn(Map<RegionKey, DomainSnapshot> held, String world, String wgRegionId) {
+        DomainSnapshot exact = held.get(RegionKey.of(world, wgRegionId));
+        if (exact != null) {
+            return exact;
+        }
+        DomainSnapshot noWorld = held.get(RegionKey.of(null, wgRegionId));
+        if (noWorld != null || world != null) {
+            return noWorld;
+        }
+        DomainSnapshot found = null;
+        for (Map.Entry<RegionKey, DomainSnapshot> e : held.entrySet()) {
+            if (wgRegionId.equals(e.getKey().regionId())) {
+                if (found != null) {
+                    return null; // several worlds: ambiguous, as for the map
+                }
+                found = e.getValue();
+            }
+        }
+        return found;
     }
 
     /**

@@ -1949,20 +1949,23 @@ public class KnKPlugin extends JavaPlugin {
         if (regionDomainResolver != null && roadNetworkCache != null) {
             // PandiO/knk-workspace#506: the refresh forgot the region -> domain map, so the NPC rule checks saw every
             // district as open; warm the map again for the roads' regions, then tell navigation once more (only while
-            // NPC navigation runs)
+            // NPC navigation runs). PandiO/knk-workspace#724: the NPC checks keep the last known answers until then
+            // (the clear holds them); once the answers are in, the NPC guards look, the hold ends, then the event
             cacheManager.registerRefreshHook("navigation region domains",
                 new net.knightsandkings.knk.paper.navigation.DomainCacheRewarm(
                     () -> npcNavigation != null && npcNavigation.navigating(),
                     () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList(),
                     world -> roadNetworkCache.snapshot(world).regionIds(), regionDomainResolver::warmCache, mainThread,
-                    navigationService::onAvailabilityChanged, getLogger()));
+                    navigationService::onAvailabilityChanged, getLogger(), regionDomainResolver::holdGeneration,
+                    this::npcGuardsLookBeforeRulesChange, regionDomainResolver::releaseLastKnown));
             // PandiO/knk-workspace#533, #593: a realtime domain change (EntityChanged, DomainAccessChanged) asks the
             // roads' regions again in place and then tells navigation (registerConfigSync; only while NPC navigation runs)
             this.navigationDomainRewarm = new net.knightsandkings.knk.paper.navigation.DomainCacheRewarm(
                 () -> npcNavigation != null && npcNavigation.navigating(),
                 () -> org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList(),
                 world -> roadNetworkCache.snapshot(world).regionIds(), regionDomainResolver::refreshRegions, mainThread,
-                navigationService::onAvailabilityChanged, getLogger());
+                navigationService::onAvailabilityChanged, getLogger(), regionDomainResolver::holdGeneration,
+                this::npcGuardsLookBeforeRulesChange, regionDomainResolver::releaseLastKnown);
         }
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationListener(navigationService), this);
@@ -2624,6 +2627,13 @@ public class KnKPlugin extends JavaPlugin {
      * lootbox, teleport, navigation, road and telemetry settings; the entity caches by type); the worlds report goes over
      * the hub while connected; and a resync step re-runs the siege's startup-only work that failed at start (#31).
      */
+    /** PandiO/knk-workspace#724: the NPC trespass guards look under the held domain answers before the switch. */
+    private void npcGuardsLookBeforeRulesChange() {
+        if (npcNavigation != null) {
+            npcNavigation.lookBeforeRulesChange();
+        }
+    }
+
     private void registerConfigSync(net.knightsandkings.knk.core.realtime.ResyncHooks hooks) {
         var service = realtimeService;
         var coalescer = new net.knightsandkings.knk.core.realtime.Coalescer(

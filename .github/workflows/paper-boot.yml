@@ -157,8 +157,9 @@ jobs:
         # The three collision scenarios of #627 (link M7) add about 30 s (a local run: 10 min 5 s for 48).
         # Link C1 (#700) adds four (the keep tower replay with a leader and a group of 20, and the detour, upstairs and
         # ravine scenes): about 5.5 minutes more, 59 with the off-road chain's scenarios (L3, L4, L10).
+        # Link E1 (#701) adds two (61) and link R1 (#724) one, a cache refresh with followers held (about 30 s): 62.
         env:
-          MIN_SCENARIOS: 61
+          MIN_SCENARIOS: 62
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"

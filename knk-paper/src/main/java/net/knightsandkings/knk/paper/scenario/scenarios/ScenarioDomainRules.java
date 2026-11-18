@@ -38,6 +38,8 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  *   <li>{@link #refresh}: {@code /knk cache refresh} clears the map and sends the availability event ("navigation
  *       routes"), then the re-warm and its second event.</li>
  * </ol>
+ * The NPC rules read the map as the plugin's do ({@code RegionDomainResolver.getLastKnownDomain}): after a clear the
+ * last known answers until the re-warm is done (PandiO/knk-workspace#724).
  */
 final class ScenarioDomainRules {
 
@@ -52,6 +54,8 @@ final class ScenarioDomainRules {
     private final AtomicInteger events = new AtomicInteger();
     private final AccessRules rules;
     private Runnable onEvent = () -> { };
+    private int apiTicks = API_TICKS;
+    private Runnable beforeSwitch = () -> { };
 
     /** @param regions the regions the re-warm asks about (the roads' regions on a server) */
     ScenarioDomainRules(ScenarioScene scene, Set<String> regions) {
@@ -61,7 +65,7 @@ final class ScenarioDomainRules {
         this.rules = new AccessRules() {
             @Override
             public Predicate<String> mayEnter(AccessSubject subject) {
-                return DomainEntryRule.of(subject, evaluator, map::getDomainByRegionIdNoRefresh, RoadRule.ALWAYS);
+                return DomainEntryRule.of(subject, evaluator, map::getLastKnownDomain, RoadRule.ALWAYS);
             }
 
             @Override
@@ -75,7 +79,8 @@ final class ScenarioDomainRules {
             w -> world.equals(w) ? Set.copyOf(regions) : Set.of(),
             (w, asked) -> answerLater(plugin, w, asked),
             task -> Bukkit.getScheduler().runTask(plugin, task),
-            this::event, Logger.getLogger("scenario-domain-rules"));
+            this::event, Logger.getLogger("scenario-domain-rules"), map::holdGeneration, () -> beforeSwitch.run(),
+            map::releaseLastKnown); // PandiO/knk-workspace#724: the hold of the last known answers, as on a server
         for (String type : NavigationDomainChanges.DOMAIN_TYPES) {
             router.on(type, (id, key, op) -> map.clearRegionCache()); // KnKPlugin's own handler
         }
@@ -113,6 +118,24 @@ final class ScenarioDomainRules {
         this.onEvent = then;
     }
 
+    /**
+     * PandiO/knk-workspace#724: runs once a re-warm's answers are in, before its hold ends and its event is sent (the
+     * scenario lets its NPCs' trespass guards look, as the plugin does).
+     */
+    void onBeforeSwitch(Runnable then) {
+        this.beforeSwitch = then;
+    }
+
+    /** Whether the NPC checks are kept on the last known answers now (a re-warm runs). */
+    boolean holding() {
+        return map.holding();
+    }
+
+    /** How many ticks the fake API takes to answer from now on (default {@link #API_TICKS}; a slow API is longer). */
+    void apiTicks(int ticks) {
+        this.apiTicks = ticks;
+    }
+
     /** Availability events sent so far. */
     int events() {
         return events.get();
@@ -135,7 +158,7 @@ final class ScenarioDomainRules {
         onEvent.run();
     }
 
-    /** The fake API: the regions' current domains go into the map {@link #API_TICKS} ticks from now. */
+    /** The fake API: the regions' current domains go into the map {@link #apiTicks} ticks from now. */
     private CompletableFuture<Void> answerLater(Plugin plugin, String w, Collection<String> regions) {
         CompletableFuture<Void> done = new CompletableFuture<>();
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -146,7 +169,7 @@ final class ScenarioDomainRules {
                 }
             }
             done.complete(null);
-        }, API_TICKS);
+        }, apiTicks);
         return done;
     }
 }

@@ -88,6 +88,9 @@ class NavigationAccessSubjectTest {
         when(resolver.getDomainByRegionIdNoRefresh(NavigationTestNetwork.WORLD, "town_1"))
             .thenReturn(Optional.of(new DomainSnapshot(1, "Town", null, "town_1", true, true, "Town", Set.of(), Set.of(),
                 Set.of(), Set.of())));
+        // PandiO/knk-workspace#724: the NPC checks' lookup is the map's own while no clear's re-warm runs
+        when(resolver.getLastKnownDomain(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenAnswer(call -> resolver.getDomainByRegionIdNoRefresh(call.getArgument(0), call.getArgument(1)));
         GatePassThroughRules.setPermissionCheck((p, node) -> nodes.contains(node));
         access = new NavigationAccess(gates, () -> siege, regionIds, resolver, p -> bypass, new DomainAccessEvaluator());
     }
@@ -297,5 +300,24 @@ class NavigationAccessSubjectTest {
         EdgeVerdict verdict = access.policyFor(npc(denied), network.snapshot, null).check(castleEdge);
         assertTrue(verdict.isBlocked(), "the deny list holds even with the bypass");
         assertEquals(NavigationTestNetwork.CASTLE_REGION, verdict.cause().name());
+    }
+
+    /**
+     * PandiO/knk-workspace#724 (the off-road chain's acceptance item A16): only the NPC checks read the last known
+     * domain answers held after a clear; a player, as a subject or through the trail rule and route policy, reads the
+     * map as before.
+     */
+    @Test
+    void onlyNpcSubjectsReadTheHeldDomainAnswersPlayersReadTheMap() {
+        access.mayEnter(new PlayerAccessSubject(player, access)).test(NavigationTestNetwork.CASTLE_REGION);
+        access.mayEnter(player).test(NavigationTestNetwork.CASTLE_REGION);
+        org.mockito.Mockito.verify(resolver, org.mockito.Mockito.never()).getLastKnownDomain(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(resolver, org.mockito.Mockito.atLeast(2)).getDomainByRegionIdNoRefresh(
+            NavigationTestNetwork.WORLD, NavigationTestNetwork.CASTLE_REGION);
+
+        access.mayEnter(npc(NpcAccessProfile.DEFAULT, "town_1")).test(NavigationTestNetwork.CASTLE_REGION);
+        org.mockito.Mockito.verify(resolver).getLastKnownDomain(NavigationTestNetwork.WORLD,
+            NavigationTestNetwork.CASTLE_REGION);
     }
 }
