@@ -167,7 +167,8 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
             player.sendMessage(CompassMessages.unavailable());
             return true;
         }
-        if (!hasNode(player)) {
+        // destination engine phase 4 (#62): with the engine the no-permission scope (80) refuses, below the bypass
+        if (engine.get() == null && !hasNode(player)) {
             player.sendMessage(CompassMessages.noPermission());
             return true;
         }

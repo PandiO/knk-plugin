@@ -16,6 +16,7 @@ import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.domain.users.ActiveMode;
 import net.knightsandkings.knk.core.navigation.compass.CompassSettings;
+import net.knightsandkings.knk.core.navigation.destinations.AllowedDestination;
 import net.knightsandkings.knk.core.navigation.destinations.Candidate;
 import net.knightsandkings.knk.core.navigation.destinations.DestinationEngine;
 import net.knightsandkings.knk.core.navigation.destinations.DestinationEngine.Resolution;
@@ -178,6 +179,16 @@ public final class PlayerNavigationEngine {
             return Candidate.Mode.REGION;
         }
         return mode == Candidate.Mode.REGION ? Candidate.Mode.SPAWN : null;
+    }
+
+    /**
+     * Whether a running session's destination is still in the player's list (phase 4, PandiO/knk-workspace#62,
+     * DESIGN § 8): the list is built again for the player's context now and the handle's key looked up in it; an
+     * empty scope (loading, frozen, no permission, the siege lobby) or a key that dropped out ends the session with
+     * the reason. What {@code NavigationService} re-checks running sessions with.
+     */
+    public DestinationEngine.Revalidation revalidate(Player player, AllowedDestination handle) {
+        return engine.revalidate(context(player), handle);
     }
 
     /** Tab completions for the destination words, inside the list. */

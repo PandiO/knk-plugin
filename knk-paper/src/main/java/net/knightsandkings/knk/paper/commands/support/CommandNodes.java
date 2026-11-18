@@ -57,7 +57,9 @@ public final class CommandNodes {
             Map.entry("socialspy", List.of(PrivateMessageNodes.SOCIAL_SPY)),
             Map.entry("ownermode", List.of(ModeService.OWNER_NODE)),
             Map.entry("staffmode", List.of(ModeService.STAFF_NODE)),
-            Map.entry("navigate", List.of(NavigateCommand.NODE)),
+            // destination engine (#62): the bypass node alone lets a player use /navigate with the engine on
+            Map.entry("navigate", List.of(NavigateCommand.NODE,
+                    net.knightsandkings.knk.core.navigation.destinations.InitialScopes.BYPASS_NODE)),
             Map.entry("kit", List.of("knk.kit.list", KitGrantFlow.GET_NODE, KitGrantFlow.GIVE_NODE, KitGrantFlow.PURCHASE_NODE,
                     "knk.kit.manage")),
             Map.entry("siegemenu", List.of(SiegeService.PERMISSION_PLAY)),

@@ -77,7 +77,8 @@ public class NavigateCommand implements TabExecutor {
             sender.sendMessage(NavigationMessages.playersOnly());
             return true;
         }
-        if (!hasNode(player)) {
+        // destination engine phase 4 (#62): with the engine the no-permission scope (80) refuses, below the bypass
+        if (engine.get() == null && !hasNode(player)) {
             player.sendMessage(NavigationMessages.noPermission());
             return true;
         }
@@ -280,7 +281,7 @@ public class NavigateCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (!(sender instanceof Player player) || !hasNode(player) || args.length == 0) {
+        if (!(sender instanceof Player player) || (engine.get() == null && !hasNode(player)) || args.length == 0) {
             return List.of();
         }
         PlayerNavigationEngine destinationEngine = engine.get();

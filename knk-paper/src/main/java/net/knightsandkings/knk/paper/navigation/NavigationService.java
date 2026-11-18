@@ -44,6 +44,8 @@ import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteReason;
 import net.knightsandkings.knk.core.navigation.JoinPoint;
 import net.knightsandkings.knk.core.navigation.NavigationSession;
 import net.knightsandkings.knk.core.navigation.destinations.AllowedDestination;
+import net.knightsandkings.knk.core.navigation.destinations.DestinationEngine;
+import net.knightsandkings.knk.core.navigation.destinations.Reason;
 import net.knightsandkings.knk.core.navigation.PolylineCursor;
 import net.knightsandkings.knk.core.navigation.SessionParameters;
 import net.knightsandkings.knk.core.roads.route.AStarRouter;
@@ -293,6 +295,14 @@ public final class NavigationService implements SiegeMatchObserver {
     private volatile MatchNavigationScope matchScope;
     /** Destination engine phase 3 (#69): only a handle starts a session (navigation.destination-engine on). */
     private volatile boolean handleOnly;
+    /**
+     * Destination engine phase 4 (#62, DESIGN § 8): re-checks a running session's handle against the player's list
+     * (navigation.destination-engine on); null: the flag is off and the siege rule of {@link NavigationEligibility}
+     * ends sessions as before.
+     */
+    private volatile SessionRevalidator revalidator;
+    /** Phase 4 (#62): an immediate re-check was asked for (any thread); the next tick runs it on the main thread. */
+    private volatile boolean revalidationDue;
     private final RouterParameters routerParameters;
     /** Snapping a destination: no height weight by default, its last leg is a walk path (finding N15). */
     private final RouterParameters destinationParameters;
@@ -318,11 +328,22 @@ public final class NavigationService implements SiegeMatchObserver {
     /** Walk request outcomes, for {@code /knk road status}. */
     enum WalkCount { REQUESTED, FOUND, NO_PATH, FALLBACK, NOT_CAPTURED, FAILED, PARTIAL }
 
+    /**
+     * Destination engine phase 4 (PandiO/knk-workspace#62, DESIGN § 8): whether a running session's destination is
+     * still in the player's list now ({@code DestinationEngine.revalidate} for the player's context). Main thread.
+     */
+    @FunctionalInterface
+    public interface SessionRevalidator {
+        DestinationEngine.Revalidation revalidate(Player player, AllowedDestination handle);
+    }
+
     /** One player's navigation: the core session plus what the runtime adds. */
     final class Active {
         final Player player;
         final Destination destination;
         final long startedTick;
+        /** Phase 4 (#62): the engine handle the session was started from (re-validated, DESIGN § 8); null: raw entry. */
+        AllowedDestination handle;
         RoadNetworkSnapshot snapshot;
         NavigationSession session;
         List<SnapPoint> goals = List.of();
@@ -876,9 +897,11 @@ public final class NavigationService implements SiegeMatchObserver {
     /**
      * Destination engine phase 3 (DESIGN § 6, E3, PandiO/knk-workspace#69): start navigating {@code player} to a
      * destination the engine listed for them. The handle is the proof (only the engine mints one), so there is no
-     * match check here; the hard blocks of {@link NavigationEligibility} still apply until phase 4 (#62) moves them
-     * into the scopes, and the rest is {@link #navigate(Player, Destination)}'s. The routable destination is built
-     * from the handle's place ({@link HandleDestinations}), synchronously. Main thread.
+     * match check here, and since phase 4 (#62) no {@link NavigationEligibility} check either: loading, frozen,
+     * permission and the siege lobby are the engine's scopes, which refused before a handle was minted. The rest is
+     * {@link #navigate(Player, Destination)}'s. The routable destination is built from the handle's place
+     * ({@link HandleDestinations}), synchronously; the running session keeps the handle for re-validation
+     * (DESIGN § 8). Main thread.
      */
     public void navigate(Player player, AllowedDestination handle) {
         Objects.requireNonNull(handle, "handle");
@@ -887,15 +910,90 @@ public final class NavigationService implements SiegeMatchObserver {
             player.sendMessage(NavigationMessages.disabled());
             return;
         }
-        if (refusedByEligibility(player)) {
-            return;
-        }
         Destination destination = HandleDestinations.of(handle, player.getWorld().getName());
         if (destination == null) {
             player.sendMessage(NavigationMessages.noLocation(handle.candidate().label()));
             return;
         }
         begin(player, destination);
+        Active started = active.get(player.getUniqueId());
+        if (started != null && started.destination == destination) {
+            started.handle = handle;
+        }
+    }
+
+    // ==================== re-validation (destination engine phase 4, #62, DESIGN § 8) ====================
+
+    /**
+     * Destination engine phase 4 (#62): with {@code navigation.destination-engine} on, running sessions are
+     * re-checked against the player's list (every {@link #RECHECK_TICKS} and on {@link #revalidateSoon()}) instead
+     * of the siege rule; null switches back to today's siege rule (the flag off).
+     */
+    public void setRevalidator(SessionRevalidator revalidator) {
+        this.revalidator = revalidator;
+    }
+
+    /**
+     * An immediate re-check of every running session (DESIGN § 8: a siege event, a mode change, a freeze change, a
+     * model refresh), run at the start of the next tick on the main thread so the change has settled. Any thread;
+     * nothing happens while the flag is off.
+     */
+    public void revalidateSoon() {
+        if (revalidator != null) {
+            revalidationDue = true;
+        }
+    }
+
+    /** Re-checks every running session that came from a handle now; the ones no longer allowed end. Main thread. */
+    public void revalidateSessions() {
+        if (revalidator == null) {
+            return;
+        }
+        for (Active a : new ArrayList<>(active.values())) {
+            if (active.get(a.player.getUniqueId()) == a) {
+                stillAllowed(a);
+            }
+        }
+    }
+
+    /**
+     * Whether the session's destination is still in the player's list; if not it ends now with
+     * {@link EndReason#DESTINATION_NOT_ALLOWED} and the scope's reason as the message. A session without a handle
+     * (the raw entry, flag off) and a failing check keep going.
+     */
+    private boolean stillAllowed(Active a) {
+        SessionRevalidator check = revalidator;
+        if (check == null || a.handle == null) {
+            return true;
+        }
+        DestinationEngine.Revalidation revalidation;
+        try {
+            revalidation = check.revalidate(a.player, a.handle);
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.WARNING, "[Navigation] Re-checking " + a.handle + " failed; the session keeps going", e);
+            return true;
+        }
+        if (revalidation == null || revalidation.allowed()) {
+            return true;
+        }
+        endNotAllowed(a, revalidation.reason());
+        return false;
+    }
+
+    /** Ends the session because its destination left the list: the scope's reason is the message (DESIGN § 8). */
+    private void endNotAllowed(Active a, Reason reason) {
+        if (active.get(a.player.getUniqueId()) != a) {
+            return;
+        }
+        if (a.session != null) {
+            a.session.end(EndReason.DESTINATION_NOT_ALLOWED);
+        }
+        end(a, EndReason.DESTINATION_NOT_ALLOWED, false);
+        if (a.player.isOnline()) {
+            a.player.sendMessage(reason == null
+                ? NavigationMessages.ended(EndReason.DESTINATION_NOT_ALLOWED, a.destination.name())
+                : EngineReasons.forCommand(reason));
+        }
     }
 
     /**
@@ -1872,6 +1970,10 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /** One server tick for every session (the ticker; tests call it directly). Main thread. */
     void tickAll() {
+        if (revalidationDue) {
+            revalidationDue = false;
+            revalidateSessions();
+        }
         if (active.isEmpty()) {
             return;
         }
@@ -1900,7 +2002,12 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         if (now - a.lastRecheckTick >= RECHECK_TICKS) {
             a.lastRecheckTick = now;
-            if (deps.eligibility().inSiege(a.player.getUniqueId())) {
+            if (revalidator != null) {
+                // destination engine phase 4 (#62, DESIGN § 8): the list decides; EndReason.SIEGE is not used (A26)
+                if (!stillAllowed(a)) {
+                    return;
+                }
+            } else if (deps.eligibility().inSiege(a.player.getUniqueId())) {
                 end(a, EndReason.SIEGE);
                 return;
             }
@@ -2431,6 +2538,11 @@ public final class NavigationService implements SiegeMatchObserver {
 
     @Override
     public void lobbyChanged(SiegeLobbyRuntime lobby) {
+        if (revalidator != null) {
+            // destination engine phase 4 (#62): the lobby scope (50) ends a member's session with its own reason
+            revalidateSoon();
+            return;
+        }
         // KNG-234: a member of a running match navigates with the compass; every lobby change in the middle of a
         // match (a vote, someone leaving) must not end their route. The eligibility re-check ends it once the match is over.
         if (lobby.phase() == net.knightsandkings.knk.core.siege.SiegePhase.IN_PROGRESS) {
@@ -2451,16 +2563,19 @@ public final class NavigationService implements SiegeMatchObserver {
     @Override
     public void objectiveCaptured(SiegeLobbyRuntime lobby, SiegeMatch match,
                                   net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent capture) {
+        revalidateSoon(); // destination engine phase 4 (#62, DESIGN § 8)
         onAvailabilityChanged();
     }
 
     @Override
     public void roundReleased(SiegeLobbyRuntime lobby) {
+        revalidateSoon(); // destination engine phase 4 (#62, DESIGN § 8)
         onAvailabilityChanged();
     }
 
     @Override
     public void matchEnded(SiegeLobbyRuntime lobby, SiegeMatch match) {
+        revalidateSoon(); // destination engine phase 4 (#62, DESIGN § 8)
         onAvailabilityChanged();
     }
 

@@ -62,6 +62,9 @@ public class ModeService {
     // In-session mode per online player. The persisted value (UserCache/API) can differ from
     // this while an "onquit" change is pending - see ModeCommand.
     private final Map<UUID, ActiveMode> activeModes = new ConcurrentHashMap<>();
+    // Destination engine phase 4 (PandiO/knk-workspace#62): told after a player's in-session mode changed.
+    private final java.util.List<java.util.function.BiConsumer<Player, ActiveMode>> modeListeners =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public ModeService(Plugin plugin, KnkPermissible knkPermissible, UserCache userCache, UsersCommandApi usersCommandApi) {
         this.plugin = Objects.requireNonNull(plugin, "plugin must not be null");
@@ -72,6 +75,15 @@ public class ModeService {
 
     public void setOfflineStore(OfflineSecurityStore offline) {
         this.offline = offline;
+    }
+
+    /**
+     * Destination engine phase 4 (PandiO/knk-workspace#62, DESIGN § 8): {@code listener} is told on the main thread,
+     * after {@link #applyMode} changed a player's in-session mode, with the player and the new mode (switching owner
+     * or staff mode on or off lifts or applies the navigation bypass at once). A failing listener is logged.
+     */
+    public void addModeListener(java.util.function.BiConsumer<Player, ActiveMode> listener) {
+        modeListeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
     public static String nodeFor(ActiveMode mode) {
@@ -124,6 +136,15 @@ public class ModeService {
             activeModes.put(player.getUniqueId(), mode);
         }
         refreshVisibilityOf(player);
+        if (previous != mode) {
+            for (var listener : modeListeners) {
+                try {
+                    listener.accept(player, mode);
+                } catch (RuntimeException e) {
+                    LOGGER.log(Level.WARNING, "Mode listener failed for " + player.getName(), e);
+                }
+            }
+        }
 
         if (!notify || previous == mode) {
             return;

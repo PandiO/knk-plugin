@@ -39,8 +39,8 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 /**
  * {@code NavigationService.navigate(Player, AllowedDestination)} (phase 3, PandiO/knk-workspace#69, DESIGN § 6, E3,
  * A20): a handle starts a session; with {@code navigation.destination-engine} on the raw entry refuses; a handle of
- * another player is refused; the hard blocks still apply until phase 4. A MockBukkit world and player on the tiny
- * network of {@link NavigationTestNetwork}.
+ * another player is refused; since phase 4 (#62) the old eligibility is asked on the raw entry only. A MockBukkit
+ * world and player on the tiny network of {@link NavigationTestNetwork}.
  */
 class NavigationServiceHandleTest {
 
@@ -131,9 +131,19 @@ class NavigationServiceHandleTest {
     }
 
     @Test
-    void theHardBlocksStillApplyToAHandle() {
+    void sincePhaseFourTheOldEligibilityIsNotAskedOnTheHandlePath() {
+        // phase 4 (#62): loading, frozen and the lobby are the engine's scopes, which refuse before a handle is
+        // minted; a running session is re-checked against the list (NavigationServiceRevalidationTest)
         frozen.set(true);
         service.navigate(player, handleFor(player.getUniqueId(), "Cinix Keep"));
+        assertTrue(service.isNavigating(player.getUniqueId()), String.valueOf(lastMessage()));
+    }
+
+    @Test
+    void theRawEntryStillAsksTheOldEligibilityWithTheFlagOff() {
+        frozen.set(true);
+        service.navigate(player, Destination.node("Cinix Keep", NavigationTestNetwork.WORLD, NavigationTestNetwork.C,
+            new double[] {200, 64, 0}));
         assertFalse(service.isNavigating(player.getUniqueId()));
         assertEquals(PlainTextComponentSerializer.plainText().serialize(NavigationMessages.frozen()), lastMessage());
     }

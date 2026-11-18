@@ -46,6 +46,12 @@ class CommandNodesTest {
     }
 
     @Test
+    void navigateIsOpenToTheDestinationEngineBypassNodeToo() {
+        // destination engine phase 4 (PandiO/knk-workspace#62): knk.navigate.any alone lets a player use /navigate
+        assertTrue(CommandNodes.anyOf("navigate").containsAll(java.util.List.of("knk.navigate", "knk.navigate.any")));
+    }
+
+    @Test
     void openCommandsAreNotGated() {
         for (String open : java.util.List.of("msg", "reply", "tpa", "tpaccept", "gate", "gatedoor", "knk", "afk", "leaderboard", "stats")) {
             assertTrue(CommandNodes.anyOf(open).isEmpty(), open);

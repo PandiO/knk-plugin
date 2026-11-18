@@ -55,7 +55,13 @@ public sealed interface NavigationEffect {
         /** The destination is no longer navigable (e.g. the network was rebuilt away). */
         DESTINATION_LOST,
         /** The player is already at the destination / inside the region. */
-        ALREADY_THERE
+        ALREADY_THERE,
+        /**
+         * Destination engine phase 4 (PandiO/knk-workspace#62, DESIGN § 8): the destination left the player's list
+         * (it is no longer listed, or the player now falls into a scope that lists nothing); the scope's reason is
+         * the message. Used with {@code navigation.destination-engine} on instead of {@link #SIEGE}.
+         */
+        DESTINATION_NOT_ALLOWED
     }
 
     /**
