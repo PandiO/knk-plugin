@@ -52,4 +52,18 @@ class BukkitNavWorldSurfaceTest {
         assertEquals(1.0, BukkitNavWorld.surfaceTop(List.of(new BoundingBox(0, 0, 0, 1, 1.5, 1))), 1e-9,
             "a fence's 1.5 is no floor height navigation plans with");
     }
+
+    @Test
+    void anOpenDoorsOpeningIsBesideItsPanel() {
+        // link C1 (PandiO/knk-workspace#700): the keep tower's door, its open panel on the cell's south side
+        double[] c = BukkitNavWorld.openingCentre(List.of(new BoundingBox(0, 0, 0.8125, 1, 1, 1)));
+        assertEquals(0.5, c[0], 1e-9);
+        assertEquals(0.40625, c[1], 1e-9, "the middle of the 13/16 opening");
+        double[] west = BukkitNavWorld.openingCentre(List.of(new BoundingBox(0, 0, 0, 0.1875, 1, 1)));
+        assertEquals(0.59375, west[0], 1e-9);
+        assertEquals(0.5, west[1], 1e-9);
+        double[] none = BukkitNavWorld.openingCentre(List.of());
+        assertEquals(0.5, none[0], 1e-9);
+        assertEquals(0.5, none[1], 1e-9);
+    }
 }

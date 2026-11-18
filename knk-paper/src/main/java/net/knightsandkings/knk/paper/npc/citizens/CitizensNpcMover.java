@@ -119,10 +119,31 @@ final class CitizensNpcMover implements NpcMover {
             return;
         }
         List<Vector> points = new ArrayList<>(waypoints.size());
+        World world = Bukkit.getServer() == null ? null : Bukkit.getWorld(waypoints.get(0).world());
         for (NavPoint p : waypoints) {
-            points.add(new Vector(p.x(), p.y(), p.z()));
+            points.add(throughDoorway(world, p));
         }
         npc.getNavigator().setTarget(points);
+    }
+
+    /**
+     * A waypoint in a cell with an open door or fence gate at the feet goes to the middle of the opening its panel
+     * leaves (link C1, PandiO/knk-workspace#700): a body passes an open door only within about 0.1 of that middle.
+     */
+    static Vector throughDoorway(World world, NavPoint p) {
+        if (world != null) {
+            int x = (int) Math.floor(p.x());
+            int y = (int) Math.floor(p.y() + 0.01);
+            int z = (int) Math.floor(p.z());
+            if (world.isChunkLoaded(x >> 4, z >> 4)) {
+                double[] centre = net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld.openingCentre(
+                    world.getBlockAt(x, y, z));
+                if (centre[0] != 0.5 || centre[1] != 0.5) {
+                    return new Vector(x + centre[0], p.y(), z + centre[1]);
+                }
+            }
+        }
+        return new Vector(p.x(), p.y(), p.z());
     }
 
     /**

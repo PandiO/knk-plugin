@@ -71,6 +71,50 @@ public final class BukkitNavWorld implements NavWorld {
     }
 
     /**
+     * Where a body walks through a cell with an open door or fence gate (link C1, PandiO/knk-workspace#700): the middle
+     * of the opening the panel leaves, as block-relative {x, z}. An open door's panel takes 3/16 of its cell at one
+     * side, so the opening is 13/16 wide and a body 0.6 wide fits only within about 0.1 of its middle; a follower a
+     * little off the cell's centre stuck on the keep tower's door panel. {0.5, 0.5} for any other block.
+     */
+    public static double[] openingCentre(Block block) {
+        if (block == null || block.isPassable()) {
+            return new double[] {0.5, 0.5};
+        }
+        BlockData data = block.getBlockData();
+        if (!((data instanceof org.bukkit.block.data.type.Door || data instanceof org.bukkit.block.data.type.Gate)
+            && ((org.bukkit.block.data.Openable) data).isOpen())) {
+            return new double[] {0.5, 0.5};
+        }
+        return openingCentre(block.getCollisionShape().getBoundingBoxes());
+    }
+
+    /** The middle of the free part of a cell beside panels that span it (block-relative {x, z}). */
+    static double[] openingCentre(java.util.Collection<org.bukkit.util.BoundingBox> boxes) {
+        double x0 = 0;
+        double x1 = 1;
+        double z0 = 0;
+        double z1 = 1;
+        for (org.bukkit.util.BoundingBox box : boxes) {
+            boolean spansX = box.getMinX() <= 1e-6 && box.getMaxX() >= 1 - 1e-6;
+            boolean spansZ = box.getMinZ() <= 1e-6 && box.getMaxZ() >= 1 - 1e-6;
+            if (spansX && !spansZ) {
+                if (box.getMinZ() <= 1e-6) {
+                    z0 = Math.max(z0, box.getMaxZ());
+                } else if (box.getMaxZ() >= 1 - 1e-6) {
+                    z1 = Math.min(z1, box.getMinZ());
+                }
+            } else if (spansZ && !spansX) {
+                if (box.getMinX() <= 1e-6) {
+                    x0 = Math.max(x0, box.getMaxX());
+                } else if (box.getMaxX() >= 1 - 1e-6) {
+                    x1 = Math.min(x1, box.getMinX());
+                }
+            }
+        }
+        return new double[] {x1 > x0 ? (x0 + x1) / 2 : 0.5, z1 > z0 ? (z0 + z1) / 2 : 0.5};
+    }
+
+    /**
      * The free height above a floor (implementation plan 4b.2 item 4): from the floor's top (a bottom slab's at half a
      * block) to the bottom of the first block above it a body cannot pass (a top slab's at half a block), at most
      * four blocks up. 0 for a floor an NPC cannot stand on or in an unloaded chunk.
