@@ -15,8 +15,10 @@ import java.util.Set;
 
 /**
  * A* over a {@link RoadNetworkSnapshot} (DESIGN §6.2 step 4, plan 2d). Edge cost =
- * {@code length × classCost × profile.costMultiplier × edge.costMultiplier}; the heuristic is the
- * Euclidean distance to the nearest goal times the network's cheapest cost factor (admissible and
+ * {@code length × classCost × profile.costMultiplier × edge.costMultiplier} in the default {@link RouteMode}
+ * ({@code preferred}); off-road phase 4 (#707) prices by the request's mode ({@code efficient}: the class cost,
+ * {@code shortest}: length). The heuristic is the
+ * Euclidean distance to the nearest goal times the network's cheapest cost factor in that mode (admissible and
  * consistent because every walked length is at least its chord). The start and the goals are
  * <b>virtual nodes</b> splitting their edges (negative state ids); a start and a goal on the same
  * edge connect directly along it. {@code Oneway} edges are walked From → To only. Edges the
@@ -175,7 +177,7 @@ public final class AStarRouter {
                     goalsByEdgeIndex.computeIfAbsent(ei, x -> new ArrayList<>()).add(k);
                 }
             }
-            this.minFactor = snapshot.minCostFactor(request.classCost());
+            this.minFactor = snapshot.minCostFactor(request.classCost(), request.mode());
         }
 
         static int goalState(int k) {
@@ -195,7 +197,7 @@ public final class AStarRouter {
         }
 
         double edgeCost(int edgeIndex) {
-            return costs.computeIfAbsent(edgeIndex, i -> snapshot.edgeCost(snapshot.edgeAt(i), request.classCost()));
+            return costs.computeIfAbsent(edgeIndex, i -> snapshot.edgeCost(snapshot.edgeAt(i), request.classCost(), request.mode()));
         }
 
         double[] position(int state) {
@@ -430,11 +432,11 @@ public final class AStarRouter {
             }
             Collections.reverse(steps);
             if (linked) {
-                return Route.buildPieces(snapshot, start, goal, steps, request.classCost());
+                return Route.buildPieces(snapshot, start, goal, steps, request.classCost(), request.mode());
             }
             List<Route.Step> roadSteps = new ArrayList<>(steps.size());
             steps.forEach(piece -> roadSteps.add((Route.Step) piece));
-            return Route.build(snapshot, start, goal, roadSteps, request.classCost());
+            return Route.build(snapshot, start, goal, roadSteps, request.classCost(), request.mode());
         }
     }
 }

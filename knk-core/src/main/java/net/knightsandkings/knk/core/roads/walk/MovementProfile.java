@@ -142,6 +142,25 @@ public record MovementProfile(
             waterFactor, climbables, climbCost, wallCost, clearanceCost, wallClearance);
     }
 
+    /**
+     * Off-road phase 4 (#707, DESIGN § 5.4.6): this profile in a route mode. {@code efficient} and {@code preferred}
+     * keep it as it is (today's walk costs); {@code shortest} prices every move as the blocks walked
+     * ({@link #lengthOnly()}).
+     */
+    public MovementProfile forMode(net.knightsandkings.knk.core.roads.route.RouteMode mode) {
+        return mode != null && mode.lengthOnlyWalk() ? lengthOnly() : this;
+    }
+
+    /**
+     * This profile with every extra cost removed (route mode {@code shortest}, #707): no jump, drop, door, wall or
+     * clearance cost, water at factor 1 and one block of ladder at 1. What the mover can do (headroom, drops, doors,
+     * wading, climbables) is unchanged, so doors, water, drops and ladders stay passable, priced as length.
+     */
+    public MovementProfile lengthOnly() {
+        return new MovementProfile(headroom, maxDrop, 0.0, 0.0, opensDoors, 0.0, wades, 1.0, climbables, 1.0, 0.0, 0.0,
+            wallClearance);
+    }
+
     /** Whether the search uses the clearance cost instead of the wall cost. */
     public boolean usesClearance() {
         return clearanceCost > 0;

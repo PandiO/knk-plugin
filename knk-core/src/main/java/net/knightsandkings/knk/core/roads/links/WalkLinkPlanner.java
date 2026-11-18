@@ -10,6 +10,7 @@ import java.util.Optional;
 
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
 import net.knightsandkings.knk.core.roads.route.EdgeVerdict;
+import net.knightsandkings.knk.core.roads.route.RouteMode;
 import net.knightsandkings.knk.core.roads.route.WalkLinkId;
 import net.knightsandkings.knk.core.roads.route.WalkLinkSource;
 
@@ -23,6 +24,9 @@ import net.knightsandkings.knk.core.roads.route.WalkLinkSource;
  * <p>A link's routing cost is its walk cost (length plus the walk profile's penalties) times
  * {@code max(1, cheapest road factor)}: walking off the road is never cheaper per block than the cheapest road (the
  * heuristic stays admissible), and with today's class costs (all at least 1) a link costs what it is walked.
+ * Off-road phase 4 (#707, DESIGN § 5.4): in route mode {@code shortest} the link's walked length takes the place of its
+ * walk cost ({@link RouteMode#linkCost}), and the cheapest road factor is the mode's; the default ({@code preferred})
+ * and {@code efficient} price it as before.
  */
 public final class WalkLinkPlanner implements WalkLinkSource {
 
@@ -32,6 +36,7 @@ public final class WalkLinkPlanner implements WalkLinkSource {
     private final String mover;
     private final AccessPolicy policy;
     private final double factor;
+    private final RouteMode mode;
     private final Map<WalkLinkId, Wanted> wanted = new HashMap<>();
     private final List<WalkLinkCache.Key> offered = new ArrayList<>();
 
@@ -44,6 +49,18 @@ public final class WalkLinkPlanner implements WalkLinkSource {
      */
     public WalkLinkPlanner(WalkLinkCandidates candidates, WalkLinkCache cache, String world, String mover,
                            AccessPolicy policy, double minFactor) {
+        this(candidates, cache, world, mover, policy, minFactor, RouteMode.DEFAULT);
+    }
+
+    /**
+     * A planner pricing its links in a {@link RouteMode} (#707).
+     *
+     * @param minFactor the request's cheapest road cost factor in that mode
+     *                  ({@code RoadNetworkSnapshot.minCostFactor(classCost, mode)})
+     */
+    public WalkLinkPlanner(WalkLinkCandidates candidates, WalkLinkCache cache, String world, String mover,
+                           AccessPolicy policy, double minFactor, RouteMode mode) {
+        this.mode = Objects.requireNonNull(mode, "mode");
         this.candidates = Objects.requireNonNull(candidates, "candidates");
         this.cache = Objects.requireNonNull(cache, "cache");
         this.world = Objects.requireNonNull(world, "world");
@@ -72,7 +89,7 @@ public final class WalkLinkPlanner implements WalkLinkSource {
             }
             EdgeVerdict verdict = policy.checkWalkLink(entry.get().link());
             if (verdict.isUsable()) {
-                usable.add(new Option(entry.get().link(), entry.get().link().walkCost() * factor));
+                usable.add(new Option(entry.get().link(), mode.linkCost(entry.get().link()) * factor));
                 offered.add(key);
             }
         }
@@ -107,6 +124,11 @@ public final class WalkLinkPlanner implements WalkLinkSource {
     /** How many usable links the A* was offered (for the counters). */
     public int offeredCount() {
         return offered.size();
+    }
+
+    /** The mode the links are priced in. */
+    public RouteMode mode() {
+        return mode;
     }
 
     public String world() {

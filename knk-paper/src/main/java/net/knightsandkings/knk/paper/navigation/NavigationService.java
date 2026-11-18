@@ -61,6 +61,7 @@ import net.knightsandkings.knk.core.roads.route.RegionShape;
 import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.Route;
+import net.knightsandkings.knk.core.roads.route.RouteMode;
 import net.knightsandkings.knk.core.roads.route.RouteRequest;
 import net.knightsandkings.knk.core.roads.route.RouteResult;
 import net.knightsandkings.knk.core.roads.route.RouterParameters;
@@ -73,6 +74,7 @@ import net.knightsandkings.knk.core.roads.links.WalkLinkCounters;
 import net.knightsandkings.knk.core.roads.links.WalkLinkPlanner;
 import net.knightsandkings.knk.core.roads.route.WalkLink;
 import net.knightsandkings.knk.core.roads.route.WalkLinkSource;
+import net.knightsandkings.knk.core.roads.walk.MovementProfile;
 import net.knightsandkings.knk.core.roads.walk.WalkGoal;
 import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
 import net.knightsandkings.knk.core.roads.walk.WalkPath;
@@ -382,6 +384,11 @@ public final class NavigationService implements SiegeMatchObserver {
         int linkSearches;
         /** ... and whether one of them found a link (a better route is asked for when the last one answers). */
         boolean linkFound;
+        /**
+         * Off-road phase 4 (#707, DESIGN § 5.4): the route mode every route, walk leg and link price of this navigation
+         * uses; the default ({@code preferred}) is today's routing.
+         */
+        RouteMode mode = RouteMode.DEFAULT;
 
         Active(Player player, Destination destination, long startedTick) {
             this.player = player;
@@ -885,6 +892,14 @@ public final class NavigationService implements SiegeMatchObserver {
      * player is already there; otherwise replaces any current session. Main thread.
      */
     public void navigate(Player player, Destination destination) {
+        navigate(player, destination, RouteMode.DEFAULT);
+    }
+
+    /**
+     * {@link #navigate(Player, Destination)} in a route mode (off-road phase 4, #707): the mode goes into the shared
+     * {@code begin}, so the engine handle's entry and this one route alike.
+     */
+    public void navigate(Player player, Destination destination, RouteMode mode) {
         if (handleOnly) {
             // destination engine phase 3 (#69, A20): with navigation.destination-engine on only a handle starts a session
             deps.logger().warning("[Navigation] A raw destination (" + destination + ") was refused for " + player.getName()
@@ -905,7 +920,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 return;
             }
         }
-        begin(player, destination);
+        begin(player, destination, mode);
     }
 
     /**
@@ -918,6 +933,14 @@ public final class NavigationService implements SiegeMatchObserver {
      * (DESIGN § 8). Main thread.
      */
     public void navigate(Player player, AllowedDestination handle) {
+        navigate(player, handle, RouteMode.DEFAULT);
+    }
+
+    /**
+     * {@link #navigate(Player, AllowedDestination)} in a route mode (off-road phase 4, #707, DESIGN § 5.4): every route,
+     * walk leg and walk-link price of the session uses {@code mode}; {@link RouteMode#DEFAULT} is today's routing.
+     */
+    public void navigate(Player player, AllowedDestination handle, RouteMode mode) {
         Objects.requireNonNull(handle, "handle");
         if (!handle.player().equals(player.getUniqueId())) {
             deps.logger().warning("[Navigation] " + handle + " refused for " + player.getName() + ": issued for another player");
@@ -929,7 +952,7 @@ public final class NavigationService implements SiegeMatchObserver {
             player.sendMessage(NavigationMessages.noLocation(handle.candidate().label()));
             return;
         }
-        begin(player, destination);
+        begin(player, destination, mode);
         Active started = active.get(player.getUniqueId());
         if (started != null && started.destination == destination) {
             started.handle = handle;
@@ -1034,7 +1057,7 @@ public final class NavigationService implements SiegeMatchObserver {
     }
 
     /** Start the session once the destination is allowed: world, network, goals, the start event, the route. */
-    private void begin(Player player, Destination destination) {
+    private void begin(Player player, Destination destination, RouteMode mode) {
         String world = player.getWorld().getName();
         if (!destination.world().equalsIgnoreCase(world)) {
             player.sendMessage(NavigationMessages.otherWorld(destination.name()));
@@ -1067,6 +1090,7 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         long now = deps.tick().getAsLong();
         Active a = new Active(player, destination, now);
+        a.mode = mode == null ? RouteMode.DEFAULT : mode;
         a.snapshot = snapshot;
         a.goals = goals.goals();
         a.target = goals.target();
@@ -1542,7 +1566,7 @@ public final class NavigationService implements SiegeMatchObserver {
                     WalkResult result;
                     WalkRequest searched = null;
                     try {
-                        searched = request.get();
+                        searched = forMode(request.get(), a.mode);
                         result = walk.pathfinder().find(searched);
                     } catch (RuntimeException e) {
                         deps.logger().log(Level.WARNING, "[Navigation] Walk search failed for " + a.player.getName(), e);
@@ -1557,6 +1581,18 @@ public final class NavigationService implements SiegeMatchObserver {
                 walkDelivered(a, leg, generation, null, WalkCount.FAILED); // shutting down
             }
         });
+    }
+
+    /**
+     * Off-road phase 4 (#707, DESIGN § 5.4): a walk leg's request in the navigation's route mode - unchanged in
+     * {@code preferred} and {@code efficient} (today's walk profile), priced as length in {@code shortest}.
+     */
+    static WalkRequest forMode(WalkRequest request, RouteMode mode) {
+        if (request == null) {
+            return null;
+        }
+        MovementProfile profile = request.profile().forMode(mode);
+        return profile == request.profile() ? request : request.withProfile(profile);
     }
 
     /**
@@ -1737,7 +1773,7 @@ public final class NavigationService implements SiegeMatchObserver {
             return null;
         }
         return new WalkLinkPlanner(candidatesFor(snapshot, links.config()), links.cache(), snapshot.world(),
-            a.player.getUniqueId().toString(), policy, snapshot.minCostFactor(routerParameters.classCost()));
+            a.player.getUniqueId().toString(), policy, snapshot.minCostFactor(routerParameters.classCost(), a.mode), a.mode);
     }
 
     /** Routing thread: counts the planned route and picks the link searches worth asking for. */
@@ -1943,7 +1979,7 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         AccessPolicy policy = deps.policies().policyFor(a.player, snapshot,
             destinationRegions(a.player, a.destination, List.of(goal.get()), leg.target));
-        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters).withMode(a.mode);
         RoadFirstRule rule = links.config().roadFirst();
         double[] target = leg.target.clone();
         deps.routing().execute(() -> {
@@ -2123,7 +2159,7 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         AccessPolicy policy = deps.policies().policyFor(a.player, snapshot,
             destinationRegions(a.player, a.destination, List.of(goal.get()), leg.target));
-        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters).withMode(a.mode);
         deps.routing().execute(() -> {
             RouteResult result;
             try {
@@ -2553,7 +2589,7 @@ public final class NavigationService implements SiegeMatchObserver {
             destinationRegions(player, a.destination, a.goals, a.target));
         SnapPoint from = connectedStart(snapshot, feet, start.get(), a.goals);
         List<SnapPoint> to = connectedGoals(snapshot, from, a.goals, a.target, a.destination);
-        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters).withMode(a.mode);
         int generation = a.generation;
         WalkLinkPlanner planner = linkPlanner(a, snapshot, policy);
         deps.routing().execute(() -> {

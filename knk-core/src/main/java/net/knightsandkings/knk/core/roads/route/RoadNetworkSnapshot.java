@@ -325,33 +325,57 @@ public final class RoadNetworkSnapshot {
 
     /**
      * The routing cost factor of an edge: {@code classCost(class) × profile.costMultiplier ×
-     * edge.costMultiplier} (DESIGN §6.2 step 4). Edges without a profile use class factor 1.0.
+     * edge.costMultiplier} (DESIGN §6.2 step 4). Edges without a profile use class factor 1.0. This is
+     * {@link RouteMode#PREFERRED}, the default (off-road phase 4, #707).
      */
     public double costFactor(RoadEdge edge, Map<RoadClass, Double> classCost) {
-        double factor = edge.costMultiplier();
+        return costFactor(edge, classCost, RouteMode.DEFAULT);
+    }
+
+    /**
+     * Off-road phase 4 (#707, DESIGN § 5.4.2): the routing cost factor of an edge in a {@link RouteMode} -
+     * {@code shortest} 1.0, {@code efficient} the class cost, {@code preferred} today's
+     * {@code classCost × profile.costMultiplier × edge.costMultiplier}.
+     */
+    public double costFactor(RoadEdge edge, Map<RoadClass, Double> classCost, RouteMode mode) {
+        double profileMultiplier = 1.0;
+        double classFactor = 1.0;
         if (edge.profileId().isPresent()) {
             Profile p = profiles.get(edge.profileId().getAsInt());
             if (p != null) {
-                factor *= p.costMultiplier();
+                profileMultiplier = p.costMultiplier();
                 Double c = classCost.get(p.roadClass());
                 if (c != null) {
-                    factor *= c;
+                    classFactor = c;
                 }
             }
         }
-        return factor;
+        return mode.roadFactor(edge.costMultiplier(), profileMultiplier, classFactor);
     }
 
     /** {@code length × costFactor}: the cost of walking the whole edge. */
     public double edgeCost(RoadEdge edge, Map<RoadClass, Double> classCost) {
-        return edge.length() * costFactor(edge, classCost);
+        return edgeCost(edge, classCost, RouteMode.DEFAULT);
+    }
+
+    /** {@code length × costFactor} in a {@link RouteMode} (#707). */
+    public double edgeCost(RoadEdge edge, Map<RoadClass, Double> classCost, RouteMode mode) {
+        return edge.length() * costFactor(edge, classCost, mode);
     }
 
     /** The smallest cost factor of any edge (≥ 0); what keeps the A* heuristic admissible. */
     public double minCostFactor(Map<RoadClass, Double> classCost) {
+        return minCostFactor(classCost, RouteMode.DEFAULT);
+    }
+
+    /**
+     * The smallest cost factor of any edge in a {@link RouteMode} (#707, DESIGN § 5.4.4): the smallest multiplier in
+     * force, which keeps the A* heuristic admissible in every mode.
+     */
+    public double minCostFactor(Map<RoadClass, Double> classCost, RouteMode mode) {
         double min = Double.POSITIVE_INFINITY;
         for (RoadEdge edge : edges) {
-            min = Math.min(min, costFactor(edge, classCost));
+            min = Math.min(min, costFactor(edge, classCost, mode));
         }
         return edges.isEmpty() ? 1.0 : min;
     }
