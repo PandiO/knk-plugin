@@ -83,4 +83,33 @@ class BukkitNavWorldBlocksTest {
         assertTrue(BukkitNavWorld.blocksBody(slab(Slab.Type.TOP)), "a top slab at feet height stops a body");
         assertFalse(BukkitNavWorld.blocksBody(air()), "air");
     }
+
+    private static Block door(boolean open) {
+        org.bukkit.block.data.type.Door data = mock(org.bukkit.block.data.type.Door.class);
+        when(data.isOpen()).thenReturn(open);
+        Block block = mock(Block.class);
+        when(block.isPassable()).thenReturn(false);
+        when(block.getBlockData()).thenReturn(data);
+        return block;
+    }
+
+    private static Block trapdoor() {
+        org.bukkit.block.data.type.TrapDoor data = mock(org.bukkit.block.data.type.TrapDoor.class);
+        when(data.isOpen()).thenReturn(true);
+        Block block = mock(Block.class);
+        when(block.isPassable()).thenReturn(false);
+        when(block.getBlockData()).thenReturn(data);
+        return block;
+    }
+
+    @Test
+    void anOpenDoorIsPassedAClosedOneAndAnOpenTrapdoorAreNot() {
+        // link C1 (PandiO/knk-workspace#700): the keep tower's open door at 1405 104 -494
+        assertFalse(BukkitNavWorld.blocksBody(door(true)), "an open door's panel stands at the side");
+        assertTrue(BukkitNavWorld.passable(door(true)));
+        assertTrue(BukkitNavWorld.blocksBody(door(false)), "a closed door is a wall (the engine opens it on a leg)");
+        assertTrue(BukkitNavWorld.blocksBody(trapdoor()), "an open trapdoor's panel can lie across the way");
+        assertEquals(4.0, freeHeight(solid(), Map.of(1, door(true), 2, door(true))), 1e-9,
+            "an open doorway has its headroom");
+    }
 }

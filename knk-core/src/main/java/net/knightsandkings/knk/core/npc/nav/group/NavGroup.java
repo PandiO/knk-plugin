@@ -794,8 +794,9 @@ public final class NavGroup {
                 while (lineStart + lineAdded < points.size() && (lineBase + lineAdded <= index
                     || path.endArc() - path.arc(index) < wanted)) {
                     NavPoint linePoint = points.get(lineStart + lineAdded);
-                    if (elastic || plazaOptions() != null) {
-                        // a shaped point only where it stays on the walk (link B5, PandiO/knk-workspace#699)
+                    if ((elastic || plazaOptions() != null) && !follower.walked(lineStart + lineAdded)) {
+                        // a shaped point only where it stays on the walk (link B5, PandiO/knk-workspace#699); a cell of
+                        // a walk the walk search planned is taken as it is (link C1, PandiO/knk-workspace#700)
                         path.addShaped(ports.world(), shapedLinePoint(follower, lineStart + lineAdded, leaderFloorY),
                             linePoint, leaderFloorY);
                     } else {

@@ -88,8 +88,8 @@ public final class ScenarioNpcs {
         // others none, as in L3
         BukkitNavWorld world = rules == AccessRules.OPEN ? new BukkitNavWorld(null) : scene.services().npcRules();
         Consumer<String> logLine = line -> log.add(new LogLine(tick, line));
-        service = new NpcNavigationService(new NpcNavigationService.Ports(this::plan, this::prepare, world, metrics,
-            System::nanoTime, logLine, rules), 4);
+        service = new NpcNavigationService(withWalks(scene, new NpcNavigationService.Ports(this::plan, this::prepare,
+            world, metrics, System::nanoTime, logLine, rules)), 4);
         groups = new NavGroupService(new NavGroupService.Ports(service, world, rules, metrics,
             System::nanoTime, logLine));
         // bodies with collision on (link M7), as the plugin wires them
@@ -99,6 +99,24 @@ public final class ScenarioNpcs {
     }
 
     private final net.knightsandkings.knk.paper.npc.nav.BukkitCollisionPolicy collision;
+
+    /**
+     * Run the NPC scenarios with off-road legs in hops, as before link C1 (a system property for the before/after
+     * runs of PandiO/knk-workspace#700: {@code -Dknk.scenario.offRoadHops=true}); off by default.
+     */
+    public static final String OFF_ROAD_HOPS = "knk.scenario.offRoadHops";
+
+    /**
+     * The ports with the walk navigator's search for off-road legs (link C1), as the plugin wires them, with every cell
+     * open like the scenarios' local legs; without it when {@link #OFF_ROAD_HOPS} is set.
+     */
+    static NpcNavigationService.Ports withWalks(ScenarioScene scene, NpcNavigationService.Ports ports) {
+        if (Boolean.getBoolean(OFF_ROAD_HOPS)) {
+            return ports;
+        }
+        return ports.withWalks(new net.knightsandkings.knk.paper.npc.nav.NpcWalkPlanner(scene.services().npcWalks(),
+            net.knightsandkings.knk.paper.npc.nav.NpcWalkPlanner.AccessFor.OPEN, scene.services().plugin().getLogger()));
+    }
 
     /**
      * Starts NPC navigation on Citizens for a scene: fails the step when Citizens is not installed or not usable.

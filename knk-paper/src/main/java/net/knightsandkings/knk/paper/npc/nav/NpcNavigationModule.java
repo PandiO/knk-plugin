@@ -66,6 +66,10 @@ public final class NpcNavigationModule {
     private java.util.function.Supplier<net.knightsandkings.knk.core.regions.RegionDomainResolver> snapshotDomains = () -> null;
     private java.util.function.Supplier<net.knightsandkings.knk.core.gates.GateManager> snapshotGates = () -> null;
     private NavSnapshotTaker snapshots;
+    /** The walk navigator's parts and access for off-road legs (link C1); set after start. */
+    private java.util.function.Supplier<NpcWalkPlanner.Sources> walkSources = () -> null;
+    private java.util.function.Supplier<net.knightsandkings.knk.paper.navigation.walk.WalkAccessFactory> walkAccess =
+        () -> null;
 
     private NpcNavigationModule(JavaPlugin plugin, NpcNavigationConfig config,
                                 java.util.function.Supplier<RegionIds> regionIds) {
@@ -159,6 +163,16 @@ public final class NpcNavigationModule {
             java.util.function.Supplier<net.knightsandkings.knk.core.gates.GateManager> gates) {
         this.snapshotDomains = domains == null ? () -> null : domains;
         this.snapshotGates = gates == null ? () -> null : gates;
+    }
+
+    /**
+     * Link C1 (PandiO/knk-workspace#700): the walk navigator's parts and the walk access, so route following plans the
+     * off-road ends and walk-only trips with the walk search (asked for when route following is built; null: hops).
+     */
+    public void setWalkSources(java.util.function.Supplier<NpcWalkPlanner.Sources> sources,
+            java.util.function.Supplier<net.knightsandkings.knk.paper.navigation.walk.WalkAccessFactory> access) {
+        this.walkSources = sources == null ? () -> null : sources;
+        this.walkAccess = access == null ? () -> null : access;
     }
 
     public void stop() {
@@ -270,10 +284,18 @@ public final class NpcNavigationModule {
                 + "exit rules hold only where a route is planned");
         }
         NpcNavLog log = new NpcNavLog(plugin.getDataFolder().toPath(), logger);
-        service = new NpcNavigationService(new NpcNavigationService.Ports(nav::planRoadFor,
+        NpcNavigationService.Ports ports = new NpcNavigationService.Ports(nav::planRoadFor,
             new NpcLegPreparer(legs, walk.searches(), task -> Bukkit.getScheduler().runTask(plugin, task),
-                Bukkit::getWorld, logger), world, metrics, System::nanoTime, log::event, nav.accessRules()),
-            config.maxPlansInFlight(), config.ruleChecksPerTick());
+                Bukkit::getWorld, logger), world, metrics, System::nanoTime, log::event, nav.accessRules());
+        NpcWalkPlanner.Sources sources = walkSources.get();
+        net.knightsandkings.knk.paper.navigation.walk.WalkAccessFactory access = walkAccess.get();
+        if (sources != null && access != null) {
+            // link C1: off-road ends and walk-only trips with the walk search, walked like the road line
+            ports = ports.withWalks(new NpcWalkPlanner(sources, NpcWalkPlanner.AccessFor.of(access), logger));
+        } else {
+            logger.warning("[NPC] the walk navigator's parts are missing: off-road legs are walked in hops");
+        }
+        service = new NpcNavigationService(ports, config.maxPlansInFlight(), config.ruleChecksPerTick());
         // bodies with collision on (link M7): players' collision per NPC through Paper's collidable exemptions, and
         // whether a player sees a place for the teleport home
         collisionPolicy = new BukkitCollisionPolicy(CitizensBootstrap::entity).start(plugin);

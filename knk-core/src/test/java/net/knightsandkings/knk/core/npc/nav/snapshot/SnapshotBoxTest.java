@@ -48,4 +48,18 @@ class SnapshotBoxTest {
         assertThrows(IllegalArgumentException.class, () -> SnapshotBox.around(List.of()));
         assertThrows(IllegalArgumentException.class, () -> new SnapshotBox(new int[] {1, 0, 0}, new int[] {0, 0, 0}));
     }
+
+    @Test
+    void aRouteBoxCoversItsFromAndToAsWell() {
+        // link C1 (PandiO/knk-workspace#700): the tower route's road ends at 1409 84 -516, its goal is 1401 113 -502
+        List<NavPoint> line = List.of(new NavPoint("world", 1309, 50, -621), new NavPoint("world", 1409, 84, -516));
+        SnapshotBox box = SnapshotBox.aroundRoute(line, new NavPoint("world", 1279.5, 64, -620.5),
+            new NavPoint("world", 1401.5, 113, -502.5));
+        assertTrue(box.contains(1401, 113, -502), "the goal upstairs");
+        assertTrue(box.contains(1401, 113 + SnapshotBox.MARGIN_ABOVE, -502), "and the margin above it");
+        assertTrue(box.contains(1279 - SnapshotBox.MARGIN, 64, -620), "the start off the road, with its margin");
+        assertArrayEquals(SnapshotBox.around(line).min(), SnapshotBox.aroundRoute(line, null, null).min());
+        assertArrayEquals(SnapshotBox.around(line).max(), SnapshotBox.aroundRoute(line, null, null).max());
+        assertTrue(SnapshotBox.aroundRoute(List.of(), null, new NavPoint("world", 0, 64, 0)).contains(0, 64, 0));
+    }
 }

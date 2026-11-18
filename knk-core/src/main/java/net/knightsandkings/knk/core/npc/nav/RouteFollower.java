@@ -59,6 +59,11 @@ public final class RouteFollower {
     }
 
     private final List<NavPoint> line;
+    /**
+     * Per line point: whether it is a cell of a walk the walk search planned (link C1, PandiO/knk-workspace#700); null
+     * when none is. Such points are handed out as they are: no corridor shaping, no corner clearance, their own floor.
+     */
+    private final boolean[] walked;
     /** The junctions the line passes that may be plazas (link M5), each at its line point, in route order. */
     private final List<PlazaOnLine> plazas;
     /** Blocks along the line at each point. */
@@ -96,11 +101,49 @@ public final class RouteFollower {
      *                 {@link #PLAZA_ON_LINE} blocks from the line is left out)
      */
     public RouteFollower(List<NavPoint> roadLine, List<PlazaCrossing> plazas) {
+        this(roadLine, plazas, null);
+    }
+
+    /**
+     * As {@link #RouteFollower(List, List)}, with the points of {@code roadLine} that are cells of a walk the walk search
+     * planned (link C1): {@code walkedPoints[i]} for {@code roadLine.get(i)}; null for none. A point added between two
+     * walked points is walked too.
+     */
+    public RouteFollower(List<NavPoint> roadLine, List<PlazaCrossing> plazas, boolean[] walkedPoints) {
         Objects.requireNonNull(roadLine, "roadLine");
         if (roadLine.isEmpty()) {
             throw new IllegalArgumentException("a route needs at least one point");
         }
-        this.line = List.copyOf(HopPlanner.resampleKeepingCorners(roadLine, STEP));
+        if (walkedPoints != null && walkedPoints.length != roadLine.size()) {
+            throw new IllegalArgumentException("one walked flag per line point");
+        }
+        if (walkedPoints == null) {
+            this.line = List.copyOf(HopPlanner.resampleKeepingCorners(roadLine, STEP));
+            this.walked = null;
+        } else {
+            List<NavPoint> points = new ArrayList<>();
+            List<Boolean> flags = new ArrayList<>();
+            points.add(roadLine.get(0));
+            flags.add(walkedPoints[0]);
+            for (int i = 1; i < roadLine.size(); i++) {
+                List<NavPoint> piece = HopPlanner.resample(List.of(roadLine.get(i - 1), roadLine.get(i)), STEP);
+                for (int k = 0; k < piece.size(); k++) {
+                    NavPoint q = piece.get(k);
+                    NavPoint last = points.get(points.size() - 1);
+                    if (Math.abs(last.x() - q.x()) < 1e-6 && Math.abs(last.y() - q.y()) < 1e-6
+                        && Math.abs(last.z() - q.z()) < 1e-6) {
+                        continue;
+                    }
+                    points.add(q);
+                    flags.add(k == piece.size() - 1 ? walkedPoints[i] : walkedPoints[i - 1] && walkedPoints[i]);
+                }
+            }
+            this.line = List.copyOf(points);
+            this.walked = new boolean[flags.size()];
+            for (int i = 0; i < flags.size(); i++) {
+                walked[i] = flags.get(i);
+            }
+        }
         List<PlazaOnLine> onLine = new ArrayList<>();
         for (PlazaCrossing p : plazas == null ? List.<PlazaCrossing>of() : plazas) {
             int best = -1;
@@ -126,6 +169,11 @@ public final class RouteFollower {
             along[i] = along[i - 1] + Math.sqrt(sq(b.x() - a.x()) + sq(b.y() - a.y()) + sq(b.z() - a.z()));
         }
         this.corners = new CornerClearance(line);
+    }
+
+    /** Whether the line point at {@code index} is a cell of a walk the walk search planned (link C1). */
+    public boolean walked(int index) {
+        return walked != null && index >= 0 && index < walked.length && walked[index];
     }
 
     /** The corner clearance of this line (its turns). */
@@ -306,9 +354,15 @@ public final class RouteFollower {
         int lastZ = Integer.MIN_VALUE;
         boolean straightOn = start == lastSnapEnd && lastSnapY != Integer.MIN_VALUE;
         int refY = straightOn ? lastSnapY : npcFloorY;
+        boolean anyWalked = false;
         for (int i = start; i < end; i++) {
             NavPoint p = line.get(i);
-            NavPoint floor = HopPlanner.surfaceNear(world, p, refY);
+            // a walk search's cell stands on its own floor (link C1): no continuity snap onto another level
+            NavPoint floor = walked(i) ? NavGeometry.floorNear(world, p, (int) Math.round(p.y())) : null;
+            anyWalked |= walked(i);
+            if (floor == null) {
+                floor = HopPlanner.surfaceNear(world, p, refY);
+            }
             if (floor == null) {
                 if (i < end - 1 || !points.isEmpty()) {
                     continue; // over a drop with no walk beside it (#592): the chain below joins its neighbours
@@ -337,7 +391,8 @@ public final class RouteFollower {
         }
         int chokepoints = 0;
         List<PlazaCrossing> here = plazaBlocks > 0 ? plazasBetween(start, end) : List.of();
-        boolean shape = steering != null && points.size() >= 2
+        // a walk the walk search planned is walked as it is (link C1): pulled straight in 2D it would cut a spiral stair
+        boolean shape = steering != null && points.size() >= 2 && !anyWalked
             && (!steering.options().plazaOnly() || !here.isEmpty());
         if (shape) {
             // plaza lines only (a group's leader): from the block centres as today, only the plazas change
@@ -347,7 +402,7 @@ public final class RouteFollower {
             indexes = new ArrayList<>(shaped.lineIndexes());
             chokepoints = shaped.chokepoints();
         }
-        if (cornerClearance > 0) {
+        if (cornerClearance > 0 && !anyWalked) {
             points = corners.apply(world, points, indexes, cornerClearance);
         }
         points = WaypointChain.bridged(world, straightOn ? lastWaypoint : null, points);

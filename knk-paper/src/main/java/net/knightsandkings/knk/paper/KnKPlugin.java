@@ -282,6 +282,9 @@ public class KnKPlugin extends JavaPlugin {
     // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
     private net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService walkSnapshots;
     private java.util.concurrent.ExecutorService walkSearches;
+    /** Link C1 (PandiO/knk-workspace#700): the walk navigator's parts NPCs plan their off-road legs with; null when off. */
+    private net.knightsandkings.knk.paper.npc.nav.NpcWalkPlanner.Sources npcWalkSources;
+    private net.knightsandkings.knk.paper.navigation.walk.WalkAccessFactory walkAccessFactory;
     private net.knightsandkings.knk.paper.roads.RoadDirtyTracker roadDirtyTracker;
     private net.knightsandkings.knk.paper.roads.RoadBuildQueue roadBuildQueue;
     private net.knightsandkings.knk.paper.roads.RoadSurveyService roadSurveyService;
@@ -2095,11 +2098,16 @@ public class KnKPlugin extends JavaPlugin {
             t.setDaemon(true);
             return t;
         });
+        this.walkAccessFactory = net.knightsandkings.knk.paper.navigation.walk.WorldGuardWalkAccess.factory(access);
         var preparer = net.knightsandkings.knk.paper.navigation.walk.WalkLegPreparer.server(walkSnapshots,
-            net.knightsandkings.knk.paper.navigation.walk.WorldGuardWalkAccess.factory(access), navigation.walk(),
-            navigation.guidanceV2(), gateManager);
-        return new net.knightsandkings.knk.paper.navigation.NavigationService.Walk(preparer,
-            new net.knightsandkings.knk.core.roads.walk.WalkSearch(), walkSearches);
+            walkAccessFactory, navigation.walk(), navigation.guidanceV2(), gateManager);
+        var search = new net.knightsandkings.knk.core.roads.walk.WalkSearch();
+        // link C1: NPCs call the same capture, access and search for their off-road legs
+        this.npcWalkSources = new net.knightsandkings.knk.paper.npc.nav.NpcWalkPlanner.Sources(walkSnapshots,
+            world -> net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world),
+            net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService::of, navigation.walk(), search,
+            walkSearches, task -> org.bukkit.Bukkit.getScheduler().runTask(this, task), org.bukkit.Bukkit::getWorld);
+        return new net.knightsandkings.knk.paper.navigation.NavigationService.Walk(preparer, search, walkSearches);
     }
 
     /**
@@ -2866,7 +2874,7 @@ public class KnKPlugin extends JavaPlugin {
             // Scripted players (PandiO/knk-workspace#540)
             () -> cacheManager != null ? cacheManager.getUserCache() : null,
             () -> permissionsDataAccess, () -> menuService, () -> menuTemplatesDataAccess, this::getApiConnectivity,
-            () -> npcNavigation != null ? npcNavigation.rulesWorld() : null);
+            () -> npcNavigation != null ? npcNavigation.rulesWorld() : null, () -> npcWalkSources);
         var scenarioCommand = new net.knightsandkings.knk.paper.scenario.ScenarioCommand(this,
             net.knightsandkings.knk.paper.scenario.PaperScenarios.registry(),
             new net.knightsandkings.knk.paper.scenario.PaperScenarioHost(settings, services));
@@ -2934,6 +2942,8 @@ public class KnKPlugin extends JavaPlugin {
                     () -> regionTracker == null ? null : regionTracker.regionIds(), () -> navigationService);
                 // link B1 (PandiO/knk-workspace#670): /knk npc nav snapshot reads the domain cache and the gates
                 npcNavigation.setSnapshotSources(() -> regionDomainResolver, () -> gateManager);
+                // link C1 (PandiO/knk-workspace#700): off-road legs with the walk navigator's search
+                npcNavigation.setWalkSources(() -> npcWalkSources, () -> walkAccessFactory);
             } catch (RuntimeException | LinkageError e) {
                 getLogger().log(java.util.logging.Level.WARNING, "[NPC] navigation module failed to start", e);
             }
