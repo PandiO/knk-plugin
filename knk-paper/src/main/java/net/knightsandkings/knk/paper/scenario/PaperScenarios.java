@@ -23,6 +23,8 @@ import net.knightsandkings.knk.paper.scenario.scenarios.WalkTrailStairhouseScena
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupRealtimeEntryScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcExitDeniedLeaderScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupExitDeniedScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupGateFinishTripScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupNarrowsScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcLandingRanksScenario;
@@ -98,6 +100,9 @@ public final class PaperScenarios {
             .register(new NpcGroupAccessChangeScenario())
             // entry removed through realtime under a gate region (PandiO/knk-workspace#593)
             .register(new NpcGroupRealtimeEntryScenario())
+            // exit denied mid-trip, for an NPC alone and for a group half inside (PandiO/knk-workspace#701)
+            .register(new NpcExitDeniedLeaderScenario())
+            .register(new NpcGroupExitDeniedScenario())
             // the two spots of the developer's L3 retest in their real geometry (PandiO/knk-workspace#592)
             .register(new NpcLedgeCornerScenario())
             .register(new NpcLandingRanksScenario())

@@ -57,6 +57,7 @@ class PaperScenariosTest {
             "lootbox-switched-off-spawns-nothing", "npc-corners-line", "walk-trail-stairhouse", "walk-trail-cursor-stairhouse", "plaza-line-brink",
             "plaza-line-cinix-south-square", "plaza-line-cinix-northern-gate-square", "npc-corners-walk", "npc-stuck-ladder",
             "npc-group-narrows", "npc-group-gate-finish-trip", "npc-group-access-change", "npc-group-realtime-entry",
+            "npc-exit-denied-leader", "npc-group-exit-denied",
             "npc-ledge-corner",
             "npc-landing-ranks",
             "npc-walks-road-route", "npc-keeps-to-road-around-obstacle", "npc-group-keeps-spacing",
@@ -103,7 +104,7 @@ class PaperScenariosTest {
         CommandSender sender = mock(CommandSender.class);
 
         command.execute(sender, new String[] {"list"});
-        verify(sender).sendMessage(contains("Scenarios (59)"));
+        verify(sender).sendMessage(contains("Scenarios (61)"));
         verify(sender).sendMessage(contains("global-region-explosion"));
         verify(sender).sendMessage(contains("player-menu-click"));
     }

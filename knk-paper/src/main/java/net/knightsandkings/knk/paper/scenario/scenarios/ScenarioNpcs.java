@@ -87,6 +87,8 @@ public final class ScenarioNpcs {
         // sees them (PandiO/knk-workspace#668: a region query of their own hid that the module's was missing); the
         // others none, as in L3
         BukkitNavWorld world = rules == AccessRules.OPEN ? new BukkitNavWorld(null) : scene.services().npcRules();
+        this.rules = rules;
+        this.world = world;
         Consumer<String> logLine = line -> log.add(new LogLine(tick, line));
         service = new NpcNavigationService(withWalks(scene, new NpcNavigationService.Ports(this::plan, this::prepare,
             world, metrics, System::nanoTime, logLine, rules)), 4);
@@ -99,6 +101,9 @@ public final class ScenarioNpcs {
     }
 
     private final net.knightsandkings.knk.paper.npc.nav.BukkitCollisionPolicy collision;
+    /** The scenario's access rules and the world the NPC checks read regions from (the road's exit rule, #701). */
+    private final AccessRules rules;
+    private final BukkitNavWorld world;
 
     /**
      * Run the NPC scenarios with off-road legs in hops, as before link C1 (a system property for the before/after
@@ -294,7 +299,41 @@ public final class ScenarioNpcs {
                 }
             }
         }
+        RoadPlanner.RoadPlan noExit = exitBlocked(subject, line, crossed);
+        if (noExit != null) {
+            return CompletableFuture.completedFuture(noExit.withPlazas(plazas));
+        }
         return CompletableFuture.completedFuture(RoadPlanner.RoadPlan.found(line, crossed).withPlazas(plazas));
+    }
+
+    /**
+     * The road router's exit rule on the fake road (PandiO/knk-workspace#701; {@code DomainAvailability}'s "you may not
+     * leave"): an NPC standing in a region it may not leave gets BLOCKED when the line leaves that region, with the
+     * line as the partial route (the NPC side cuts it at the edge) and the rule asked again for the wake-up. Null
+     * otherwise, and always for the scenarios without rules of their own. Entry stays as before: the fake road finds
+     * its line, and the NPC side's checks keep the NPCs out.
+     */
+    private RoadPlanner.RoadPlan exitBlocked(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+                                             List<NavPoint> line, List<RoadPlanner.GateCrossing> crossed) {
+        if (rules == AccessRules.OPEN) {
+            return null;
+        }
+        java.util.Set<String> denied = rules.regionRule(subject).exitDenied();
+        if (denied.isEmpty()) {
+            return null;
+        }
+        for (NavPoint p : line) {
+            java.util.Set<String> at = world.regionsAt(p.world(), p.blockX(), p.blockY() + 1, p.blockZ());
+            for (String region : denied) {
+                if (!at.contains(region)) {
+                    return RoadPlanner.RoadPlan.blocked(line, "you may not leave " + region,
+                        new net.knightsandkings.knk.core.npc.nav.BlockingElement(
+                            net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind.DOMAIN, region, region, java.util.Set.of(),
+                            at), crossed, s -> rules.regionRule(s).exitDenied().contains(region));
+                }
+            }
+        }
+        return null;
     }
 
     private CompletableFuture<LocalLegPreparer.Prepared> prepare(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,

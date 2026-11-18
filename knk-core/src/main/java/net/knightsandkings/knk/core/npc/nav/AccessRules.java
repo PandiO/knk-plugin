@@ -32,6 +32,16 @@ public interface AccessRules {
      */
     Predicate<String> mayEnter(AccessSubject subject);
 
+    /**
+     * The entry and exit rules per region for a subject, judged from the regions it stands in (PandiO/knk-workspace#701):
+     * {@link #mayEnter} with the exit rule of the regions it stands in. By default the exits are those of the entry
+     * rule when it is a {@link RegionRule} (Paper's {@code NavigationAccess} answers with {@link DomainEntryRule}), else
+     * every exit is allowed.
+     */
+    default RegionRule regionRule(AccessSubject subject) {
+        return RegionRule.of(mayEnter(subject));
+    }
+
     /** Whether this gate door stops the subject now (closed, moving, jammed or locked, and not its to pass). */
     boolean gateBlocks(AccessSubject subject, int doorId);
 

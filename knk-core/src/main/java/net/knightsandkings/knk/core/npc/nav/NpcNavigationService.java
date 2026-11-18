@@ -1424,28 +1424,19 @@ public final class NpcNavigationService {
 
     /**
      * The partial route of a BLOCKED plan as far as the NPC may walk it now: cut before the first point in a region
-     * the current rules deny it (the router's partial route ends at a road node, which may lie past a district's
-     * edge), so the NPC waits at the edge and the recheck has nothing to object to.
+     * the current rules deny it, or outside a region it stands in and may not leave (PandiO/knk-workspace#701; the
+     * router's partial route ends at a road node, which may lie past a district's edge), so the NPC waits at the edge
+     * and the recheck has nothing to object to.
      */
     private List<NavPoint> allowedPart(Nav nav, NavPoint at, List<NavPoint> line) {
         if (line.isEmpty()) {
             return line;
         }
-        Set<String> here = regionsAtFeet(at);
-        Predicate<String> mayEnter = null;
-        Map<String, Boolean> verdicts = new HashMap<>();
+        StepCheck steps = steps(nav, at.world(), regionsAtFeet(at));
         List<NavPoint> points = HopPlanner.resampleKeepingCorners(line, RouteFollower.STEP);
         for (int i = 0; i < points.size(); i++) {
-            for (String region : regionsAtFloor(points.get(i))) {
-                if (here.contains(region)) {
-                    continue;
-                }
-                if (mayEnter == null) {
-                    mayEnter = ports.rules().mayEnter(subject(nav, at.world(), here));
-                }
-                if (!verdicts.computeIfAbsent(region, mayEnter::test)) {
-                    return i == 0 ? List.of() : points.subList(0, i);
-                }
+            if (!steps.allows(regionsAtFloor(points.get(i)))) {
+                return i == 0 ? List.of() : points.subList(0, i);
             }
         }
         return line;
@@ -2529,41 +2520,45 @@ public final class NpcNavigationService {
     }
 
     /**
-     * The trespass guard: a region the NPC stands in now and did not stand in at its last check was entered; the
-     * entry is judged by the current rules from the regions it came from. An availability event takes a fresh look
-     * first ({@link #onAvailabilityChanged}), so entries made before the plugin knew of a change are not counted.
-     * Independent of the planner and of the engine's block rules: it watches where NPCs really are. Must stay 0.
+     * The trespass guard: a region the NPC stands in now and did not stand in at its last check was entered, and one
+     * it stood in then and does not now was left (PandiO/knk-workspace#701); the step is judged by the current rules
+     * from the regions it came from. An availability event takes a fresh look first ({@link #onAvailabilityChanged}),
+     * so steps made before the plugin knew of a change are not counted. Independent of the planner and of the engine's
+     * block rules: it watches where NPCs really are. Must stay 0.
      */
     private boolean trespassed(Nav nav, NavPoint at, Set<String> here) {
         Set<String> before = nav.regions;
         nav.regions = here;
-        if (before == null) {
-            return false; // the first look at this NPC: nothing to compare with
+        if (before == null || before.equals(here)) {
+            return false; // the first look at this NPC (nothing to compare with), or no region entered or left
         }
-        Predicate<String> mayEnter = null;
+        RegionRule rule = ports.rules().regionRule(subject(nav, at.world(), before));
         boolean trespassed = false;
         for (String region : here) {
-            if (before.contains(region)) {
-                continue;
+            if (!before.contains(region) && !rule.test(region)) {
+                trespassed |= trespass(nav, at, new RegionRule.Denied(region, false));
             }
-            if (mayEnter == null) {
-                mayEnter = ports.rules().mayEnter(subject(nav, at.world(), before));
-            }
-            if (!mayEnter.test(region)) {
-                trespassed = true;
-                ports.metrics().count(Event.TRESPASS);
-                ports.log().accept(String.format(Locale.ROOT, "TRESPASS %s entered %s at %d %d %d (%s)",
-                    nav.mover.name(), region, at.blockX(), at.blockY(), at.blockZ(),
-                    nav.onTrail ? "on the road line" : "on a local leg"));
+        }
+        for (String region : before) {
+            if (!here.contains(region) && !rule.mayLeave(region)) {
+                trespassed |= trespass(nav, at, new RegionRule.Denied(region, true));
             }
         }
         return trespassed;
     }
 
+    private boolean trespass(Nav nav, NavPoint at, RegionRule.Denied denied) {
+        ports.metrics().count(Event.TRESPASS);
+        ports.log().accept(String.format(Locale.ROOT, "TRESPASS %s %s at %d %d %d (%s)", nav.mover.name(),
+            denied.verb(), at.blockX(), at.blockY(), at.blockZ(), nav.onTrail ? "on the road line" : "on a local leg"));
+        return true;
+    }
+
     /**
      * The first thing on the NPC's way ahead that the current rules deny it, judged from the regions it stands in:
-     * a region ({@code region <id>}) on the rest of the engine's path, the hops, the route line or the tail, or a
-     * gate door ({@code gate <id>}) the route still has to pass. Null when the way is free. {@code onlyDoors}
+     * a region it may not enter ({@code region <id>}) or a region it stands in and may not leave ({@code exit <id>},
+     * PandiO/knk-workspace#701) on the rest of the engine's path, the hops, the route line or the tail, or a gate door
+     * ({@code gate <id>}) the route still has to pass. Null when the way is free. {@code onlyDoors}
      * non-null: a gate event - only those doors are asked about.
      */
     private String deniedAhead(Nav nav, NavPoint at, Set<String> here, AccessSubject subject, Set<Integer> onlyDoors) {
@@ -2580,8 +2575,7 @@ public final class NpcNavigationService {
         if (onlyDoors != null) {
             return null;
         }
-        Predicate<String> mayEnter = null;
-        Map<String, Boolean> verdicts = new HashMap<>();
+        StepCheck steps = new StepCheck(here, () -> ports.rules().regionRule(subject));
         List<Set<String>> ahead = new java.util.ArrayList<>();
         if (!nav.onTrail) {
             // a K&K local leg's own waypoints (link M6), else the engine's path
@@ -2602,16 +2596,9 @@ public final class NpcNavigationService {
             ahead.add(regionsAtFloor(hop));
         }
         for (Set<String> regions : ahead) {
-            for (String region : regions) {
-                if (here.contains(region)) {
-                    continue; // a region the NPC is in is not entered
-                }
-                if (mayEnter == null) {
-                    mayEnter = ports.rules().mayEnter(subject);
-                }
-                if (!verdicts.computeIfAbsent(region, mayEnter::test) && !nav.tolerated.contains("region " + region)) {
-                    return "region " + region;
-                }
+            RegionRule.Denied denied = steps.denied(regions);
+            if (denied != null && !nav.tolerated.contains(denied.key())) {
+                return denied.key();
             }
         }
         return null;
@@ -2645,6 +2632,11 @@ public final class NpcNavigationService {
         return new NpcAccessSubject(nav.mover.name(), nav.profile, world, regions);
     }
 
+    /** Steps from {@code here} under the current rules, entries and exits (PandiO/knk-workspace#701). */
+    private StepCheck steps(Nav nav, String world, Set<String> here) {
+        return new StepCheck(here, () -> ports.rules().regionRule(subject(nav, world, here)));
+    }
+
     // ==================== stuck: spells and the recovery ladder (4b.2 items 6 and 7) ====================
 
     /** One footstep and the fall check, every few ticks while the NPC moves. */
@@ -2675,20 +2667,12 @@ public final class NpcNavigationService {
         return aim == null ? new double[] {0, 0} : new double[] {aim.x() - at.x(), aim.z() - at.z()};
     }
 
-    /** Whether the current rules let the NPC stand at a feet position: every region there it is not in may be entered. */
+    /**
+     * Whether the current rules let the NPC stand at a feet position: every region there it is not in may be entered,
+     * and every region it is in and may not leave is there too (PandiO/knk-workspace#701).
+     */
     private boolean mayStand(Nav nav, NavPoint here, NavPoint feet) {
-        Set<String> now = regionsAtFeet(here);
-        Set<String> there = regionsAtFeet(feet);
-        if (now.containsAll(there)) {
-            return true;
-        }
-        Predicate<String> mayEnter = ports.rules().mayEnter(subject(nav, here.world(), now));
-        for (String region : there) {
-            if (!now.contains(region) && !mayEnter.test(region)) {
-                return false;
-            }
-        }
-        return true;
+        return steps(nav, here.world(), regionsAtFeet(here)).allows(regionsAtFeet(feet));
     }
 
     /**
