@@ -1496,6 +1496,10 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 sender.sendMessage(RoadMessages.field("plaza lines", plazaLines));
             }
             sendWalkMeasurements(sender, nav.walkMeasurementLines(WALK_RECENT));
+            for (String line : nav.walkLinkStatusLines()) { // off-road phase 2 (#705), with navigation.walk-links on
+                int colon = line.indexOf(": ");
+                sender.sendMessage(RoadMessages.field(line.substring(0, colon), line.substring(colon + 2)));
+            }
         }
         LiveEdgeTags tags = liveTags.get();
         if (tags != null) {

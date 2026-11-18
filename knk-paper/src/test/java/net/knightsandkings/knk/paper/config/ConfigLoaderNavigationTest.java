@@ -188,7 +188,49 @@ class ConfigLoaderNavigationTest {
         assertTrue(curve.getMessage().contains("plaza-curve-clearance"), curve.getMessage());
     }
 
-    /** A navigation section with none of the plaza-line keys. */
+    @Test
+    void theWalkLinkKeysAreInConfigYmlOffWithTheDesignDefaultsAndAreChecked() throws Exception {
+        // off-road phase 2 (#705, DESIGN § 5.2, O28): walk-links off, range 40, ratio 2.0, TTL and retry 600 s; road-first
+        // share 0.6 and max ratio 1.5 (agent defaults for the developer to confirm)
+        YamlConfiguration bundled = bundledConfig();
+        for (String key : List.of("walk-links", "walk-link-range", "walk-link-ratio", "walk-link-ttl-seconds",
+            "walk-link-retry-seconds", "walk-link-searches-per-route", "road-first-share", "road-first-max-ratio")) {
+            assertTrue(bundled.contains("navigation." + key), key);
+        }
+        NavigationConfig loaded = ConfigLoader.load(bundled).navigation();
+        assertEquals(new NavigationConfig.WalkLinksConfig(false, 40, 2.0, 600, 600, 4, 0.6, 1.5), loaded.walkLinks());
+        assertEquals(NavigationConfig.WalkLinksConfig.defaults(), loaded.walkLinks());
+        assertEquals(NavigationConfig.WalkLinksConfig.defaults(), new YamlNavigation().missing().walkLinks(),
+            "a config.yml without the keys: off");
+        assertEquals(loaded.walkLinks(), NavigationConfig.defaults().walkLinks());
+        assertEquals(48, loaded.maxSnapDistance(), "max-snap-distance is not changed by phase 2");
+
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.walk-links", true);
+        yaml.set("navigation.walk-link-range", 30);
+        yaml.set("navigation.walk-link-ratio", 2.5);
+        yaml.set("navigation.walk-link-ttl-seconds", 120);
+        yaml.set("navigation.walk-link-retry-seconds", 60);
+        yaml.set("navigation.walk-link-searches-per-route", 2);
+        yaml.set("navigation.road-first-share", 0.7);
+        yaml.set("navigation.road-first-max-ratio", 1.2);
+        NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+        navigation.validate();
+        assertEquals(new NavigationConfig.WalkLinksConfig(true, 30, 2.5, 120, 60, 2, 0.7, 1.2), navigation.walkLinks());
+        assertEquals(navigation.walkLinks(), navigation.withGuidanceV2(true).withPlazaLines(
+            NavigationConfig.PlazaLinesConfig.defaults()).walkLinks());
+
+        for (Object[] bad : new Object[][] {{"walk-link-range", 1}, {"walk-link-ratio", 1.0}, {"walk-link-ttl-seconds", 0},
+            {"walk-link-searches-per-route", 33}, {"road-first-share", 1.5}, {"road-first-max-ratio", 0.5}}) {
+            YamlConfiguration wrong = new YamlConfiguration();
+            wrong.set("navigation." + bad[0], bad[1]);
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                ConfigLoader.loadNavigation(wrong.getConfigurationSection("navigation"))::validate);
+            assertTrue(e.getMessage().contains((String) bad[0]), e.getMessage());
+        }
+    }
+
+        /** A navigation section with none of the plaza-line keys. */
     private static final class YamlNavigation {
         NavigationConfig missing() {
             YamlConfiguration yaml = new YamlConfiguration();

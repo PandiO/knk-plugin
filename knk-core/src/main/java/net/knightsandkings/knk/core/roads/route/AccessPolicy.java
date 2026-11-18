@@ -16,4 +16,12 @@ public interface AccessPolicy {
     AccessPolicy ALL_OPEN = edge -> EdgeVerdict.open();
 
     EdgeVerdict check(RoadEdge edge);
+
+    /**
+     * Off-road navigation phase 2 (#705, DESIGN § 5.2.4): whether a walk link's tags (the regions and gate doors its
+     * path passes) let this player take it, judged like a road edge with those tags ({@link WalkLink#tagsEdge()}).
+     */
+    default EdgeVerdict checkWalkLink(WalkLink link) {
+        return check(link.tagsEdge());
+    }
 }

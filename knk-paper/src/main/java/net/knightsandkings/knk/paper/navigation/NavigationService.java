@@ -66,6 +66,13 @@ import net.knightsandkings.knk.core.roads.route.RouteResult;
 import net.knightsandkings.knk.core.roads.route.RouterParameters;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
 import net.knightsandkings.knk.core.roads.route.Snapper;
+import net.knightsandkings.knk.core.roads.links.RoadFirstRule;
+import net.knightsandkings.knk.core.roads.links.WalkLinkCache;
+import net.knightsandkings.knk.core.roads.links.WalkLinkCandidates;
+import net.knightsandkings.knk.core.roads.links.WalkLinkCounters;
+import net.knightsandkings.knk.core.roads.links.WalkLinkPlanner;
+import net.knightsandkings.knk.core.roads.route.WalkLink;
+import net.knightsandkings.knk.core.roads.route.WalkLinkSource;
 import net.knightsandkings.knk.core.roads.walk.WalkGoal;
 import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
 import net.knightsandkings.knk.core.roads.walk.WalkPath;
@@ -371,6 +378,10 @@ public final class NavigationService implements SiegeMatchObserver {
         /** Off-road phase 7 step 2 (#712): the route the plaza trail below was made for, and that trail. */
         Route plazaRoute;
         net.knightsandkings.knk.core.navigation.PlazaTrail plazaTrail;
+        /** Off-road phase 2 (#705): link searches this navigation asked for that have not answered yet. */
+        int linkSearches;
+        /** ... and whether one of them found a link (a better route is asked for when the last one answers). */
+        boolean linkFound;
 
         Active(Player player, Destination destination, long startedTick) {
             this.player = player;
@@ -1629,7 +1640,369 @@ public final class NavigationService implements SiegeMatchObserver {
                 return; // the straight line stays until the road route is known
             }
         }
+        if (walkLinks != null && result != null && result.isFound() && !a.roadsTried && leg == a.leg) {
+            // off-road phase 2 (#705), the developer's road-first wish: direct mode asks once whether a road carries most
+            // of the way; the walk path stays drawn as the straight line would (PENDING) until the answer is in
+            a.roadsTried = true;
+            if (tryRoadFirst(a, leg, generation, result.path().orElseThrow().length(),
+                () -> adoptWalkResult(a, leg, result, partial, shaped))) {
+                return;
+            }
+        }
         adoptWalkResult(a, leg, result, partial, shaped);
+    }
+
+    // ==================== walk links and mixed routes (off-road phase 2, #705) ====================
+
+    /**
+     * Main thread: the regions and gate doors a walk link's path passes (its tags for the access policy, DESIGN § 5.2.3).
+     * Paper: WorldGuard regions at the path's points, the gate cells' doors.
+     */
+    @FunctionalInterface
+    public interface LinkTagger {
+        /** @param floorPoints the path in the network's convention (floor block positions) */
+        Tags tags(World world, List<double[]> floorPoints);
+
+        /** In path order, without repeats. */
+        record Tags(List<String> regionIds, List<Integer> gateDoorIds) {
+            public static final Tags NONE = new Tags(List.of(), List.of());
+
+            public Tags {
+                regionIds = List.copyOf(regionIds);
+                gateDoorIds = List.copyOf(gateDoorIds);
+            }
+        }
+    }
+
+    /**
+     * What walk links need ({@code navigation.walk-links} on): the cache (also the block-change hook's target), the
+     * counters and the tagger. Absent: routes, trails and sessions exactly as before.
+     */
+    public record WalkLinks(NavigationConfig.WalkLinksConfig config, WalkLinkCache cache, WalkLinkCounters counters,
+                            LinkTagger tagger) {
+        public WalkLinks {
+            Objects.requireNonNull(config, "config");
+            Objects.requireNonNull(cache, "cache");
+            Objects.requireNonNull(counters, "counters");
+            tagger = tagger == null ? (world, points) -> LinkTagger.Tags.NONE : tagger;
+        }
+    }
+
+    /** A link search waiting for a free slot. */
+    private record LinkJob(Active a, RoadNetworkSnapshot snapshot, WalkLinkSource.Candidate candidate,
+                           WalkLinkCache.Key key) {
+    }
+
+    /** At most this many link searches wait; beyond, a wanted link is skipped (dropped first under load, § 9.3.4). */
+    static final int LINK_QUEUE_MAX = 32;
+    /** A link's walk search counts as arrived within this many blocks of the To node. */
+    static final double LINK_ARRIVE = 1.5;
+
+    /** Off-road phase 2 (#705); null with {@code navigation.walk-links} off. */
+    private volatile WalkLinks walkLinks;
+    /** Candidates per world for its current snapshot (routing threads). */
+    private final Map<String, WalkLinkCandidates> linkCandidates = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.ArrayDeque<LinkJob> linkQueue = new java.util.ArrayDeque<>();
+    private int linkSearchesRunning;
+
+    /**
+     * Turns walk links on ({@code navigation.walk-links}, before the first navigation; KnKPlugin) or off (null). Needs walk
+     * paths ({@code navigation.walk.enabled}); without them it stays off.
+     */
+    public void setWalkLinks(WalkLinks links) {
+        this.walkLinks = links;
+    }
+
+    /** The walk links, when on. */
+    public Optional<WalkLinks> walkLinks() {
+        return Optional.ofNullable(walkLinks);
+    }
+
+    /** The candidates of a snapshot, made once per snapshot (any thread). */
+    WalkLinkCandidates candidatesFor(RoadNetworkSnapshot snapshot, NavigationConfig.WalkLinksConfig config) {
+        String world = snapshot.world().toLowerCase(Locale.ROOT);
+        WalkLinkCandidates known = linkCandidates.get(world);
+        if (known != null && known.snapshot() == snapshot) {
+            return known;
+        }
+        WalkLinkCandidates fresh = new WalkLinkCandidates(snapshot, config.range(), config.ratio());
+        linkCandidates.put(world, fresh);
+        return fresh;
+    }
+
+    /** Main thread: the request's link planner, or null with walk links (or walk paths) off. */
+    private WalkLinkPlanner linkPlanner(Active a, RoadNetworkSnapshot snapshot, AccessPolicy policy) {
+        WalkLinks links = walkLinks;
+        if (links == null || !walkEnabled()) {
+            return null;
+        }
+        return new WalkLinkPlanner(candidatesFor(snapshot, links.config()), links.cache(), snapshot.world(),
+            a.player.getUniqueId().toString(), policy, snapshot.minCostFactor(routerParameters.classCost()));
+    }
+
+    /** Routing thread: counts the planned route and picks the link searches worth asking for. */
+    private List<WalkLinkPlanner.Wanted> wantedLinks(WalkLinkPlanner planner, RouteResult result) {
+        WalkLinks links = walkLinks;
+        if (links == null) {
+            return List.of();
+        }
+        int taken = result.routeToGuide().map(r -> r.walkLinks().size()).orElse(0);
+        links.counters().routePlanned(planner.offeredCount(), taken);
+        double cost = result.isFound() ? result.route().cost() : Double.POSITIVE_INFINITY;
+        List<WalkLinkPlanner.Wanted> wanted = planner.wanted(links.config().searchesPerRoute(), cost);
+        links.counters().wanted(wanted.size());
+        return wanted;
+    }
+
+    /** Main thread: queues the wanted link searches of a navigation (one per candidate: the cache claims it). */
+    private void requestLinks(Active a, RoadNetworkSnapshot snapshot, List<WalkLinkPlanner.Wanted> wanted) {
+        WalkLinks links = walkLinks;
+        if (links == null || !walkEnabled() || active.get(a.player.getUniqueId()) != a) {
+            return;
+        }
+        for (WalkLinkPlanner.Wanted w : wanted) {
+            WalkLinkCache.Key key = new WalkLinkCache.Key(snapshot.world(), a.player.getUniqueId().toString(),
+                w.candidate().id());
+            if (linkQueue.size() >= LINK_QUEUE_MAX) {
+                links.counters().skippedUnderLoad();
+                continue;
+            }
+            if (!links.cache().claim(key)) {
+                continue; // searched already, or being searched
+            }
+            a.linkSearches++;
+            linkQueue.add(new LinkJob(a, snapshot, w.candidate(), key));
+        }
+        pumpLinks();
+    }
+
+    /**
+     * Main thread: starts queued link searches while fewer than {@code walk.max-concurrent-searches - 1} run (at least
+     * one), so a walk leg always finds a free walk thread (link searches share the pool and give way, § 9.3.4).
+     */
+    private void pumpLinks() {
+        WalkLinks links = walkLinks;
+        int limit = Math.max(1, deps.config().walk().maxConcurrentSearches() - 1);
+        while (links != null && linkSearchesRunning < limit && !linkQueue.isEmpty()) {
+            LinkJob job = linkQueue.poll();
+            if (active.get(job.a().player.getUniqueId()) != job.a()) {
+                links.cache().release(job.key());
+                continue; // the navigation ended meanwhile
+            }
+            linkSearchesRunning++;
+            runLink(links, job);
+        }
+    }
+
+    /** Main thread: capture and access as for a walk leg, the search on the walk executor, the answer back here. */
+    private void runLink(WalkLinks links, LinkJob job) {
+        Active a = job.a();
+        RoadNetworkSnapshot snapshot = job.snapshot();
+        Optional<net.knightsandkings.knk.core.domain.roads.RoadNode> from = snapshot.node(job.candidate().from());
+        Optional<net.knightsandkings.knk.core.domain.roads.RoadNode> to = snapshot.node(job.candidate().to());
+        if (from.isEmpty() || to.isEmpty()) {
+            linkAnswered(links, job, null, null);
+            return;
+        }
+        double[] fromFloor = from.get().position();
+        double[] toFloor = to.get().position();
+        double[] feet = {fromFloor[0] + 0.5, fromFloor[1] + 1, fromFloor[2] + 0.5};
+        Walk walk = deps.walk();
+        CompletableFuture<Supplier<WalkRequest>> capture;
+        try {
+            // no destination regions: the link is shared by this player's routes to any destination; the access policy
+            // judges its regions at every route (the "no way out" rule included)
+            capture = walk.preparer().prepare(a.player, feet, toFloor,
+                WalkGoal.within(toFloor[0], toFloor[1], toFloor[2], LINK_ARRIVE), null);
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.FINE, "[Navigation] Walk link capture failed", e);
+            links.counters().notCaptured();
+            linkAnswered(links, job, null, null);
+            return;
+        }
+        capture.whenComplete((request, error) -> {
+            if (error != null || request == null) {
+                links.counters().notCaptured();
+                linkAnswered(links, job, null, null);
+                return;
+            }
+            try {
+                walk.searches().execute(() -> {
+                    WalkResult result;
+                    long started = System.nanoTime();
+                    try {
+                        result = walk.pathfinder().find(request.get());
+                    } catch (RuntimeException e) {
+                        deps.logger().log(Level.FINE, "[Navigation] Walk link search failed", e);
+                        result = null;
+                    }
+                    links.counters().searched(System.nanoTime() - started, result == null ? 0 : result.expansions());
+                    WalkResult delivered = result;
+                    deps.mainThread().execute(() -> linkAnswered(links, job, delivered, new double[][] {fromFloor, toFloor}));
+                });
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                linkAnswered(links, job, null, null); // shutting down
+            }
+        });
+    }
+
+    /**
+     * Main thread: a link search answered (null: none ran). Found: tagged and cached; no way: "none" for
+     * {@code walk-link-retry-seconds}; no search: the key is free again. When the navigation's last search answered and
+     * one found a link, the session asks for a better route (an improvement: kept unless clearly shorter).
+     */
+    private void linkAnswered(WalkLinks links, LinkJob job, WalkResult result, double[][] ends) {
+        linkSearchesRunning = Math.max(0, linkSearchesRunning - 1);
+        Active a = job.a();
+        boolean found = false;
+        if (result == null) {
+            links.cache().release(job.key());
+        } else if (result.isFound() && ends != null) {
+            WalkPath path = result.path().orElseThrow();
+            List<double[]> points = path.points();
+            List<double[]> floor = new ArrayList<>(points.size());
+            points.forEach(p -> floor.add(new double[] {p[0] - 0.5, p[1], p[2] - 0.5}));
+            LinkTagger.Tags tags;
+            try {
+                tags = links.tagger().tags(a.player.getWorld(), floor);
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.FINE, "[Navigation] Walk link tags failed; link dropped", e);
+                tags = null;
+            }
+            if (tags != null) {
+                WalkLink link = WalkLink.ofWalkPath(job.candidate().id(), job.snapshot().world(), ends[0], ends[1], points,
+                    path.length(), path.cost(), tags.regionIds(), tags.gateDoorIds());
+                links.cache().putFound(job.key(), link);
+                found = true;
+            } else {
+                links.cache().release(job.key());
+            }
+        } else {
+            links.cache().putNone(job.key());
+        }
+        if (active.get(a.player.getUniqueId()) == a) {
+            a.linkSearches = Math.max(0, a.linkSearches - 1);
+            a.linkFound |= found;
+            if (a.linkSearches == 0 && a.linkFound) {
+                a.linkFound = false;
+                if (a.session != null && a.snapshot == job.snapshot()) {
+                    links.counters().improvementAsked();
+                    apply(a, a.session.onWalkLinksFound(deps.tick().getAsLong()));
+                }
+            }
+        }
+        pumpLinks();
+    }
+
+    /**
+     * D13 for walk links (#705): a link ahead of the player whose tags the policy now blocks (a gate on it closed)
+     * re-routes like a blocked edge. True when it did.
+     */
+    private boolean recheckLinks(Active a, Route route, AccessPolicy policy, double travelled, long now) {
+        for (Route.WalkLinkStretch w : route.walkLinks()) {
+            if (w.polylineTo() <= travelled) {
+                continue;
+            }
+            EdgeVerdict verdict = policy.checkWalkLink(w.link());
+            if (verdict.isBlocked()) {
+                apply(a, a.session.onElementBlocked(verdict, now));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The developer's road-first wish (#698, 2026-11-18; {@link RoadFirstRule}): direct mode found one walk path of
+     * {@code walkLength} blocks; the road route from the road nearest the player to the road nearest the target is
+     * asked for once, and taken - as a routed navigation whose ends are walk legs - when the road carries
+     * {@code road-first-share} of the way at no more than {@code road-first-max-ratio} times the walk. False when no road
+     * is near enough (then the walk path is adopted at once); else {@code otherwise} runs on the main thread when the
+     * walk path wins. With {@code navigation.walk-links} off this is never called.
+     */
+    private boolean tryRoadFirst(Active a, DirectLeg leg, int generation, double walkLength, Runnable otherwise) {
+        WalkLinks links = walkLinks;
+        RoadNetworkSnapshot snapshot = a.snapshot;
+        if (links == null || snapshot == null || snapshot.isEmpty()) {
+            return false;
+        }
+        Location feet = a.player.getLocation();
+        double px = feet.getX(), pFloorY = feet.getY() - 1, pz = feet.getZ();
+        Optional<SnapPoint> start = snapStart(snapshot, px, pFloorY, pz, null);
+        Optional<SnapPoint> goal = new Snapper(snapshot, destinationParameters).snapFloor(leg.target[0], leg.target[1],
+            leg.target[2]);
+        if (start.isEmpty() || goal.isEmpty()) {
+            return false;
+        }
+        SnapPoint from = connectedStart(snapshot, feet, start.get(), List.of(goal.get()));
+        List<SnapPoint> to = connectedGoals(snapshot, from, List.of(goal.get()), leg.target,
+            Destination.point(a.destination.name(), a.destination.world(), 0, 0, 0));
+        double[] f = from.point();
+        if (to.stream().allMatch(g -> distance(f[0], f[1], f[2], g.point()) <= sessionParameters.arriveDistance())) {
+            return false; // the player and the target are nearest the same bit of road: nothing for the road to carry
+        }
+        AccessPolicy policy = deps.policies().policyFor(a.player, snapshot,
+            destinationRegions(a.player, a.destination, List.of(goal.get()), leg.target));
+        RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
+        RoadFirstRule rule = links.config().roadFirst();
+        double[] target = leg.target.clone();
+        deps.routing().execute(() -> {
+            RouteResult result;
+            try {
+                result = new AStarRouter(snapshot).route(request);
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[Navigation] Road-first routing failed for " + a.player.getName(), e);
+                result = RouteResult.noRoute();
+            }
+            RouteResult delivered = result;
+            deps.mainThread().execute(() -> {
+                if (active.get(a.player.getUniqueId()) != a || a.leg != leg || leg.generation != generation) {
+                    return;
+                }
+                if (!delivered.isFound()) {
+                    otherwise.run();
+                    return;
+                }
+                Route route = delivered.route();
+                double[] rs = route.start().point();
+                double[] re = route.end().point();
+                Location now = a.player.getLocation();
+                RoadFirstRule.Decision decision = rule.decide(walkLength,
+                    distance(now.getX(), now.getY() - 1, now.getZ(), rs), route.length(),
+                    distance(re[0], re[1], re[2], target));
+                links.counters().roadFirst(decision.useRoad());
+                if (deps.logger().isLoggable(Level.FINE)) {
+                    deps.logger().fine("[Navigation] Road-first for " + a.player.getName() + ": " + decision.describe());
+                }
+                if (!decision.useRoad()) {
+                    otherwise.run();
+                    return;
+                }
+                a.player.sendMessage(NavigationMessages.roadFirst(a.destination.name()));
+                dropLeg(a);
+                a.leg = null;
+                a.goals = to;
+                a.target = target;
+                long tick = deps.tick().getAsLong();
+                a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, tick,
+                    deps.config().cursorParameters());
+                a.session.start(); // its first computation is this one: the result is fed in below
+                apply(a, a.session.onRouteResult(delivered, tick));
+            });
+        });
+        return true;
+    }
+
+    /** {@code /knk road status}: the walk-link lines (#705); empty with walk links off. */
+    public List<String> walkLinkStatusLines() {
+        WalkLinks links = walkLinks;
+        if (links == null) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>(links.counters().lines(links.cache().counters()));
+        out.add(String.format(Locale.ROOT, "walk link queue: %d running, %d waiting", linkSearchesRunning,
+            linkQueue.size()));
+        return out;
     }
 
     // ==================== shaped walk trails (off-road phase 6.1, #710) ====================
@@ -2182,16 +2555,30 @@ public final class NavigationService implements SiegeMatchObserver {
         List<SnapPoint> to = connectedGoals(snapshot, from, a.goals, a.target, a.destination);
         RouteRequest request = RouteRequest.of(from, to, policy, routerParameters);
         int generation = a.generation;
+        WalkLinkPlanner planner = linkPlanner(a, snapshot, policy);
         deps.routing().execute(() -> {
             RouteResult result;
+            List<WalkLinkPlanner.Wanted> wanted = List.of();
             try {
-                result = new AStarRouter(snapshot).routeOrExplain(request);
+                if (planner == null) {
+                    result = new AStarRouter(snapshot).routeOrExplain(request);
+                } else {
+                    // off-road phase 2 (#705): the A* may take cached walk links; the unsearched ones worth a search
+                    result = new AStarRouter(snapshot).routeOrExplain(request, planner);
+                    wanted = wantedLinks(planner, result);
+                }
             } catch (RuntimeException e) {
                 deps.logger().log(Level.WARNING, "[Navigation] Routing failed for " + player.getName(), e);
                 result = RouteResult.noRoute();
             }
             RouteResult delivered = result;
-            deps.mainThread().execute(() -> deliver(a, generation, delivered));
+            List<WalkLinkPlanner.Wanted> searches = wanted;
+            deps.mainThread().execute(() -> {
+                deliver(a, generation, delivered);
+                if (!searches.isEmpty()) {
+                    requestLinks(a, snapshot, searches);
+                }
+            });
         });
     }
 
@@ -2506,6 +2893,9 @@ public final class NavigationService implements SiegeMatchObserver {
         for (int i = 0; i < route.steps().size(); i++) {
             Route.Step step = route.steps().get(i);
             double stepLength = Math.abs(step.exitAlong() - step.entryAlong());
+            if (route.hasWalkLinks()) {
+                stepStart = route.stepPolylineStart(i); // phase 2 (#705): walk links lie between the steps
+            }
             double stepEnd = stepStart + stepLength;
             if (stepEnd <= travelled) {
                 stepStart = stepEnd;
@@ -2518,6 +2908,9 @@ public final class NavigationService implements SiegeMatchObserver {
                 return;
             }
             stepStart = stepEnd;
+        }
+        if (route.hasWalkLinks() && recheckLinks(a, route, policy, travelled, now)) {
+            return;
         }
         Optional<BlockedExplainer.Explanation> why = a.session.explanation();
         if (why.isPresent() && !policy.check(why.get().blockedEdge()).isBlocked()) {
@@ -2535,6 +2928,10 @@ public final class NavigationService implements SiegeMatchObserver {
     /** A gate changed state (R4 listener, hopped to the main thread by the caller). */
     public void onGateChanged(int doorId) {
         notifyRuleListeners(listener -> listener.gateChanged(doorId));
+        WalkLinks links = walkLinks;
+        if (links != null) {
+            links.cache().dropNone(null); // phase 2 (#705): a gate that opened may let a link through
+        }
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (a.direct()) {
@@ -2548,7 +2945,9 @@ public final class NavigationService implements SiegeMatchObserver {
                 continue;
             }
             boolean onRoute = a.route().map(r -> r.steps().stream().anyMatch(s -> s.edge().gateDoorIds().contains(doorId))).orElse(false)
-                || a.session.explanation().map(e -> e.blockedEdge().gateDoorIds().contains(doorId)).orElse(false);
+                || a.session.explanation().map(e -> e.blockedEdge().gateDoorIds().contains(doorId)).orElse(false)
+                || a.route().map(r -> r.walkLinks().stream()
+                    .anyMatch(w -> w.link().gateDoorIds().contains(doorId))).orElse(false);
             if (onRoute) {
                 a.lastRecheckTick = now;
                 recheck(a, now);
@@ -2561,6 +2960,10 @@ public final class NavigationService implements SiegeMatchObserver {
     /** Something may have opened anywhere (domain cache refresh, siege lockdown change): every session re-checks. */
     public void onAvailabilityChanged() {
         notifyRuleListeners(net.knightsandkings.knk.core.npc.nav.RuleChangeListener::availabilityChanged);
+        WalkLinks links = walkLinks;
+        if (links != null) {
+            links.cache().dropNone(null); // phase 2 (#705): what was shut may be open now
+        }
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (a.direct()) {
@@ -2584,6 +2987,12 @@ public final class NavigationService implements SiegeMatchObserver {
     /** The world's network snapshot was swapped: goals are re-derived and a fresh route requested. */
     public void onNetworkChanged(String world) {
         RoadNetworkSnapshot snapshot = deps.snapshots().apply(world);
+        WalkLinks links = walkLinks;
+        if (links != null) {
+            // phase 2 (#705): node ids may mean other places on the new network (the routing view's split nodes)
+            links.cache().clearWorld(world);
+            linkCandidates.remove(world.toLowerCase(Locale.ROOT));
+        }
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (!a.destination.world().equalsIgnoreCase(world) || a.direct() || a.session == null) {

@@ -28,10 +28,12 @@ public record Maneuver(Kind kind, double[] position, double along, double bearin
         /** The next edge climbs more than 3 blocks and stays up: "Take the stairs up". */
         UP,
         /** The next edge climbs more than 3 blocks and comes back down: "Cross the bridge". */
-        BRIDGE;
+        BRIDGE,
+        /** Off-road phase 2 (#705): the route leaves the road for a walk link: "Leave the road and walk across". */
+        WALK;
 
         public boolean isTurn() {
-            return this != CONTINUE && this != DOWN && this != UP && this != BRIDGE;
+            return this != CONTINUE && this != DOWN && this != UP && this != BRIDGE && this != WALK;
         }
 
         public boolean isLevelChange() {

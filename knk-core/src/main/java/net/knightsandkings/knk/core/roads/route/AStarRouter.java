@@ -52,7 +52,17 @@ public final class AStarRouter {
      * {@link RouteResult.Status#NO_ROUTE} - never BLOCKED; see {@link #routeOrExplain}.
      */
     public RouteResult route(RouteRequest request) {
-        Search search = new Search(request);
+        return route(request, null);
+    }
+
+    /**
+     * Off-road navigation phase 2 (#705, DESIGN § 5.2, {@code navigation.walk-links}): as {@link #route(RouteRequest)},
+     * and at every road node it expands the search may also take the usable walk links {@code links} offers from there;
+     * the candidates nobody searched yet are reported back to it ({@link WalkLinkSource#wanted}). A route that takes a
+     * link is built with {@link Route#buildPieces}. {@code null} routes exactly as {@link #route(RouteRequest)}.
+     */
+    public RouteResult route(RouteRequest request, WalkLinkSource links) {
+        Search search = new Search(request, links);
         if (search.reachableGoals.isEmpty()) {
             return RouteResult.differentComponents();
         }
@@ -71,7 +81,7 @@ public final class AStarRouter {
      * after all; empty when nothing gets closer than the start.
      */
     public Optional<Route> routeTowards(RouteRequest request) {
-        Search search = new Search(request);
+        Search search = new Search(request, null);
         if (search.reachableGoals.isEmpty()) {
             return Optional.empty();
         }
@@ -79,7 +89,15 @@ public final class AStarRouter {
     }
 
     public RouteResult routeOrExplain(RouteRequest request) {
-        RouteResult result = route(request);
+        return routeOrExplain(request, null);
+    }
+
+    /**
+     * {@link #routeOrExplain(RouteRequest)} with walk links ({@link #route(RouteRequest, WalkLinkSource)}); the
+     * explanation of a road network without a usable route is the road network's, without links.
+     */
+    public RouteResult routeOrExplain(RouteRequest request, WalkLinkSource links) {
+        RouteResult result = route(request, links);
         if (result.status() != RouteResult.Status.NO_ROUTE) {
             return result;
         }
@@ -95,11 +113,20 @@ public final class AStarRouter {
         final int fromState;
         final int edgeIndex;
         final boolean forward;
+        /** Phase 2 (#705): the walk link taken to get here, with its routing cost; null for a road edge. */
+        final WalkLink link;
+        final double linkCost;
 
         Arrival(int fromState, int edgeIndex, boolean forward) {
+            this(fromState, edgeIndex, forward, null, 0);
+        }
+
+        Arrival(int fromState, int edgeIndex, boolean forward, WalkLink link, double linkCost) {
             this.fromState = fromState;
             this.edgeIndex = edgeIndex;
             this.forward = forward;
+            this.link = link;
+            this.linkCost = linkCost;
         }
     }
 
@@ -125,9 +152,12 @@ public final class AStarRouter {
             return c != 0 ? c : Long.compare(a.seq, b.seq);
         });
         long seq;
+        /** Phase 2 (#705): walk links offered at expanded nodes; null: none asked for (today's search). */
+        final WalkLinkSource links;
 
-        Search(RouteRequest request) {
+        Search(RouteRequest request, WalkLinkSource links) {
             this.request = request;
+            this.links = links;
             this.start = request.start();
             this.startEdgeIndex = snapshot.edgeIndex(start.edgeId());
             if (startEdgeIndex < 0) {
@@ -203,6 +233,51 @@ public final class AStarRouter {
             open.add(new Entry(tentative + heuristic(to), tentative, seq++, to));
         }
 
+        /** Phase 2 (#705): a walk link from {@code from} to its To node. */
+        void relaxLink(int from, WalkLink link, double cost) {
+            int to = link.toNode();
+            if (closed.contains(to) || snapshot.node(to).isEmpty()) {
+                return;
+            }
+            double tentative = g.get(from) + cost;
+            Double known = g.get(to);
+            if (known != null && tentative >= known) {
+                return;
+            }
+            g.put(to, tentative);
+            arrivals.put(to, new Arrival(from, -1, true, link, cost));
+            open.add(new Entry(tentative + heuristic(to), tentative, seq++, to));
+        }
+
+        /** Phase 2 (#705): the links at an expanded node - the usable ones relaxed, the unsearched ones reported. */
+        void expandLinks(int nodeId) {
+            WalkLinkSource.Links here = links.at(nodeId);
+            if (here.usable().isEmpty() && here.unknown().isEmpty()) {
+                return;
+            }
+            double[] p = snapshot.requireNode(nodeId).position();
+            for (WalkLinkSource.Option option : here.usable()) {
+                if (option.link().fromNode() != nodeId) {
+                    continue;
+                }
+                double[] q = snapshot.node(option.link().toNode()).map(n -> n.position()).orElse(null);
+                if (q == null) {
+                    continue;
+                }
+                // never below the straight distance at the cheapest road factor: the heuristic stays admissible
+                double cost = Math.max(option.routingCost(), EdgePolyline.distance(p, q) * minFactor);
+                relaxLink(nodeId, option.link(), cost);
+            }
+            for (WalkLinkSource.Candidate candidate : here.unknown()) {
+                Optional<double[]> q = snapshot.node(candidate.to()).map(n -> n.position());
+                if (q.isEmpty() || closed.contains(candidate.to())) {
+                    continue;
+                }
+                double bound = g.get(nodeId) + EdgePolyline.distance(p, q.get()) * minFactor + heuristic(candidate.to());
+                links.wanted(candidate, bound);
+            }
+        }
+
         /** Goals on an edge reachable from {@code along} travelling in {@code forward} direction. */
         void relaxGoalsOnEdge(int from, int edgeIndex, double along, boolean forward, double partialFactor) {
             List<Integer> onEdge = goalsByEdgeIndex.get(edgeIndex);
@@ -256,6 +331,9 @@ public final class AStarRouter {
                 double perBlock = p.length() <= 0 ? 0 : edgeCost(ei) / p.length();
                 relaxGoalsOnEdge(nodeId, ei, forward ? 0 : p.length(), forward, perBlock);
                 relax(nodeId, edge.otherNode(nodeId), edgeCost(ei), ei, forward);
+            }
+            if (links != null) {
+                expandLinks(nodeId);
             }
         }
 
@@ -328,10 +406,17 @@ public final class AStarRouter {
 
         /** The route to a reached state: a goal (ends at its snap point) or a node (ends at the node). */
         Route reconstructTo(int endState, SnapPoint goal) {
-            List<Route.Step> steps = new ArrayList<>();
+            List<Route.Piece> steps = new ArrayList<>();
+            boolean linked = false;
             int state = endState;
             while (state != START_STATE) {
                 Arrival a = arrivals.get(state);
+                if (a.link != null) {
+                    steps.add(new Route.LinkStep(a.link, a.linkCost));
+                    linked = true;
+                    state = a.fromState;
+                    continue;
+                }
                 RoadEdge edge = snapshot.edgeAt(a.edgeIndex);
                 EdgePolyline p = snapshot.polylineAt(a.edgeIndex);
                 double entry = a.fromState == START_STATE ? start.along() : (a.forward ? 0 : p.length());
@@ -344,7 +429,12 @@ public final class AStarRouter {
                 state = a.fromState;
             }
             Collections.reverse(steps);
-            return Route.build(snapshot, start, goal, steps, request.classCost());
+            if (linked) {
+                return Route.buildPieces(snapshot, start, goal, steps, request.classCost());
+            }
+            List<Route.Step> roadSteps = new ArrayList<>(steps.size());
+            steps.forEach(piece -> roadSteps.add((Route.Step) piece));
+            return Route.build(snapshot, start, goal, roadSteps, request.classCost());
         }
     }
 }

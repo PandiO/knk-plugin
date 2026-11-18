@@ -34,6 +34,22 @@ public final class CompositeAccessPolicy implements AccessPolicy {
         return result;
     }
 
+    /**
+     * Off-road phase 2 (#705): a walk link's tags, judged by every policy like an edge - never cached, since the probe
+     * edges of all links share {@link WalkLink#PROBE_EDGE_ID} (the link has its own id space, O17).
+     */
+    @Override
+    public EdgeVerdict checkWalkLink(WalkLink link) {
+        EdgeVerdict result = EdgeVerdict.open();
+        for (AccessPolicy policy : policies) {
+            EdgeVerdict v = policy.checkWalkLink(link);
+            if (v.isBlocked()) {
+                return v;
+            }
+            result = EdgeVerdict.stricter(result, v);
+        }
+        return result;
+    }
 
     private EdgeVerdict evaluate(RoadEdge edge) {
         EdgeVerdict result = EdgeVerdict.open();

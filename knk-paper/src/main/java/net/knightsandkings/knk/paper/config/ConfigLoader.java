@@ -490,7 +490,16 @@ public class ConfigLoader {
                 section.getBoolean("plaza-lines", defaults.plazaLines().enabled()),
                 section.getDouble("plaza-pull", defaults.plazaLines().pull()),
                 section.getDouble("plaza-guide-cost", defaults.plazaLines().guideCost()),
-                section.getDouble("plaza-curve-clearance", defaults.plazaLines().curveClearance())));
+                section.getDouble("plaza-curve-clearance", defaults.plazaLines().curveClearance())),
+            new NavigationConfig.WalkLinksConfig(
+                section.getBoolean("walk-links", defaults.walkLinks().enabled()),
+                section.getDouble("walk-link-range", defaults.walkLinks().range()),
+                section.getDouble("walk-link-ratio", defaults.walkLinks().ratio()),
+                section.getInt("walk-link-ttl-seconds", defaults.walkLinks().ttlSeconds()),
+                section.getInt("walk-link-retry-seconds", defaults.walkLinks().retrySeconds()),
+                section.getInt("walk-link-searches-per-route", defaults.walkLinks().searchesPerRoute()),
+                section.getDouble("road-first-share", defaults.walkLinks().roadFirstShare()),
+                section.getDouble("road-first-max-ratio", defaults.walkLinks().roadFirstMaxRatio())));
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */

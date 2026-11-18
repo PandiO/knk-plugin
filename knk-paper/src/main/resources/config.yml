@@ -787,6 +787,26 @@ navigation:
   plaza-pull: 0.35
   plaza-guide-cost: 2
   plaza-curve-clearance: 0.65
+  # Walk links and mixed routes (off-road navigation phase 2, #705). true: the road route may leave the road for a
+  # walk path between two road nodes (a courtyard shortcut) where the road between them is much longer, and a target
+  # within max-snap-distance is reached over the road when the road carries most of the way (road-first). Links are
+  # searched off the main thread as walk legs are, cached, and dropped when blocks change near them. false = routes,
+  # trails and sessions exactly as before. Keep false until the live test signs it off
+  walk-links: false
+  # A link joins two road nodes at most walk-link-range blocks apart (straight) whose road is more than
+  # walk-link-ratio times as long (2..128 blocks; above 1). A found link is kept walk-link-ttl-seconds unless blocks
+  # change near it, "no link" walk-link-retry-seconds; one route asks for at most walk-link-searches-per-route
+  # searches (0..32), the most promising first
+  walk-link-range: 40
+  walk-link-ratio: 2.0
+  walk-link-ttl-seconds: 600
+  walk-link-retry-seconds: 600
+  walk-link-searches-per-route: 4
+  # With walk-links only. Road-first: a target within max-snap-distance is reached over the road instead of one walk
+  # path when the road carries at least road-first-share of the way (0..1) and the whole way is at most
+  # road-first-max-ratio times the walk path (at least 1). Defaults for the developer to confirm in the live test
+  road-first-share: 0.6
+  road-first-max-ratio: 1.5
   walk:
     # false = straight lines exactly as before (the kill switch)
     enabled: true
