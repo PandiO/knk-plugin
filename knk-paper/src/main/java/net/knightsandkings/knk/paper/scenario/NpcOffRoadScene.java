@@ -14,13 +14,14 @@ import net.knightsandkings.knk.core.navigation.shape.NavPoint;
  * not reach, on a 64 × 32 × 64 box with the ground at {@link #GROUND} (so a ravine can be dug below it). Each kind has
  * its fake road (a loop of floor points, walked there and back by {@code ScenarioNpcs}), its start and its goal.
  * <ol>
- *   <li>{@link Kind#DETOUR}: a walled courtyard south of a road along z 6, its only gate on the far side; the goal in
- *       the courtyard. The road's nearest point is its end at x 32; the straight line to the goal runs into the near
- *       wall.</li>
- *   <li>{@link Kind#UPSTAIRS}: a 7 × 7 tower with a spiral stair (stair blocks round a 3 × 3 pillar, one turn, 16
- *       steps) and the goal on the pillar's top, 17 blocks above the ground; the road ends 22 blocks north of its
- *       door.</li>
- *   <li>{@link Kind#RAVINE}: a 5-deep ravine across the scene with one bridge; the road runs along the north bank,
+ *   <li>{@link Kind#DETOUR}: a walled courtyard (x 22..42, z 20..50) south of a road along z 6, its only gate in the
+ *       far wall; the goal deep in the courtyard. The road's nearest point is its end at x 32; the straight line to
+ *       the goal runs into the near wall.</li>
+ *   <li>{@link Kind#UPSTAIRS}: a 7 × 7 tower with a spiral stair (stair blocks round a 3 × 3 pillar, two turns, 32
+ *       steps) and the goal on the pillar's top, 33 blocks above the ground, inside a curtain wall whose gate is in
+ *       the east wall, away from the road (as the keep's tower stands in the keep); the road ends 14 blocks north of
+ *       the curtain wall.</li>
+ *   <li>{@link Kind#RAVINE}: a 5-deep ravine across the scene with one bridge (x 39..41); the road runs along the north bank,
  *       over the bridge and on to the east. The NPC starts on the south bank west of the bridge: the road's nearest
  *       point lies across the ravine, the road points it can reach are on the bridge.</li>
  * </ol>
@@ -31,11 +32,11 @@ public final class NpcOffRoadScene {
     public enum Kind { DETOUR, UPSTAIRS, RAVINE }
 
     /** The box every kind needs. */
-    public static final ScenarioScene.Box BOX = new ScenarioScene.Box(64, 32, 64);
+    public static final ScenarioScene.Box BOX = new ScenarioScene.Box(64, 48, 64);
     /** Scene y of the ground's floor blocks; feet at {@code GROUND + 1}. */
     public static final int GROUND = 6;
     /** The tower's pillar top (its floor block), the upstairs goal's floor. */
-    public static final int TOWER_TOP = GROUND + 16;
+    public static final int TOWER_TOP = GROUND + 32;
 
     private final ScenarioScene scene;
     private final Kind kind;
@@ -78,11 +79,11 @@ public final class NpcOffRoadScene {
         }
     }
 
-    // ---- the courtyard: walls x 20..44, z 26..44, 4 high; the gate at x 32..33 in the south wall ----
+    // ---- the courtyard: walls x 22..42, z 20..50, 4 high; the gate at x 32..33 in the south wall ----
 
     private void buildDetour() {
-        wallRing(20, 26, 44, 44, GROUND + 1, GROUND + 4);
-        fill(32, GROUND + 1, 44, 33, GROUND + 3, 44, Material.AIR);
+        wallRing(22, 20, 42, 50, GROUND + 1, GROUND + 4);
+        fill(32, GROUND + 1, 50, 33, GROUND + 3, 50, Material.AIR);
     }
 
     // ---- the tower: walls x 40..46, z 28..34; door at x 40, z 29; pillar x 42..44, z 30..32 ----
@@ -91,15 +92,21 @@ public final class NpcOffRoadScene {
     static final int[][] RING = {
         {41, 29}, {41, 30}, {41, 31}, {41, 32}, {41, 33}, {42, 33}, {43, 33}, {44, 33},
         {45, 33}, {45, 32}, {45, 31}, {45, 30}, {45, 29}, {44, 29}, {43, 29}, {42, 29}};
-    /** The ring cells the top floor covers (above them the stair has room: steps up to 13 under it). */
+    /** Steps: two turns of the ring. */
+    static final int STEPS = 2 * 16;
+    /** The ring cells the top floor covers (above them the second turn's steps up to 29 have their headroom). */
     static final int TOP_OVER = 13;
 
     private void buildTower() {
+        // the curtain wall round the tower (x 30..56, z 20..50), its gate in the east wall at z 38..39, away from the
+        // road (inside the walk's box: the capture margin is 16 blocks round the road's end and the goal)
+        wallRing(30, 20, 56, 50, GROUND + 1, GROUND + 4);
+        fill(56, GROUND + 1, 38, 56, GROUND + 3, 39, Material.AIR);
         wallRing(40, 28, 46, 34, GROUND + 1, TOWER_TOP + 2);
         fill(40, GROUND + 1, 29, 40, GROUND + 2, 29, Material.AIR); // the door
         fill(42, GROUND + 1, 30, 44, TOWER_TOP, 32, Material.STONE_BRICKS); // the pillar, its top the goal's floor
-        for (int k = 1; k < RING.length; k++) {
-            int[] c = RING[k];
+        for (int k = 1; k < STEPS; k++) {
+            int[] c = RING[k % RING.length];
             int[] next = RING[(k + 1) % RING.length];
             BlockFace up = face(next[0] - c[0], next[1] - c[1]);
             scene.block(c[0], GROUND + k, c[1]).setBlockData(org.bukkit.Bukkit.createBlockData(
@@ -120,12 +127,12 @@ public final class NpcOffRoadScene {
         return dz > 0 ? BlockFace.SOUTH : BlockFace.NORTH;
     }
 
-    // ---- the ravine: z 16..22 across the scene, floor at y 1; the bridge at x 29..31 ----
+    // ---- the ravine: z 16..22 across the scene, floor at y 1; the bridge at x 39..41 ----
 
     private void buildRavine() {
         fill(0, GROUND, 16, 63, GROUND, 22, Material.AIR);
         fill(0, 1, 16, 63, 1, 22, Material.STONE);
-        fill(29, GROUND, 16, 31, GROUND, 22, Material.OAK_PLANKS);
+        fill(39, GROUND, 16, 41, GROUND, 22, Material.OAK_PLANKS);
     }
 
     /** Whether a world position lies in the ravine below the ground (a fall). */
@@ -159,7 +166,7 @@ public final class NpcOffRoadScene {
         return switch (kind) {
             case DETOUR -> List.of(new int[] {4, 6}, new int[] {32, 6});
             case UPSTAIRS -> List.of(new int[] {4, 6}, new int[] {43, 6});
-            case RAVINE -> List.of(new int[] {20, 12}, new int[] {30, 12}, new int[] {30, 36}, new int[] {58, 36});
+            case RAVINE -> List.of(new int[] {20, 12}, new int[] {40, 12}, new int[] {40, 36}, new int[] {58, 36});
         };
     }
 
@@ -194,7 +201,7 @@ public final class NpcOffRoadScene {
     /** The goal: feet. */
     public NavPoint goal() {
         return switch (kind) {
-            case DETOUR -> feet(32, GROUND, 34);
+            case DETOUR -> feet(32, GROUND, 44);
             case UPSTAIRS -> feet(43, TOWER_TOP, 31);
             case RAVINE -> feet(56, GROUND, 36);
         };

@@ -31,9 +31,9 @@ import net.knightsandkings.knk.paper.scenario.SizedScene;
  *       walk reaches it, on the bridge (the road join by reachability).</li>
  * </ol>
  * Settings: the code defaults with the developer's {@code local-legs-clearance} and {@code corridor-steering} on (the
- * dev server's of 2026-11-17). Each walk fails when the NPC does not arrive in time, falls into the ravine, or when no
- * off-road part was planned with the walk search. With {@code -Dknk.scenario.offRoadHops=true} the NPCs walk the
- * off-road parts in hops, as before C1 (the before run).
+ * dev server's of 2026-11-17). Each walk fails when the NPC does not arrive in time, falls into the ravine, gets stuck
+ * on the way (a stuck spell), or when no off-road part was planned with the walk search. With
+ * {@code -Dknk.scenario.offRoadHops=true} the NPCs walk the off-road parts in hops, as before C1 (the before run).
  */
 public final class NpcOffRoadScenario implements Scenario<ScenarioScene>, SizedScene {
 
@@ -123,6 +123,10 @@ public final class NpcOffRoadScenario implements Scenario<ScenarioScene>, SizedS
                 if (!fell.isEmpty()) {
                     failures.add("fell into the ravine: " + fell);
                 }
+                long stuck = stuckSpells(npcs.get());
+                if (stuck > 0) {
+                    failures.add(stuck + " stuck spells on the way");
+                }
                 if (npcs.get().service().offRoadWalks() == 0) {
                     failures.add("no off-road part was planned with the walk search ("
                         + npcs.get().service().offRoadHops() + " in hops)");
@@ -174,8 +178,16 @@ public final class NpcOffRoadScenario implements Scenario<ScenarioScene>, SizedS
                 if (group.get().lost() > 0) {
                     failures.add(group.get().lost() + " followers lost");
                 }
+                long stuck = stuckSpells(npcs.get());
+                if (stuck > 0) {
+                    failures.add(stuck + " stuck spells in both walks");
+                }
                 return failures.isEmpty() ? null : String.join("; ", failures) + npcs.get().tail(20);
             });
+    }
+
+    private static long stuckSpells(ScenarioNpcs npcs) {
+        return npcs.metrics().total(Event.STUCK_ENGINE) + npcs.metrics().total(Event.STUCK_NO_PROGRESS);
     }
 
     private static String where(NavPoint feet) {
