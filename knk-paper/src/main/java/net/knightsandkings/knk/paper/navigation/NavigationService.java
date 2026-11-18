@@ -368,6 +368,9 @@ public final class NavigationService implements SiegeMatchObserver {
          * asks the road network once, never again - also not for the last leg after a road's end (N13).
          */
         boolean roadsTried;
+        /** Off-road phase 7 step 2 (#712): the route the plaza trail below was made for, and that trail. */
+        Route plazaRoute;
+        net.knightsandkings.knk.core.navigation.PlazaTrail plazaTrail;
 
         Active(Player player, Destination destination, long startedTick) {
             this.player = player;
@@ -1867,7 +1870,10 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /** The route's trail from {@code along} with today's straight line from the player - none when shut in (KNG-124). */
     private void drawRouteFromPlayer(Active a, Route route, double along) {
-        if (shutInNearRoute(a)) {
+        net.knightsandkings.knk.core.navigation.PlazaTrail plazas = plazaTrail(a, route, along);
+        if (plazas != null) {
+            deps.trail().drawRoute(a.player, route, along, trailTarget(a), !shutInNearRoute(a), plazas);
+        } else if (shutInNearRoute(a)) {
             deps.trail().drawRoute(a.player, route, along, trailTarget(a), false);
         } else {
             deps.trail().drawRoute(a.player, route, along, trailTarget(a));
@@ -1970,6 +1976,89 @@ public final class NavigationService implements SiegeMatchObserver {
             polyline = List.copyOf(polyline);
             nodes = List.copyOf(nodes);
         }
+    }
+
+    // ==================== plaza lines on the trail (off-road phase 7 step 2, #712) ====================
+
+    private volatile java.util.function.Supplier<net.knightsandkings.knk.core.navigation.shape.NavWorld> plazaWorld =
+        () -> null;
+    private volatile Function<String, net.knightsandkings.knk.core.navigation.shape.PlazaCurve.Options> plazaOptions;
+    private final java.util.concurrent.atomic.AtomicLong plazaLinesPlaced = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong plazaCrossingsTried = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * The live world and the per-world options the trail's plaza lines are worked out with ({@code navigation.plaza-lines};
+     * the same as {@code /knk road plazaline}'s). Without them the trail draws no plaza line, flag or not.
+     */
+    public void setPlazaLines(java.util.function.Supplier<net.knightsandkings.knk.core.navigation.shape.NavWorld> world,
+                              Function<String, net.knightsandkings.knk.core.navigation.shape.PlazaCurve.Options> options) {
+        this.plazaWorld = world == null ? () -> null : world;
+        this.plazaOptions = options;
+    }
+
+    /** "placed N of M" for {@code /knk road status}: plaza lines on trails since start, of the crossings worked out. */
+    public String plazaLineStatus() {
+        return deps.config().plazaLines().enabled()
+            ? "on; placed " + plazaLinesPlaced.get() + " of " + plazaCrossingsTried.get() + " crossings"
+            : "off";
+    }
+
+    /**
+     * The route's plaza trail with {@code navigation.plaza-lines} on, its next crossing near the trail's window worked
+     * out (at most one per redraw, DESIGN § 8.6: once per crossing for the route's life); null with the flag off, so
+     * the trail is drawn exactly as before (A24). Only the drawn trail uses it: the session, the HUD, the ETA and the
+     * maneuvers keep the route polyline (A25). Main thread.
+     */
+    private net.knightsandkings.knk.core.navigation.PlazaTrail plazaTrail(Active a, Route route, double along) {
+        Function<String, net.knightsandkings.knk.core.navigation.shape.PlazaCurve.Options> optionsOf = plazaOptions;
+        if (!deps.config().plazaLines().enabled() || optionsOf == null || a.snapshot == null || route == null
+            || route.isEmpty()) {
+            return null;
+        }
+        net.knightsandkings.knk.core.navigation.shape.NavWorld world = plazaWorld.get();
+        if (world == null) {
+            return null;
+        }
+        RoadNetworkSnapshot snapshot = a.snapshot;
+        if (a.plazaRoute != route || a.plazaTrail == null) {
+            a.plazaRoute = route;
+            a.plazaTrail = new net.knightsandkings.knk.core.navigation.PlazaTrail(plazaCrossingsAlong(route, snapshot));
+        }
+        String w = snapshot.world();
+        a.plazaTrail.prepare(along, deps.config().trail().length(), crossing -> {
+            plazaCrossingsTried.incrementAndGet();
+            try {
+                var node = snapshot.node(crossing.nodeId()).orElse(null);
+                if (node == null) {
+                    return null;
+                }
+                var result = net.knightsandkings.knk.core.navigation.shape.PlazaCurve.cross(world,
+                    net.knightsandkings.knk.core.navigation.PlazaLinePreviews.feetOf(w, route.polyline()),
+                    net.knightsandkings.knk.core.navigation.PlazaLinePreviews.crossingOf(w, node), optionsOf.apply(w));
+                var segment = net.knightsandkings.knk.core.navigation.PlazaTrail.segmentOf(route.polyline(), result);
+                if (segment != null) {
+                    plazaLinesPlaced.incrementAndGet();
+                }
+                return segment;
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "plaza line failed at node " + crossing.nodeId(), e);
+                return null; // the route's own bend stays
+            }
+        });
+        return a.plazaTrail;
+    }
+
+    /** The route's nodes that may be plazas, each with where the route passes it (in route order). */
+    static List<net.knightsandkings.knk.core.navigation.PlazaTrail.Crossing> plazaCrossingsAlong(Route route,
+            RoadNetworkSnapshot snapshot) {
+        List<net.knightsandkings.knk.core.navigation.PlazaTrail.Crossing> out = new ArrayList<>();
+        double min = 0;
+        for (var node : plazaNodesOf(route, snapshot)) {
+            double along = route.project(node.x(), node.y(), node.z(), min).along();
+            out.add(new net.knightsandkings.knk.core.navigation.PlazaTrail.Crossing(node.id(), along));
+            min = along;
+        }
+        return out;
     }
 
     // ==================== ticking ====================
@@ -2265,7 +2354,12 @@ public final class NavigationService implements SiegeMatchObserver {
             drawWalkPath(a, leg);
         }
         boolean straight = !leg.walking() && leg.status != DirectLeg.Status.NO_PATH;
-        deps.trail().drawRoute(a.player, route, 0, trailTarget(a), straight);
+        net.knightsandkings.knk.core.navigation.PlazaTrail plazas = plazaTrail(a, route, 0);
+        if (plazas != null) {
+            deps.trail().drawRoute(a.player, route, 0, trailTarget(a), straight, plazas);
+        } else {
+            deps.trail().drawRoute(a.player, route, 0, trailTarget(a), straight);
+        }
     }
 
     /** KNG-124: a floor position within {@link #ON_ROUTE_HORIZONTAL} and {@link #ON_ROUTE_VERTICAL} of a route point. */

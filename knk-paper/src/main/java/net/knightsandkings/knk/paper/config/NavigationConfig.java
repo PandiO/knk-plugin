@@ -421,21 +421,30 @@ public record NavigationConfig(
     }
 
     /**
-     * Plaza lines for the players' trail (off-road navigation phase 7, DESIGN § 8.7, PandiO/knk-workspace#712).
-     * Phase 7's first step only previews them ({@code /knk road plazaline}, which works with the flag off); the trail
-     * does not use them yet.
+     * Plaza lines for the players' trail (off-road navigation phase 7, DESIGN § 8.7, PandiO/knk-workspace#712). With
+     * {@code plaza-lines} on, the road trail is drawn along the plaza line where a route crosses a plaza (step 2);
+     * {@code /knk road plazaline} previews the lines with the flag on or off.
      *
-     * @param enabled   {@code navigation.plaza-lines}: the trail takes the plaza line where a route crosses a plaza.
-     *                  Default false: today's route polyline (A24)
+     * @param enabled   {@code navigation.plaza-lines}: the trail is drawn along the plaza line where a route crosses a
+     *                  plaza. Default false: today's trail (A24)
      * @param pull      {@code navigation.plaza-pull}: how far the curve's middle is pulled from the chord towards the
      *                  plaza node, 0 to 1. Default 0.35 (O30), tuned live on Cinix and Brink
      * @param guideCost {@code navigation.plaza-guide-cost}: the A* fallback's cost per block of distance from the
      *                  curve, at least 0. Default 2
+     * @param curveClearance {@code navigation.plaza-curve-clearance}: the least clearance the curve must keep to be
+     *                  taken; under it the A* line is used (it keeps {@code walk.wall-clearance} where it can, never
+     *                  under 0.35). Default 0.65, the developer's decision on #712 (a player is 0.6 wide)
      */
-    public record PlazaLinesConfig(boolean enabled, double pull, double guideCost) {
+    public record PlazaLinesConfig(boolean enabled, double pull, double guideCost, double curveClearance) {
         public static PlazaLinesConfig defaults() {
             return new PlazaLinesConfig(false, net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_PULL,
-                net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_GUIDE_COST);
+                net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_GUIDE_COST,
+                net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_CURVE_CLEARANCE);
+        }
+
+        /** Without {@code plaza-curve-clearance} (callers from step 1): the default. */
+        public PlazaLinesConfig(boolean enabled, double pull, double guideCost) {
+            this(enabled, pull, guideCost, net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_CURVE_CLEARANCE);
         }
 
         public void validate() {
@@ -444,6 +453,10 @@ public record NavigationConfig(
             }
             if (!(guideCost >= 0)) {
                 throw new IllegalArgumentException("navigation.plaza-guide-cost must not be negative (got: " + guideCost + ")");
+            }
+            if (!(curveClearance >= 0.35 && curveClearance <= 2)) {
+                throw new IllegalArgumentException("navigation.plaza-curve-clearance must be 0.35..2 (got: "
+                    + curveClearance + ")");
             }
         }
     }

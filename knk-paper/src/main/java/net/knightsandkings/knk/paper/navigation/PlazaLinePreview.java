@@ -32,8 +32,9 @@ import net.knightsandkings.knk.paper.utils.ParticleDraw;
 /**
  * {@code /knk road plazaline [<plaza or junction>]} (off-road navigation phase 7 step 1, DESIGN § 8.9, O16;
  * PandiO/knk-workspace#712): the plaza lines drawn for the staff member for {@value #SHOW_SECONDS} seconds, so the
- * developer sees them on real plazas (Cinix, Brink) before the trail uses them. Works with {@code navigation.plaza-lines}
- * off and changes nothing: no route, session or trail is touched.
+ * developer saw them on real plazas (Cinix, Brink) before the trail used them (step 2 draws them on the trail with
+ * {@code navigation.plaza-lines} on). Works with the flag on or off and changes nothing: no route, session or trail is
+ * touched.
  *
  * <ol>
  *     <li>Without an argument: the junctions of the player's own route that may be plazas ({@code /navigate} first).</li>
@@ -96,8 +97,8 @@ public final class PlazaLinePreview {
         PlazaCurve.Options opts = options.apply(worldName);
         List<PlazaLinePreviews.Line> lines = PlazaLinePreviews.compute(world.get(), passes, opts);
         player.sendMessage(RoadMessages.info(String.format(java.util.Locale.ROOT,
-            "Plaza lines (preview, the trail does not use them; plaza-pull %.2f, clearance %.2f):", opts.pull(),
-            opts.clearance())));
+            "Plaza lines (preview; the trail draws them with navigation.plaza-lines on; plaza-pull %.2f, "
+                + "curve clearance %.2f, A* clearance %.2f):", opts.pull(), opts.curveClearance(), opts.clearance())));
         for (PlazaLinePreviews.Line line : lines) {
             player.sendMessage(RoadMessages.field(kindLabel(line.result().kind()), PlazaLinePreviews.describe(line)));
         }

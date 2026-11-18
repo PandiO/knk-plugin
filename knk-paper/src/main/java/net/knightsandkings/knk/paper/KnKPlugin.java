@@ -1852,7 +1852,8 @@ public class KnKPlugin extends JavaPlugin {
             npc.value(net.knightsandkings.knk.core.npc.nav.NavigationSettings.CORRIDOR_HALF_WIDTH, scope),
             navigation.walk().wallClearance(),
             npc.value(net.knightsandkings.knk.core.npc.nav.NavigationSettings.PLAZA_CORRIDOR_BLOCKS, scope),
-            navigation.plazaLines().pull(), navigation.plazaLines().guideCost());
+            navigation.plazaLines().pull(), navigation.plazaLines().guideCost(),
+            Math.max(0.35, Math.min(2, navigation.plazaLines().curveClearance())));
     }
 
     private void initializeRoads() {
@@ -2013,6 +2014,10 @@ public class KnKPlugin extends JavaPlugin {
         }
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.navigation.NavigationListener(navigationService), this);
+        // Off-road navigation phase 7 step 2 (PandiO/knk-workspace#712): plaza lines on the trail, with
+        // navigation.plaza-lines on (read per redraw; off draws today's trail)
+        navigationService.setPlazaLines(() -> new net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld(
+            regionTracker == null ? null : regionTracker.regionIds()), this::plazaLineOptions);
         navigationService.start();
 
         // KNG-234: the navigation compass - any item matching the web app's material + display name rule.

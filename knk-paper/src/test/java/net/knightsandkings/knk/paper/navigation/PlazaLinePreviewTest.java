@@ -180,7 +180,7 @@ class PlazaLinePreviewTest {
 
         List<String> said = messages();
         assertEquals(4, said.size(), "a header and one line per pair of roads: " + said);
-        assertTrue(said.get(0).contains("preview, the trail does not use them; plaza-pull 0.35, clearance 0.80"),
+        assertTrue(said.get(0).contains("plaza-pull 0.35, curve clearance 0.65, A* clearance 0.80"),
             said.get(0));
         assertTrue(said.get(1).contains("Brink (#1): edge #10 → edge #11: curve "), said.get(1));
         assertTrue(said.get(1).contains("right angle"), said.get(1));

@@ -153,8 +153,11 @@ class ConfigLoaderNavigationTest {
         assertTrue(bundled.contains("navigation.plaza-lines"));
         assertTrue(bundled.contains("navigation.plaza-pull"));
         assertTrue(bundled.contains("navigation.plaza-guide-cost"));
+        assertTrue(bundled.contains("navigation.plaza-curve-clearance"));
         NavigationConfig loaded = ConfigLoader.load(bundled).navigation();
-        assertEquals(new NavigationConfig.PlazaLinesConfig(false, 0.35, 2), loaded.plazaLines());
+        assertEquals(new NavigationConfig.PlazaLinesConfig(false, 0.35, 2, 0.65), loaded.plazaLines());
+        assertEquals(new NavigationConfig.PlazaLinesConfig(false, 0.35, 2), loaded.plazaLines(),
+            "step 1's constructor: the developer's 0.65");
         assertEquals(loaded.plazaLines(), NavigationConfig.defaults().plazaLines());
         assertEquals(NavigationConfig.PlazaLinesConfig.defaults(), new YamlNavigation().missing().plazaLines(),
             "a config.yml without the keys: off, the defaults");
@@ -163,9 +166,10 @@ class ConfigLoaderNavigationTest {
         yaml.set("navigation.plaza-lines", true);
         yaml.set("navigation.plaza-pull", 0.5);
         yaml.set("navigation.plaza-guide-cost", 3);
+        yaml.set("navigation.plaza-curve-clearance", 0.7);
         NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
         navigation.validate();
-        assertEquals(new NavigationConfig.PlazaLinesConfig(true, 0.5, 3), navigation.plazaLines());
+        assertEquals(new NavigationConfig.PlazaLinesConfig(true, 0.5, 3, 0.7), navigation.plazaLines());
         assertEquals(navigation.plazaLines(), navigation.withGuidanceV2(true).withCursorJump(4).plazaLines());
 
         yaml.set("navigation.plaza-pull", 1.5);
@@ -177,6 +181,11 @@ class ConfigLoaderNavigationTest {
         IllegalArgumentException cost = assertThrows(IllegalArgumentException.class,
             ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"))::validate);
         assertTrue(cost.getMessage().contains("plaza-guide-cost"), cost.getMessage());
+        yaml.set("navigation.plaza-guide-cost", 2);
+        yaml.set("navigation.plaza-curve-clearance", 0.2);
+        IllegalArgumentException curve = assertThrows(IllegalArgumentException.class,
+            ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"))::validate);
+        assertTrue(curve.getMessage().contains("plaza-curve-clearance"), curve.getMessage());
     }
 
     /** A navigation section with none of the plaza-line keys. */

@@ -17,6 +17,7 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
+import net.knightsandkings.knk.core.navigation.PlazaTrail;
 import net.knightsandkings.knk.core.roads.route.Route;
 import net.knightsandkings.knk.core.roads.route.TrailCentring;
 import net.knightsandkings.knk.paper.config.NavigationConfig;
@@ -128,10 +129,28 @@ public final class TrailRenderer {
      * player to the trail - the walk leg to the road is drawn instead, or nothing when it has no way (KNG-75).
      */
     public void drawRoute(Player viewer, Route route, double along, double[] target, boolean fromPlayer) {
+        drawRoute(viewer, route, along, target, fromPlayer, null);
+    }
+
+    /**
+     * As {@link #drawRoute(Player, Route, double, double[], boolean)}, with the route's plaza lines (off-road navigation
+     * phase 7, PandiO/knk-workspace#712): a spot of the trail inside a plaza crossing is drawn on its plaza line
+     * ({@link PlazaTrail#draw}). {@code null} draws exactly as without.
+     */
+    public void drawRoute(Player viewer, Route route, double along, double[] target, boolean fromPlayer,
+                          PlazaTrail plazas) {
         double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();
-        List<double[]> trail = ground != null && viewer.getWorld() != null
+        boolean centred = ground != null && viewer.getWorld() != null;
+        List<double[]> trail = centred
             ? centredWindow(route, along, length, SPACING, surfaceFor(viewer))
             : trailPoints(route, along, length, SPACING);
+        if (plazas != null && !trail.isEmpty()) {
+            double[] alongs = centred ? centredWindowAlongs(route, along, length, SPACING)
+                : trailPointAlongs(route, along, length, SPACING);
+            if (alongs.length == trail.size()) {
+                trail = plazas.draw(trail, alongs);
+            }
+        }
         if (trail.isEmpty()) {
             return;
         }
@@ -304,6 +323,45 @@ public final class TrailRenderer {
             out.add(centred.get(centred.size() - 1));
         }
         return out;
+    }
+
+    /** Each point's distance along the route, for {@link #trailPoints} with the same arguments. */
+    static double[] trailPointAlongs(Route route, double along, double length, double spacing) {
+        if (route == null || route.isEmpty() || spacing <= 0) {
+            return new double[0];
+        }
+        double total = route.polylineLength();
+        double start = Math.max(0, Math.min(along, total));
+        double stop = Math.min(total, start + length);
+        List<Double> out = new ArrayList<>();
+        for (double a = start; a < stop; a += spacing) {
+            out.add(a);
+        }
+        out.add(stop);
+        return out.stream().mapToDouble(Double::doubleValue).toArray();
+    }
+
+    /** Each point's distance along the route, for {@link #centredWindow} with the same arguments. */
+    static double[] centredWindowAlongs(Route route, double along, double length, double spacing) {
+        if (route == null || route.isEmpty() || spacing <= 0) {
+            return new double[0];
+        }
+        double total = route.polylineLength();
+        double start = Math.max(0, Math.min(along, total));
+        double stop = Math.min(total, start + length);
+        int lastSpot = (int) Math.floor(total / spacing + 1e-9);
+        int first = Math.min(lastSpot, (int) Math.ceil(start / spacing - 1e-9));
+        int last = Math.max(first, Math.min(lastSpot, (int) Math.floor(stop / spacing + 1e-9)));
+        int to = Math.min(lastSpot, last + TrailCentring.SMOOTHING);
+        boolean endSpot = to == lastSpot && total - lastSpot * spacing > 1e-6;
+        List<Double> out = new ArrayList<>();
+        for (int k = first; k <= last; k++) {
+            out.add(k * spacing);
+        }
+        if (endSpot && stop >= total - 1e-9) {
+            out.add(total);
+        }
+        return out.stream().mapToDouble(Double::doubleValue).toArray();
     }
 
     /**
