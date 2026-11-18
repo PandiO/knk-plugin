@@ -277,6 +277,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.navigation.NavigationService navigationService;
     private net.knightsandkings.knk.paper.roads.LiveEdgeTags liveEdgeTags;
     private net.knightsandkings.knk.paper.navigation.NavigationDestinations navigationDestinations;
+    // Destination engine P2 (PandiO/knk-workspace#103): the navigation model and its snapshot; nothing reads it before P3.
+    private net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime navigationModel;
     private net.knightsandkings.knk.paper.navigation.NavigationCompassService navigationCompass;
     private java.util.concurrent.ExecutorService navigationRouting;
     // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
@@ -1305,6 +1307,10 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (navigationModel != null) {
+            navigationModel.stop();
+            navigationModel = null;
+        }
         if (npcNavigation != null) {
             try {
                 npcNavigation.stop();
@@ -1915,6 +1921,7 @@ public class KnKPlugin extends JavaPlugin {
             domainCatalogDataAccess, locationsDataAccess, domainLocations, roadNetworkCache::snapshot, System::currentTimeMillis);
         navigationDestinations.refresh();
         cacheManager.registerRefreshHook("navigation destinations", navigationDestinations::refresh);
+        startNavigationModel(domainLocations);
 
         var access = new net.knightsandkings.knk.paper.navigation.NavigationAccess(
             gateManager, () -> siegeGates, regionTracker.regionIds(), regionDomainResolver,
@@ -2011,6 +2018,28 @@ public class KnKPlugin extends JavaPlugin {
         }
         navigationService.setMatchScope(navigationCompass);
         getLogger().info("Road navigation (/navigate) initialized");
+    }
+
+    /**
+     * Destination engine phase 2 (DESIGN § 7, PandiO/knk-workspace#103): the navigation model (domain places,
+     * Locations, compass settings, road-access answers, an empty landmarks section) from its snapshot
+     * {@code offline/navigation-model.json}, refreshed in the background with a paced per-domain fallback. Nothing
+     * reads it before phase 3 (#69): /navigate, completion, the compass and NavigationService are unchanged.
+     */
+    private void startNavigationModel(net.knightsandkings.knk.core.navigation.DomainLocationResolver domainLocations) {
+        try {
+            this.navigationModel = net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime.create(
+                net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime.source(
+                    domainCatalogDataAccess, locationsDataAccess, apiClient.getNavigationCompassSettingsApi()),
+                net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime.placeLookup(domainLocations),
+                getDataFolder().toPath(),
+                net.knightsandkings.knk.paper.navigation.model.NavigationModelConfig.from(getConfig()));
+            navigationModel.start();
+            cacheManager.registerRefreshHook("navigation model", navigationModel::refreshNow);
+        } catch (RuntimeException e) {
+            getLogger().log(java.util.logging.Level.WARNING, "[Navigation] Navigation model not started", e);
+            this.navigationModel = null;
+        }
     }
 
     /**

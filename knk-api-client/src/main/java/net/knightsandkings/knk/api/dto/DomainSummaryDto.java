@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * Minimal id/name/subtype view of a Domain returned by POST api/Domains/search
@@ -11,6 +12,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * {@code roadAccess} is "Applies" or "Ignored": whether the domain's entry/exit rule keeps the road router
  * off its roads (rev. 7 Part C, KNG-92); search only, null otherwise. {@code wgRegionId} is the domain's
  * WorldGuard region (search only): the routing view leaves the regions of "Ignored" domains uncut.
+ * {@code worldName} is the domain's world (KNG-111). {@code location} is the domain's own Location (destination
+ * engine E12, PandiO/knk-workspace#103), kept as the raw JSON node so the mapper can tell an API that sent
+ * {@code "location": null} (the domain has none) from an older API without the key (Java null).
  */
 public record DomainSummaryDto(
         @JsonProperty("id") Integer id,
@@ -18,5 +22,12 @@ public record DomainSummaryDto(
         @JsonProperty("domainType") String domainType,
         @JsonProperty("navigationDefault") String navigationDefault,
         @JsonProperty("roadAccess") String roadAccess,
-        @JsonProperty("wgRegionId") String wgRegionId
-) {}
+        @JsonProperty("wgRegionId") String wgRegionId,
+        @JsonProperty("worldName") String worldName,
+        @JsonProperty("location") JsonNode location
+) {
+    public DomainSummaryDto(Integer id, String name, String domainType, String navigationDefault, String roadAccess,
+                            String wgRegionId) {
+        this(id, name, domainType, navigationDefault, roadAccess, wgRegionId, null, null);
+    }
+}

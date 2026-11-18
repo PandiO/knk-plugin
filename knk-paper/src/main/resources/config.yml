@@ -824,6 +824,12 @@ navigation:
     clearance-cost: 5
     wall-clearance: 0.8
     curve: true
+  # Destination engine (PandiO/knk-workspace#103): the navigation model (domain places, Locations, compass settings)
+  # is kept in offline/navigation-model.json and loaded at start-up, so navigation works the same with the web API
+  # down. A model older than this many days adds "may be out of date" to the destination lists (from phase 3 on,
+  # behind navigation.destination-engine). At least 1.
+  destinations:
+    stale-after-days: 14
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
