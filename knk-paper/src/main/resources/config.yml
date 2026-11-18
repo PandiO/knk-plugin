@@ -836,6 +836,12 @@ navigation:
   # chosen), and the road-access answers to the model. false (the default) keeps today's paths unchanged. Read at
   # start-up: restart the server after a change. Removed in phase 4b (#747) once the engine is the only path.
   destination-engine: false
+  # Off-road navigation phase 5.1 (PandiO/knk-workspace#708): true loads the landmarks staff made in the web app or
+  # with /knk landmark (api/landmarks) into the navigation model, offers them to /navigate, its tab completion and the
+  # compass (only while destination-engine is true as well: landmarks are reached through the destination engine
+  # only), and turns /knk landmark on. false (the default): no landmark is loaded or offered and /knk landmark says it
+  # is off. Read at start-up: restart the server after a change.
+  landmarks: false
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in

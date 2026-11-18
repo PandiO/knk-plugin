@@ -29,7 +29,8 @@ public final class HandleDestinations {
         String name = candidate.label();
         Place place = candidate.place();
         if (place instanceof Place.Point p) {
-            return Destination.point(name, p.world(), p.x(), p.y(), p.z());
+            // a landmark's Radius extent (#708): arrived inside its cylinder
+            return Destination.point(name, p.world(), p.x(), p.y(), p.z()).withArrivalRadius(p.arrivalRadius());
         }
         if (place instanceof Place.Street s) {
             return Destination.street(name, s.world(), s.streetId());

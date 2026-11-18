@@ -1078,7 +1078,8 @@ public final class NavigationService implements SiegeMatchObserver {
             case POINT -> {
                 double[] p = destination.point();
                 double[] floor = {p[0], p[1] - 1, p[2]};
-                if (distance(px, pFloorY, pz, floor) <= sessionParameters.arriveDistance()) {
+                if (distance(px, pFloorY, pz, floor) <= sessionParameters.arriveDistance()
+                    || destination.withinArrivalRadius(feet.getX(), feet.getY(), feet.getZ())) {
                     return Goals.already();
                 }
                 if (destination.regionId() != null) {
@@ -1189,6 +1190,11 @@ public final class NavigationService implements SiegeMatchObserver {
 
     private boolean insideRegion(Active a, Location feet) {
         return a.region != null && a.destination.kind() == Destination.Kind.REGION && insideRegion(a.destination, a.region, feet);
+    }
+
+    /** Off-road phase 5.1 (#708): inside a landmark's Radius extent, the cylinder around its point. */
+    private static boolean withinArrivalRadius(Active a, Location feet) {
+        return a.destination.withinArrivalRadius(feet.getX(), feet.getY(), feet.getZ());
     }
 
     // ==================== the player's road (KNG-75) ====================
@@ -1357,7 +1363,7 @@ public final class NavigationService implements SiegeMatchObserver {
         Location feet = a.player.getLocation();
         double x = feet.getX(), floorY = feet.getY() - 1, z = feet.getZ();
         double d = distance(x, floorY, z, leg.target);
-        if (d <= sessionParameters.arriveDistance() || insideRegion(a, feet)) {
+        if (d <= sessionParameters.arriveDistance() || insideRegion(a, feet) || withinArrivalRadius(a, feet)) {
             arrive(a);
             return;
         }
@@ -2037,7 +2043,7 @@ public final class NavigationService implements SiegeMatchObserver {
             return;
         }
         Location feet = a.player.getLocation();
-        if (insideRegion(a, feet)) {
+        if (insideRegion(a, feet) || withinArrivalRadius(a, feet)) {
             arrive(a);
             return;
         }
@@ -2338,7 +2344,7 @@ public final class NavigationService implements SiegeMatchObserver {
         if (a.target != null) {
             Location feet = a.player.getLocation();
             double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), a.target);
-            if (d > sessionParameters.arriveDistance() && d <= destinationLimit()) {
+            if (d > sessionParameters.arriveDistance() && !withinArrivalRadius(a, feet) && d <= destinationLimit()) {
                 a.session = null;
                 a.roadsTried = true; // the roads brought the player as close as they go
                 if (d <= lastLegRange()) {

@@ -18,12 +18,20 @@ import org.junit.jupiter.api.Test;
  * so {@code /navigate}, completion, the compass and {@code NavigationService} behave exactly as before. Phase 3
  * (#69) widened the list: the engine's providers ({@code core/navigation/engine}) and its plugin adapters
  * ({@code paper/navigation/engine}) read the model, and only behind {@code navigation.destination-engine}; the
- * clients (the command, the compass, the service) never name it - they ask the engine.
+ * clients (the command, the compass, the service) never name it - they ask the engine. Off-road phase 5.1 (#708) adds
+ * the landmark files: the core landmark records and rules use the model's {@code Landmark} and its {@code Extent}, the
+ * api-client maps the API's landmarks to it, and {@code /knk landmark} reads the model's domain and landmark names for
+ * its {@code link} argument and completion (an admin command, not a navigation client: it never offers a destination).
  */
 class NavigationModelUnreadTest {
 
     private static final String MODEL_PACKAGE = "net.knightsandkings.knk.core.navigation.model";
     private static final String RUNTIME_PACKAGE = "net.knightsandkings.knk.paper.navigation.model";
+    /** Off-road phase 5.1 (#708): the landmark records, rules, mapper and admin command (see the class comment). */
+    private static final List<String> LANDMARK_FILES = List.of(
+        "/core/landmarks/LandmarkCommandArgs.java", "/core/landmarks/LandmarkExtent.java",
+        "/core/domain/landmarks/LandmarkWrite.java", "/core/domain/landmarks/KnkLandmark.java",
+        "/api/mapper/LandmarkMapper.java", "/paper/commands/LandmarkAdminCommand.java");
 
     @Test
     void onlyTheModelPackagesAndTheStartUpWiringUseTheModel() throws IOException {
@@ -38,7 +46,8 @@ class NavigationModelUnreadTest {
                 for (Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
                     String path = root.relativize(file).toString().replace('\\', '/');
                     if (path.contains("/core/navigation/model/") || path.contains("/paper/navigation/model/")
-                        || path.contains("/core/navigation/engine/") || path.contains("/paper/navigation/engine/")) {
+                        || path.contains("/core/navigation/engine/") || path.contains("/paper/navigation/engine/")
+                        || LANDMARK_FILES.stream().anyMatch(path::endsWith)) {
                         continue;
                     }
                     String text = Files.readString(file);
