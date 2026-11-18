@@ -130,18 +130,20 @@ public final class Route {
     private final SnapPoint end;
     private final List<Integer> nodeIds;
     private final Map<RoadClass, Double> classCost;
+    /** Off-road phase 4 (#707): the mode the step costs were computed in (rebuilt routes keep it). */
+    private final RouteMode mode;
     /** Phase 2 (#705): the walk links on the route, in order; empty for a road-only route. */
     private final List<WalkLinkStretch> walkLinks;
     /** Polyline distance where each step starts; null for a road-only route (its steps follow each other). */
     private final double[] stepStarts;
 
     private Route(List<Step> steps, List<double[]> polyline, double length, double cost, SnapPoint start, SnapPoint end,
-                  List<Integer> nodeIds, Map<RoadClass, Double> classCost) {
-        this(steps, polyline, length, cost, start, end, nodeIds, classCost, List.of(), null);
+                  List<Integer> nodeIds, Map<RoadClass, Double> classCost, RouteMode mode) {
+        this(steps, polyline, length, cost, start, end, nodeIds, classCost, mode, List.of(), null);
     }
 
     private Route(List<Step> steps, List<double[]> polyline, double length, double cost, SnapPoint start, SnapPoint end,
-                  List<Integer> nodeIds, Map<RoadClass, Double> classCost, List<WalkLinkStretch> walkLinks,
+                  List<Integer> nodeIds, Map<RoadClass, Double> classCost, RouteMode mode, List<WalkLinkStretch> walkLinks,
                   double[] stepStarts) {
         this.steps = Collections.unmodifiableList(steps);
         this.polyline = Collections.unmodifiableList(polyline);
@@ -155,6 +157,7 @@ public final class Route {
         this.end = end;
         this.nodeIds = Collections.unmodifiableList(nodeIds);
         this.classCost = classCost;
+        this.mode = mode;
         this.walkLinks = List.copyOf(walkLinks);
         this.stepStarts = stepStarts;
     }
@@ -165,6 +168,12 @@ public final class Route {
      */
     public static Route build(RoadNetworkSnapshot snapshot, SnapPoint start, SnapPoint end, List<Step> steps,
                               Map<RoadClass, Double> classCost) {
+        return build(snapshot, start, end, steps, classCost, RouteMode.DEFAULT);
+    }
+
+    /** {@link #build(RoadNetworkSnapshot, SnapPoint, SnapPoint, List, Map)} with the step costs of a {@link RouteMode} (#707). */
+    public static Route build(RoadNetworkSnapshot snapshot, SnapPoint start, SnapPoint end, List<Step> steps,
+                              Map<RoadClass, Double> classCost, RouteMode mode) {
         List<Step> normalised = new ArrayList<>(steps.size());
         List<double[]> polyline = new ArrayList<>();
         List<Integer> nodes = new ArrayList<>();
@@ -176,7 +185,7 @@ public final class Route {
             EdgePolyline p = snapshot.polyline(s.edge());
             double fraction = p.length() <= 0 ? 0 : Math.abs(s.exitAlong() - s.entryAlong()) / p.length();
             double stepLength = fraction * s.edge().length();
-            double stepCost = stepLength * snapshot.costFactor(s.edge(), classCost);
+            double stepCost = stepLength * snapshot.costFactor(s.edge(), classCost, mode);
             normalised.add(new Step(s.edge(), s.forward(), s.entryAlong(), s.exitAlong(), stepLength, stepCost, distance,
                 s.verdict()));
             distance += stepLength;
@@ -192,7 +201,7 @@ public final class Route {
             }
         }
         append(polyline, end.point().clone());
-        return new Route(normalised, polyline, distance, cost, start, end, nodes, Map.copyOf(classCost));
+        return new Route(normalised, polyline, distance, cost, start, end, nodes, Map.copyOf(classCost), mode);
     }
 
     /**
@@ -202,10 +211,19 @@ public final class Route {
      */
     public static Route buildPieces(RoadNetworkSnapshot snapshot, SnapPoint start, SnapPoint end, List<? extends Piece> pieces,
                                     Map<RoadClass, Double> classCost) {
+        return buildPieces(snapshot, start, end, pieces, classCost, RouteMode.DEFAULT);
+    }
+
+    /**
+     * {@link #buildPieces(RoadNetworkSnapshot, SnapPoint, SnapPoint, List, Map)} with the road step costs of a
+     * {@link RouteMode} (#707); a link keeps the routing cost its {@link LinkStep} carries (priced by the mode already).
+     */
+    public static Route buildPieces(RoadNetworkSnapshot snapshot, SnapPoint start, SnapPoint end, List<? extends Piece> pieces,
+                                    Map<RoadClass, Double> classCost, RouteMode mode) {
         if (pieces.stream().noneMatch(p -> p instanceof LinkStep)) {
             List<Step> steps = new ArrayList<>(pieces.size());
             pieces.forEach(p -> steps.add((Step) p));
-            return build(snapshot, start, end, steps, classCost);
+            return build(snapshot, start, end, steps, classCost, mode);
         }
         List<Step> normalised = new ArrayList<>();
         List<double[]> polyline = new ArrayList<>();
@@ -223,7 +241,7 @@ public final class Route {
                 EdgePolyline p = snapshot.polyline(s.edge());
                 double fraction = p.length() <= 0 ? 0 : Math.abs(s.exitAlong() - s.entryAlong()) / p.length();
                 double stepLength = fraction * s.edge().length();
-                double stepCost = stepLength * snapshot.costFactor(s.edge(), classCost);
+                double stepCost = stepLength * snapshot.costFactor(s.edge(), classCost, mode);
                 normalised.add(new Step(s.edge(), s.forward(), s.entryAlong(), s.exitAlong(), stepLength, stepCost,
                     distance, s.verdict()));
                 stepRanges.add(new int[] {fromIndex});
@@ -267,13 +285,13 @@ public final class Route {
             links.add(new WalkLinkStretch((Integer) r[0], (WalkLink) r[1], cumulative[(Integer) r[2]],
                 cumulative[(Integer) r[3]], (Double) r[4], (Double) r[5]));
         }
-        return new Route(normalised, polyline, distance, cost, start, end, nodes, Map.copyOf(classCost), links,
+        return new Route(normalised, polyline, distance, cost, start, end, nodes, Map.copyOf(classCost), mode, links,
             stepStarts);
     }
 
     /** A route without steps: the start point only. */
     public static Route empty(SnapPoint start) {
-        return new Route(List.of(), List.of(start.point().clone()), 0, 0, start, start, List.of(), Map.of());
+        return new Route(List.of(), List.of(start.point().clone()), 0, 0, start, start, List.of(), Map.of(), RouteMode.DEFAULT);
     }
 
     private static void append(List<double[]> polyline, double[] pt) {
@@ -374,6 +392,11 @@ public final class Route {
         return cost;
     }
 
+    /** Off-road phase 4 (#707): the {@link RouteMode} the route's costs were computed in. */
+    public RouteMode mode() {
+        return mode;
+    }
+
     public SnapPoint start() {
         return start;
     }
@@ -410,9 +433,9 @@ public final class Route {
         Step last = head.get(count - 1);
         SnapPoint newEnd = SnapPoint.onEdge(snapshot, last.edge().id(), last.exitAlong());
         if (!walkLinks.isEmpty()) {
-            return buildPieces(snapshot, start, newEnd, pieces(head, count), classCost);
+            return buildPieces(snapshot, start, newEnd, pieces(head, count), classCost, mode);
         }
-        return build(snapshot, start, newEnd, head, classCost);
+        return build(snapshot, start, newEnd, head, classCost, mode);
     }
 
     /** Same steps with verdicts from another policy (the explainer's partial route). */
@@ -422,9 +445,9 @@ public final class Route {
             re.add(s.withVerdict(policy.check(s.edge())));
         }
         if (!walkLinks.isEmpty()) {
-            return buildPieces(snapshot, start, end, pieces(re, re.size()), classCost);
+            return buildPieces(snapshot, start, end, pieces(re, re.size()), classCost, mode);
         }
-        return build(snapshot, start, end, re, classCost);
+        return build(snapshot, start, end, re, classCost, mode);
     }
 
     /** {@code steps} (this route's, re-verdicted) with this route's walk links before step {@code endStep} put back. */

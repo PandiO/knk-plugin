@@ -19,19 +19,28 @@ import java.util.Objects;
  * @param goals        one or more goal points; the search stops at the first one reached
  * @param accessPolicy the player's availability rules (built per request)
  * @param classCost    routing factor per road class (edges without a profile use 1.0)
+ * @param mode         off-road phase 4 (#707, DESIGN § 5.4): which costs the route is planned with;
+ *                     {@link RouteMode#DEFAULT} ({@code preferred}, today's routing) for every caller that names none
  */
 public record RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy accessPolicy,
-                           Map<RoadClass, Double> classCost) {
+                           Map<RoadClass, Double> classCost, RouteMode mode) {
 
     public RouteRequest {
         Objects.requireNonNull(start, "start");
         Objects.requireNonNull(accessPolicy, "accessPolicy");
         Objects.requireNonNull(classCost, "classCost");
+        Objects.requireNonNull(mode, "mode");
         goals = List.copyOf(goals);
         if (goals.isEmpty()) {
             throw new IllegalArgumentException("a route request needs at least one goal");
         }
         classCost = Map.copyOf(classCost);
+    }
+
+    /** A request in the default mode ({@code preferred}, today's routing). */
+    public RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy accessPolicy,
+                        Map<RoadClass, Double> classCost) {
+        this(start, goals, accessPolicy, classCost, RouteMode.DEFAULT);
     }
 
     /** Single goal with the parameters' class costs. */
@@ -46,10 +55,15 @@ public record RouteRequest(SnapPoint start, List<SnapPoint> goals, AccessPolicy 
     }
 
     public RouteRequest withPolicy(AccessPolicy policy) {
-        return new RouteRequest(start, goals, policy, classCost);
+        return new RouteRequest(start, goals, policy, classCost, mode);
     }
 
     public RouteRequest withStart(SnapPoint newStart) {
-        return new RouteRequest(newStart, goals, accessPolicy, classCost);
+        return new RouteRequest(newStart, goals, accessPolicy, classCost, mode);
+    }
+
+    /** This request in another {@link RouteMode} (#707). */
+    public RouteRequest withMode(RouteMode newMode) {
+        return new RouteRequest(start, goals, accessPolicy, classCost, newMode);
     }
 }

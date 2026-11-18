@@ -3279,6 +3279,8 @@ public class KnKPlugin extends JavaPlugin {
             navigateCommand.setMatchScope(() -> navigationCompass);
             // Destination engine phase 3 (#69): null unless navigation.destination-engine is on
             navigateCommand.setEngine(() -> navigationEngine);
+            // Off-road phase 4 (#707): the route mode words' nodes knk.navigate.mode.<word> through KnkPermissible
+            navigateCommand.setModePermissions(commandPermissions());
             registerTabCommand("navigate", navigateCommand);
             // Location retention (KNG-80): /knk location here|tp|orphans replaces the built-in /knk location here;
             // each action checks its own knk.admin.location* node. tp goes through the KNG-17 teleport engine.

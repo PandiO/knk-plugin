@@ -18,6 +18,8 @@ import org.bukkit.entity.Player;
 import net.knightsandkings.knk.core.navigation.destinations.Candidate;
 import net.knightsandkings.knk.core.navigation.destinations.DestinationEngine;
 import net.knightsandkings.knk.core.navigation.destinations.InitialScopes;
+import net.knightsandkings.knk.core.roads.route.RouteMode;
+import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
 import net.knightsandkings.knk.paper.navigation.MatchNavigationScope.MatchDestination;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Located;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Mode;
@@ -25,8 +27,11 @@ import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Resolutio
 import net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine;
 
 /**
- * {@code /navigate <destination> [spawn|region]}, {@code /navigate stop}, {@code /navigate}
- * (DESIGN §6.1; alias {@code /nav} in plugin.yml). Node {@code knk.navigate} (default true),
+ * {@code /navigate <destination> [shortest|efficient|preferred] [spawn|region]}, {@code /navigate stop}, {@code /navigate}
+ * (DESIGN §6.1; alias {@code /nav} in plugin.yml). Off-road phase 4 (PandiO/knk-workspace#707, off-road DESIGN § 4.4,
+ * O24, O25): the optional route mode word stands before the trailing {@code spawn}/{@code region}; without one the
+ * route is {@link RouteMode#DEFAULT} (today's) and needs no node, a typed word needs {@code knk.navigate.mode.<word>},
+ * and tab completion offers only the words the player holds. Node {@code knk.navigate} (default true),
  * checked like {@code DiscoveryAdminCommand.hasNode} (R15): Bukkit's permissible or KnkPermissible's
  * cache. Parsing and resolution only - {@link NavigationService} does the rest. The services are
  * read lazily: they exist only when {@code navigation.enabled} and the road cache started.
@@ -47,6 +52,11 @@ public class NavigateCommand implements TabExecutor {
      * engine resolves and completes; null (the flag off, the default) keeps today's paths below unchanged.
      */
     private Supplier<PlayerNavigationEngine> engine = () -> null;
+    /**
+     * Off-road phase 4 (#707): the in-house checks of the mode nodes ({@code whenAllowed} to navigate, the cached
+     * {@code hasForCompletion} to complete); null (tests, no API) checks Bukkit and {@code knkPermission}'s cache.
+     */
+    private CommandPermissions modePermissions;
 
     public NavigateCommand(Supplier<NavigationService> service, Supplier<NavigationDestinations> destinations,
                            BiPredicate<Player, String> knkPermission, Executor mainThread) {
@@ -59,6 +69,11 @@ public class NavigateCommand implements TabExecutor {
     /** The rule for players in a minigame match (KNG-234); read lazily like the other services. */
     public void setMatchScope(Supplier<MatchNavigationScope> matchScope) {
         this.matchScope = Objects.requireNonNull(matchScope, "matchScope");
+    }
+
+    /** The in-house permission checks of the route mode nodes (#707). */
+    public void setModePermissions(CommandPermissions modePermissions) {
+        this.modePermissions = modePermissions;
     }
 
     /** The destination engine, read lazily; a supplier answering null means the flag is off. */
@@ -108,7 +123,8 @@ public class NavigateCommand implements TabExecutor {
             navigateInMatch(player, navigation, String.join(" ", args).trim(), inMatch.get());
             return true;
         }
-        Parsed parsed = parse(args);
+        ParsedRoute parsedRoute = parseRoute(args);
+        Parsed parsed = parsedRoute.parsed();
         Resolution resolution = catalogue.resolve(parsed.destination(), player.getWorld().getName());
         if (resolution.ambiguous()) {
             player.sendMessage(NavigationMessages.ambiguous(parsed.destination(), resolution.choiceNames()));
@@ -136,7 +152,8 @@ public class NavigateCommand implements TabExecutor {
                 });
                 return;
             }
-            navigation.navigate(player, located.destination());
+            withMode(player, parsedRoute.routeMode(), () -> navigation.navigate(player, located.destination()),
+                mode -> navigation.navigate(player, located.destination(), mode));
         }));
         return true;
     }
@@ -176,19 +193,24 @@ public class NavigateCommand implements TabExecutor {
      */
     private void navigateWithEngine(Player player, NavigationService navigation, PlayerNavigationEngine destinations,
                                     String[] args) {
-        Parsed parsed = parse(args);
+        ParsedRoute parsedRoute = parseRoute(args);
+        Parsed parsed = parsedRoute.parsed();
+        RouteMode routeMode = parsedRoute.routeMode();
         String typed = String.join(" ", args).trim();
         DestinationEngine.Resolution resolution = destinations.resolve(player, parsed.destination(), coreMode(parsed.mode()));
-        if (!resolution.found() && parsed.mode() != Mode.DEFAULT) {
+        if (!resolution.found() && (parsed.mode() != Mode.DEFAULT || routeMode != null)) {
             // "Blue spawn" may be a whole name (a team spawn in a match): the whole text, as today's match path read it
             DestinationEngine.Resolution whole = destinations.resolve(player, typed, Candidate.Mode.DEFAULT);
             if (whole.found()) {
                 resolution = whole;
+                routeMode = null; // the words were part of the name
             }
         }
         boolean inMatch = InitialScopes.SIEGE_MATCH.equals(resolution.list().scopeId());
+        DestinationEngine.Resolution found = resolution;
         switch (resolution.outcome()) {
-            case FOUND -> navigation.navigate(player, resolution.destination());
+            case FOUND -> withMode(player, routeMode, () -> navigation.navigate(player, found.destination()),
+                mode -> navigation.navigate(player, found.destination(), mode));
             case NOT_ALLOWED -> player.sendMessage(EngineReasons.forCommand(resolution.reason()));
             case AMBIGUOUS -> player.sendMessage(NavigationMessages.ambiguous(parsed.destination(), resolution.choiceNames()));
             case OTHER_WORLD -> player.sendMessage(NavigationMessages.otherWorld(resolution.candidate().label()));
@@ -226,7 +248,7 @@ public class NavigateCommand implements TabExecutor {
     }
 
     /** Tab completion through the engine: {@code stop}, the list's names, then the mode words outside a match. */
-    private static List<String> completeWithEngine(Player player, PlayerNavigationEngine destinations, String[] args) {
+    private List<String> completeWithEngine(Player player, PlayerNavigationEngine destinations, String[] args) {
         List<String> words = Arrays.asList(args);
         String current = args[args.length - 1].toLowerCase(Locale.ROOT);
         List<String> out = new ArrayList<>();
@@ -238,15 +260,72 @@ public class NavigateCommand implements TabExecutor {
                 out.add(word);
             }
         }
-        if (args.length >= 2 && destinations.isComplete(player, words.subList(0, args.length - 1))
-            && !InitialScopes.SIEGE_MATCH.equals(destinations.list(player).scopeId())) {
-            for (String mode : MODES) {
-                if (mode.startsWith(current) && !out.contains(mode)) {
-                    out.add(mode);
-                }
+        if (args.length >= 2 && !InitialScopes.SIEGE_MATCH.equals(destinations.list(player).scopeId())) {
+            List<String> before = words.subList(0, args.length - 1);
+            if (destinations.isComplete(player, before)) {
+                addTrailingWords(out, current, true, player);
+            } else if (endsWithRouteMode(before) && destinations.isComplete(player, before.subList(0, before.size() - 1))) {
+                addTrailingWords(out, current, false, player);
             }
         }
         return out;
+    }
+
+    /**
+     * The words after a complete destination (#707): {@code spawn}, {@code region}, then (when no mode word was typed
+     * yet) the route mode words the player holds, so a player without a mode node completes exactly as before.
+     */
+    private void addTrailingWords(List<String> out, String current, boolean offerRouteModes, Player player) {
+        for (String mode : MODES) {
+            if (mode.startsWith(current) && !out.contains(mode)) {
+                out.add(mode);
+            }
+        }
+        if (!offerRouteModes) {
+            return;
+        }
+        for (RouteMode routeMode : RouteMode.values()) {
+            String word = routeMode.word();
+            if (word.startsWith(current) && !out.contains(word) && holdsForCompletion(player, routeMode.node())) {
+                out.add(word);
+            }
+        }
+    }
+
+    private static boolean endsWithRouteMode(List<String> words) {
+        return words.size() >= 2 && RouteMode.fromWord(words.get(words.size() - 1)).isPresent();
+    }
+
+    /**
+     * Starts the navigation (#707, O25): without a typed word {@code today} runs, today's call with no check (the
+     * default mode); with one {@code inMode} runs once the player holds {@code knk.navigate.mode.<word>} (the in-house
+     * check waits for a real answer; a refusal says so and starts nothing).
+     */
+    private void withMode(Player player, RouteMode typed, Runnable today, java.util.function.Consumer<RouteMode> inMode) {
+        if (typed == null) {
+            today.run();
+            return;
+        }
+        java.util.function.Consumer<RouteMode> start = inMode;
+        CommandPermissions permissions = modePermissions;
+        if (permissions != null) {
+            permissions.whenAllowed(player, typed.node(), () -> start.accept(typed));
+            return;
+        }
+        if (player.hasPermission(typed.node()) || (knkPermission != null && knkPermission.test(player, typed.node()))) {
+            start.accept(typed);
+        } else {
+            player.sendMessage(CommandPermissions.NO_PERMISSION_MESSAGE);
+        }
+    }
+
+    /** The cached answer for completion (#707): fails closed on a cold cache and warms it for the next keystroke. */
+    private boolean holdsForCompletion(Player player, String node) {
+        CommandPermissions permissions = modePermissions;
+        if (permissions != null) {
+            return permissions.hasForCompletion(player, node);
+        }
+        return player.hasPermission(node) || (knkPermission != null && knkPermission.test(player, node));
     }
 
     /** The command's mode word as the engine's. */
@@ -273,6 +352,34 @@ public class NavigateCommand implements TabExecutor {
             }
         }
         return new Parsed(String.join(" ", words).trim(), mode);
+    }
+
+    /**
+     * Off-road phase 4 (#707): the destination, its trailing {@code spawn}/{@code region} and, before that, the route
+     * mode word ({@code null} when none was typed). Each trailing word is split off only while a destination word
+     * stays, so {@code /navigate shortest} navigates to a place called "shortest".
+     */
+    record ParsedRoute(Parsed parsed, RouteMode routeMode) {
+    }
+
+    static ParsedRoute parseRoute(String[] args) {
+        List<String> words = new ArrayList<>(Arrays.asList(args));
+        Mode mode = Mode.DEFAULT;
+        if (words.size() >= 2) {
+            Mode trailing = Mode.parse(words.get(words.size() - 1)).orElse(null);
+            if (trailing != null) {
+                mode = trailing;
+                words.remove(words.size() - 1);
+            }
+        }
+        RouteMode routeMode = null;
+        if (words.size() >= 2) {
+            routeMode = RouteMode.fromWord(words.get(words.size() - 1)).orElse(null);
+            if (routeMode != null) {
+                words.remove(words.size() - 1);
+            }
+        }
+        return new ParsedRoute(new Parsed(String.join(" ", words).trim(), mode), routeMode);
     }
 
     boolean hasNode(Player player) {
@@ -304,11 +411,12 @@ public class NavigateCommand implements TabExecutor {
             out.add("stop");
         }
         out.addAll(catalogue.complete(words, world));
-        if (args.length >= 2 && catalogue.isComplete(words.subList(0, args.length - 1), world)) {
-            for (String mode : MODES) {
-                if (mode.startsWith(current) && !out.contains(mode)) {
-                    out.add(mode);
-                }
+        if (args.length >= 2) {
+            List<String> before = words.subList(0, args.length - 1);
+            if (catalogue.isComplete(before, world)) {
+                addTrailingWords(out, current, true, player);
+            } else if (endsWithRouteMode(before) && catalogue.isComplete(before.subList(0, before.size() - 1), world)) {
+                addTrailingWords(out, current, false, player);
             }
         }
         return out;

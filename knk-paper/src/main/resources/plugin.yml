@@ -280,7 +280,7 @@ commands:
   # Node knk.navigate (default true) checked in NavigateCommand.
   navigate:
     description: "Guide yourself along the roads to a place, town, district, structure, street or road node"
-    usage: "/navigate <destination> [spawn|region] | /navigate stop | /navigate"
+    usage: "/navigate <destination> [shortest|efficient|preferred] [spawn|region] | /navigate stop | /navigate"
     aliases: [nav]
   hub:
     description: "Teleport to the hub (the hub spawn on the Game Settings page); /hub return is the outage return button"
@@ -1272,3 +1272,21 @@ permissions:
       Destination engine bypass (PandiO/knk-workspace#25, E5, E12): with navigation.destination-engine on, /navigate
       and the compass list every destination, also in a siege match. Not granted by default, not even to operators.
     default: false
+
+  knk.navigate.mode.shortest:
+    description: >-
+      /navigate <destination> shortest - route by length only, on roads and walk legs (off-road navigation phase 4,
+      PandiO/knk-workspace#707, O25). /navigate without a mode word needs no node.
+    default: op
+
+  knk.navigate.mode.efficient:
+    description: >-
+      /navigate <destination> efficient - route by road class cost and the walk profile's costs, without the road
+      cost multipliers (PandiO/knk-workspace#707, O25).
+    default: op
+
+  knk.navigate.mode.preferred:
+    description: >-
+      /navigate <destination> preferred - type the default mode word explicitly; the same route as /navigate without a
+      mode word (PandiO/knk-workspace#707, O25).
+    default: op
