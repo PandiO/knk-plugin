@@ -70,6 +70,8 @@ import net.knightsandkings.knk.core.roads.route.Snapper;
 import net.knightsandkings.knk.core.roads.links.RoadFirstRule;
 import net.knightsandkings.knk.core.roads.links.WalkLinkCache;
 import net.knightsandkings.knk.core.roads.links.WalkLinkCandidates;
+import net.knightsandkings.knk.core.landmarks.LandmarkConnections;
+import net.knightsandkings.knk.core.landmarks.LandmarkWeights;
 import net.knightsandkings.knk.core.roads.links.WalkLinkCounters;
 import net.knightsandkings.knk.core.roads.links.WalkLinkPlanner;
 import net.knightsandkings.knk.core.roads.route.WalkLink;
@@ -1536,6 +1538,8 @@ public final class NavigationService implements SiegeMatchObserver {
         boolean shape = deps.config().guidanceV2() && !leg.nearRoute;
         Location feet = a.player.getLocation();
         double[] target = leg.target;
+        // phase 5.2 (#709): landmark weights, resolved here on the main thread (WorldGuard shapes), cut to the leg later
+        LandmarkWeights weights = walkWeights(a);
         CompletableFuture<Supplier<WalkRequest>> capture;
         try {
             // KNG-121: the navigation's destination, also for the walk to the road (not the road's start)
@@ -1566,7 +1570,7 @@ public final class NavigationService implements SiegeMatchObserver {
                     WalkResult result;
                     WalkRequest searched = null;
                     try {
-                        searched = forMode(request.get(), a.mode);
+                        searched = forMode(request.get(), a.mode, weights);
                         result = walk.pathfinder().find(searched);
                     } catch (RuntimeException e) {
                         deps.logger().log(Level.WARNING, "[Navigation] Walk search failed for " + a.player.getName(), e);
@@ -1593,6 +1597,20 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         MovementProfile profile = request.profile().forMode(mode);
         return profile == request.profile() ? request : request.withProfile(profile);
+    }
+
+    /**
+     * Off-road phase 5.2 (#709, DESIGN § 5.4.3): {@link #forMode(WalkRequest, RouteMode)} plus the landmark weights
+     * whose areas the leg can reach ({@link WalkRequest#reachBox()}), in a mode that uses them only. Without weights,
+     * in another mode, or with no area near the leg, the request is {@code forMode}'s unchanged. Walk thread.
+     */
+    static WalkRequest forMode(WalkRequest request, RouteMode mode, LandmarkWeights weights) {
+        WalkRequest moded = forMode(request, mode);
+        if (moded == null || weights == null || weights.isEmpty() || mode == null || !mode.usesPreferenceWeights()) {
+            return moded;
+        }
+        var cells = weights.within(moded.reachBox());
+        return cells.isNone() ? moded : moded.withWeights(cells);
     }
 
     /**
@@ -1734,6 +1752,59 @@ public final class NavigationService implements SiegeMatchObserver {
     /** A link's walk search counts as arrived within this many blocks of the To node. */
     static final double LINK_ARRIVE = 1.5;
 
+    /**
+     * Off-road phase 5.2 (#709, DESIGN § 5.4.3, § 6.2.2): what the walk planner needs from the landmarks, with
+     * {@code navigation.landmarks} on. The server's implementation reads the navigation model
+     * ({@code engine/ModelLandmarks}); this service never names it.
+     */
+    public interface Landmarks {
+
+        /**
+         * Main thread: the weighted areas of {@code world} (landmarks with an extent and a preference other than 1.0),
+         * with a Region extent resolved to its Bukkit-free shape.
+         */
+        List<LandmarkWeights.Area> preferenceAreas(String world);
+
+        /** {@code navigation.preference-max}. */
+        double preferenceMax();
+
+        /** Any thread: road node id → landmark id, the nodes of {@code snapshot} landmarks stand on. */
+        Map<Integer, Integer> linkNodes(RoadNetworkSnapshot snapshot);
+
+        /** The landmark-to-landmark links ({@link LandmarkConnections#INFERRED} in v1, decision O05). */
+        default LandmarkConnections connections() {
+            return LandmarkConnections.INFERRED;
+        }
+    }
+
+    /** Off-road phase 5.2 (#709); null with {@code navigation.landmarks} off. */
+    private volatile Landmarks landmarks;
+
+    /** Turns landmark weights and landmark link nodes on ({@code navigation.landmarks}; KnKPlugin) or off (null). */
+    public void setLandmarks(Landmarks landmarks) {
+        this.landmarks = landmarks;
+    }
+
+    /**
+     * Main thread: the preference weights a walk leg of {@code a} searches with - only in a mode that uses them
+     * ({@code preferred}, {@link RouteMode#usesPreferenceWeights()}) and with landmarks on; otherwise
+     * {@link LandmarkWeights#NONE}. A failure is logged and means no weights.
+     */
+    private LandmarkWeights walkWeights(Active a) {
+        Landmarks source = landmarks;
+        if (source == null || a.mode == null || !a.mode.usesPreferenceWeights()) {
+            return LandmarkWeights.NONE;
+        }
+        try {
+            List<LandmarkWeights.Area> areas = source.preferenceAreas(a.player.getWorld().getName());
+            return areas == null || areas.isEmpty() ? LandmarkWeights.NONE
+                : LandmarkWeights.of(areas, source.preferenceMax());
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.WARNING, "[Navigation] Landmark weights failed for " + a.player.getName(), e);
+            return LandmarkWeights.NONE;
+        }
+    }
+
     /** Off-road phase 2 (#705); null with {@code navigation.walk-links} off. */
     private volatile WalkLinks walkLinks;
     /** Candidates per world for its current snapshot (routing threads). */
@@ -1757,13 +1828,28 @@ public final class NavigationService implements SiegeMatchObserver {
     /** The candidates of a snapshot, made once per snapshot (any thread). */
     WalkLinkCandidates candidatesFor(RoadNetworkSnapshot snapshot, NavigationConfig.WalkLinksConfig config) {
         String world = snapshot.world().toLowerCase(Locale.ROOT);
+        Landmarks marks = landmarks;
+        Map<Integer, Integer> landmarkNodes = marks == null ? Map.of() : landmarkNodes(marks, snapshot);
         WalkLinkCandidates known = linkCandidates.get(world);
-        if (known != null && known.snapshot() == snapshot) {
+        if (known != null && known.snapshot() == snapshot && known.landmarkNodes().equals(landmarkNodes)) {
             return known;
         }
-        WalkLinkCandidates fresh = new WalkLinkCandidates(snapshot, config.range(), config.ratio());
+        // phase 5.2 (#709): the road nodes landmarks stand on are link ends too (none with landmarks off)
+        WalkLinkCandidates fresh = landmarkNodes.isEmpty()
+            ? new WalkLinkCandidates(snapshot, config.range(), config.ratio())
+            : new WalkLinkCandidates(snapshot, config.range(), config.ratio(), landmarkNodes, marks.connections());
         linkCandidates.put(world, fresh);
         return fresh;
+    }
+
+    private Map<Integer, Integer> landmarkNodes(Landmarks marks, RoadNetworkSnapshot snapshot) {
+        try {
+            Map<Integer, Integer> nodes = marks.linkNodes(snapshot);
+            return nodes == null ? Map.of() : nodes;
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.WARNING, "[Navigation] Landmark link nodes failed for " + snapshot.world(), e);
+            return Map.of();
+        }
     }
 
     /** Main thread: the request's link planner, or null with walk links (or walk paths) off. */

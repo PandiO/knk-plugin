@@ -22,6 +22,9 @@ import org.junit.jupiter.api.Test;
  * the landmark files: the core landmark records and rules use the model's {@code Landmark} and its {@code Extent}, the
  * api-client maps the API's landmarks to it, and {@code /knk landmark} reads the model's domain and landmark names for
  * its {@code link} argument and completion (an admin command, not a navigation client: it never offers a destination).
+ * Off-road phase 5.2 (#709) adds the two landmark rules of the walk planner ({@code LandmarkWeights},
+ * {@code LandmarkLinkNodes}), which read the model's {@code Landmark}; {@code NavigationService} reaches them through its
+ * {@code Landmarks} port, implemented in {@code paper/navigation/engine}, and never names the model.
  */
 class NavigationModelUnreadTest {
 
@@ -30,6 +33,7 @@ class NavigationModelUnreadTest {
     /** Off-road phase 5.1 (#708): the landmark records, rules, mapper and admin command (see the class comment). */
     private static final List<String> LANDMARK_FILES = List.of(
         "/core/landmarks/LandmarkCommandArgs.java", "/core/landmarks/LandmarkExtent.java",
+        "/core/landmarks/LandmarkWeights.java", "/core/landmarks/LandmarkLinkNodes.java",
         "/core/domain/landmarks/LandmarkWrite.java", "/core/domain/landmarks/KnkLandmark.java",
         "/api/mapper/LandmarkMapper.java", "/paper/commands/LandmarkAdminCommand.java");
 

@@ -19,9 +19,15 @@ import java.util.Objects;
  * @param domainId          the domain it is linked to; null when none
  * @param domainName        that domain's name (the candidate's {@code in <domain>} detail); null when none
  * @param navigationEnabled false: the landmark exists but is not offered as a destination
+ * @param preference        the walk-cost multiplier inside the extent (off-road phase 5.2, PandiO/knk-workspace#709,
+ *                          DESIGN § 5.4.3; the API allows 0.25 to 4.0); 1.0 (no weight) when missing, not finite or
+ *                          not above 0
  */
 public record Landmark(int id, String name, String world, double x, double y, double z, Extent extent, String regionId,
-                       Double radius, Integer domainId, String domainName, boolean navigationEnabled) {
+                       Double radius, Integer domainId, String domainName, boolean navigationEnabled, double preference) {
+
+    /** No weight: a {@code preference} of 1.0. */
+    public static final double NO_PREFERENCE = 1.0;
 
     /** Off-road DESIGN § 6.3 {@code ExtentKind}. */
     public enum Extent {
@@ -46,5 +52,22 @@ public record Landmark(int id, String name, String world, double x, double y, do
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(world, "world");
         extent = extent == null ? Extent.NONE : extent;
+        preference = preference(preference);
+    }
+
+    /** A landmark without a preference weight (1.0), as before phase 5.2. */
+    public Landmark(int id, String name, String world, double x, double y, double z, Extent extent, String regionId,
+                    Double radius, Integer domainId, String domainName, boolean navigationEnabled) {
+        this(id, name, world, x, y, z, extent, regionId, radius, domainId, domainName, navigationEnabled, NO_PREFERENCE);
+    }
+
+    /** A stored or sent preference as the model holds it: missing, not finite or not above 0 is {@link #NO_PREFERENCE}. */
+    public static double preference(Double value) {
+        return value == null || !Double.isFinite(value) || !(value > 0) ? NO_PREFERENCE : value;
+    }
+
+    /** Whether this landmark weights walk cells: an extent (region or radius) and a preference other than 1.0. */
+    public boolean weighted() {
+        return extent != Extent.NONE && preference != NO_PREFERENCE;
     }
 }

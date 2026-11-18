@@ -864,6 +864,12 @@ navigation:
   # only), and turns /knk landmark on. false (the default): no landmark is loaded or offered and /knk landmark says it
   # is off. Read at start-up: restart the server after a change.
   landmarks: false
+  # Off-road navigation phase 5.2 (PandiO/knk-workspace#709): with landmarks true, a landmark with an extent (region
+  # or radius) and a preference other than 1.0 multiplies the walk cost of every cell inside it, in the preferred route
+  # mode only (the default mode; shortest and efficient ignore it): above 1.0 the walk search avoids the area, below
+  # 1.0 it prefers it. Overlapping landmarks multiply, capped at this value (and at its inverse the other way), so one
+  # bad overlap cannot block a hall. At least 1.0; read at start-up.
+  preference-max: 4.0
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in

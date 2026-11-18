@@ -8,7 +8,7 @@ import net.knightsandkings.knk.core.navigation.model.Landmark;
  * A landmark as the web API holds it (off-road navigation phase 5.1, PandiO/knk-workspace#708, DESIGN § 6.3;
  * {@code GET api/landmarks}): a named place made by staff, pinned to a Location, optionally linked to a domain and
  * optionally with an extent. What {@code /knk landmark} reads and writes; the navigation model keeps the smaller
- * {@link Landmark} (no Location id, no preference), see {@link #toModel()}.
+ * {@link Landmark} (no Location id; the preference since phase 5.2), see {@link #toModel()}.
  *
  * @param id                the landmark's id (its destination key is {@code landmark:<id>})
  * @param name              unique per world
@@ -22,7 +22,7 @@ import net.knightsandkings.knk.core.navigation.model.Landmark;
  * @param extent            None, Region or Radius
  * @param regionId          the WorldGuard region for a Region extent, else null
  * @param radius            blocks for a Radius extent, else null
- * @param preference        the walk-cost multiplier inside the extent (0.25 to 4.0; read from phase 5.2)
+ * @param preference        the walk-cost multiplier inside the extent (0.25 to 4.0; in the model since phase 5.2)
  * @param navigationEnabled false: not offered as a destination
  */
 public record KnkLandmark(int id, String name, Integer locationId, String world, double x, double y, double z,
@@ -40,6 +40,7 @@ public record KnkLandmark(int id, String name, Integer locationId, String world,
         if (world == null || world.isBlank()) {
             return null;
         }
-        return new Landmark(id, name, world, x, y, z, extent, regionId, radius, domainId, domainName, navigationEnabled);
+        return new Landmark(id, name, world, x, y, z, extent, regionId, radius, domainId, domainName, navigationEnabled,
+            preference);
     }
 }

@@ -54,6 +54,12 @@ import static net.knightsandkings.knk.core.roads.walk.WalkGrid.NO_LINK;
  * revised 2026-10-07): to the expanded cell closest to the target (3D, ties to the cheaper), when it
  * is at least {@link #MIN_PARTIAL_GAIN} blocks closer than the start cell.
  *
+ * <p><b>Preference weights</b> (off-road phase 5.2, PandiO/knk-workspace#709, DESIGN § 5.4.3): with
+ * {@link WalkRequest#weights() cell weights} the cost of entering a cell (everything above but the access verdict) is
+ * multiplied by the cell's {@link WalkCellWeights#multiplier multiplier}, and the heuristic by
+ * {@link WalkCellWeights#minMultiplier()}, so it stays admissible. With {@link WalkCellWeights#NONE} neither is
+ * touched: the search is exactly the one before.
+ *
  * <p><b>Counters</b> (off-road navigation phase 0, PandiO/knk-workspace#703): every result carries
  * {@link WalkResult#stats()} - expansions, cells touched, the wall time of {@link #find} and the cap that ended
  * the search. They cost two clock reads per search and nothing in the loop (the expansion count already exists,
@@ -129,6 +135,10 @@ public final class WalkSearch implements WalkPathfinder {
         private final WalkGrid grid;
         /** The clearance map of the clearance cost (phase 6.1); null without one. */
         private final WalkClearance clearance;
+        /** The request's cell weights (phase 5.2); null without any, so the loop stays as before. */
+        private final WalkCellWeights weights;
+        /** The heuristic's scale: the smallest multiplier in force, 1.0 without weights. */
+        private final double heuristicScale;
         private final LongMap<Node> nodes = new LongMap<>(1024);
         private final PriorityQueue<Entry> open = new PriorityQueue<>((a, b) -> {
             int c = Double.compare(a.f, b.f);
@@ -158,6 +168,9 @@ public final class WalkSearch implements WalkPathfinder {
             this.clearance = profile.usesClearance()
                 ? new WalkClearance((x, y, z) -> isStanding(x, y, z) && access.allows(x, y + 1, z), profile.wallClearance())
                 : null;
+            WalkCellWeights w = request.weights();
+            this.weights = w == null || w.isNone() ? null : w;
+            this.heuristicScale = weights == null ? 1.0 : Math.min(1.0, Math.max(0.0, weights.minMultiplier()));
         }
 
         WalkResult run() {
@@ -452,6 +465,9 @@ public final class WalkSearch implements WalkPathfinder {
             } else if (profile.wallCost() > 0 && besideWall(x, y, z)) {
                 cost += profile.wallCost();
             }
+            if (weights != null) {
+                cost *= weights.multiplier(x, y + 1, z);
+            }
             relax(u, BlockKey.pack(x, y, z), false, cost + accessCost, stepLength);
         }
 
@@ -480,7 +496,8 @@ public final class WalkSearch implements WalkPathfinder {
             if (accessCost == CellAccess.BLOCKED) {
                 return;
             }
-            relax(u, BlockKey.pack(x, y, z), true, move + accessCost, stepLength);
+            double cost = weights == null ? move : move * weights.multiplier(x, y, z);
+            relax(u, BlockKey.pack(x, y, z), true, cost + accessCost, stepLength);
         }
 
         /** The access verdict; NaN or negative answers count as blocked (they would break the search). */
@@ -520,7 +537,8 @@ public final class WalkSearch implements WalkPathfinder {
             double dx = BlockKey.x(n.key) + 0.5 - request.targetX();
             double dz = BlockKey.z(n.key) + 0.5 - request.targetZ();
             double dy = Math.abs(floorY(n) - request.targetFloorY());
-            return Math.max(Math.sqrt(dx * dx + dz * dz), dy);
+            double h = Math.max(Math.sqrt(dx * dx + dz * dz), dy);
+            return weights == null ? h : h * heuristicScale;
         }
 
         private WalkPath path(Node end) {

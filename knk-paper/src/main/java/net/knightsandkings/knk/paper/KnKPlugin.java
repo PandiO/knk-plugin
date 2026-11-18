@@ -2025,6 +2025,14 @@ public class KnKPlugin extends JavaPlugin {
         navigationService.setPlazaLines(() -> new net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld(
             regionTracker == null ? null : regionTracker.regionIds()), this::plazaLineOptions);
         startWalkLinks(navigation, walk, access);
+        // Off-road navigation phase 5.2 (PandiO/knk-workspace#709): landmark preference weights on walk legs in the
+        // preferred mode and landmarks as walk-link ends, with navigation.landmarks on (off: nothing changes)
+        if (landmarksConfig().enabled()) {
+            navigationService.setLandmarks(new net.knightsandkings.knk.paper.navigation.engine.ModelLandmarks(
+                () -> navigationModel == null ? null : navigationModel.holder(),
+                new net.knightsandkings.knk.paper.navigation.WorldGuardRegionShapes(),
+                landmarksConfig().preferenceMax()));
+        }
         navigationService.start();
 
         // KNG-234: the navigation compass - any item matching the web app's material + display name rule.
