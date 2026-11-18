@@ -122,6 +122,34 @@ class AnvilRegionTest {
         assertEquals("minecraft:tuff", AnvilRegion.paletteEntry(Map.of("", "minecraft:tuff")));
         assertEquals("minecraft:oak_stairs[facing=north,half=bottom]", AnvilRegion.paletteEntry(Map.of("Name",
             "minecraft:oak_stairs", "Properties", Map.of("half", "bottom", "facing", "north"))));
+        // link C1 (PandiO/knk-workspace#700): Minecraft 26.x writes a state other than the block's default this way
+        assertEquals("minecraft:stone_brick_stairs[facing=east,half=top]", AnvilRegion.paletteEntry(Map.of("id",
+            "minecraft:stone_brick_stairs", "properties", Map.of("half", "top", "facing", "east"))));
+        assertEquals("minecraft:lava[level=6]", AnvilRegion.paletteEntry(Map.of("", Map.of("id", "minecraft:lava",
+            "properties", Map.of("level", "6")))));
+    }
+
+    @Test
+    void theTowersStairsAndSlabsAreRead() throws Exception {
+        // link C1: the keep tower's stairs are read; before, states written as {id, properties}
+        // (a stair facing east, a top slab) were left out, and the tower's stair had gaps
+        NavSnapshotZip.Loaded loaded;
+        try (InputStream in = getClass().getResourceAsStream("/scenario-snapshots/keep-tower.zip")) {
+            loaded = NavSnapshotZip.read(in);
+        }
+        var m = loaded.snapshot().manifest();
+        SnapshotBox box = new SnapshotBox(m.boxMin(), m.boxMax());
+        int[] blocks = {0, 0, 0};
+        for (Map.Entry<String, byte[]> file : loaded.files().entrySet()) {
+            AnvilRegion.blocks(file.getKey(), file.getValue(), box, (x, y, z, state) -> {
+                blocks[0]++;
+                if (state.contains("stairs[") && !state.contains("facing=north")) {
+                    blocks[2]++;
+                }
+            });
+        }
+        assertTrue(blocks[0] > 40_000, blocks[0] + " blocks");
+        assertTrue(blocks[2] > 50, blocks[2] + " stairs facing east, south or west");
     }
 
     @Test

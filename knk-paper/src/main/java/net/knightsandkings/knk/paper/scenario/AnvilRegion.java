@@ -20,7 +20,8 @@ import net.knightsandkings.knk.core.npc.nav.snapshot.SnapshotBox;
  * PandiO/knk-workspace#670): the snapshot replay places a real route's blocks in a scenario box from the files
  * {@code /knk npc nav snapshot} copied. Reads the chunks' {@code sections} with their {@code block_states} (palette and
  * packed indexes, the format since 1.18; palette entries as {@code {Name, Properties}} or, since Minecraft 26.x, as
- * block state strings, wrapped in {@code {"": ...}} in a list of mixed types); gzip, zlib and uncompressed chunks. Chunks stored outside the file
+ * block state strings, wrapped in {@code {"": ...}} in a list of mixed types, and {@code {id, properties}} for a state
+ * that is not the block's default); gzip, zlib and uncompressed chunks. Chunks stored outside the file
  * ({@code .mcc}) and LZ4 chunks are skipped and counted.
  */
 public final class AnvilRegion {
@@ -194,12 +195,22 @@ public final class AnvilRegion {
         return state(map);
     }
 
-    /** A {@code {Name, Properties}} palette entry as {@code Name[key=value,...]} with the properties sorted. */
+    /**
+     * A {@code {Name, Properties}} palette entry as {@code Name[key=value,...]} with the properties sorted. Minecraft
+     * 26.x also writes a state whose properties differ from the block's defaults as {@code {id, properties}} (an upright
+     * stair facing east, a top slab): read the same way (PandiO/knk-workspace#700, link C1; before, those blocks were
+     * left out of every replay).
+     */
     static String state(Map<String, Object> entry) {
-        if (entry == null || !(entry.get("Name") instanceof String name)) {
+        if (entry == null) {
             return null;
         }
-        Map<String, Object> props = SceneSchematic.Nbt.map(entry.get("Properties"));
+        Object named = entry.containsKey("Name") ? entry.get("Name") : entry.get("id");
+        if (!(named instanceof String name)) {
+            return null;
+        }
+        Map<String, Object> props = SceneSchematic.Nbt.map(entry.containsKey("Name") ? entry.get("Properties")
+            : entry.get("properties"));
         if (props == null || props.isEmpty()) {
             return name;
         }

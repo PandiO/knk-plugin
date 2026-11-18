@@ -1187,17 +1187,18 @@ public final class NpcNavigationService {
             ? HopPlanner.hops(ports.world(), List.of(from, roadStart), nav.settings.hopBlocks()) : List.of();
         List<NavPoint> tailHops = to != null && roadEnd.horizontalDistance(to) > ARRIVAL_DISTANCE
             ? HopPlanner.hops(ports.world(), List.of(roadEnd, to), nav.settings.hopBlocks()) : List.of();
-        takeRoute(nav, generation, at, line, gates, plazas, headHops, tailHops);
+        takeRoute(nav, generation, at, line, null, gates, plazas, headHops, tailHops);
     }
 
     /**
      * Takes a route line in hand: the hops before it (an off-road start the walk search did not plan), the line in
-     * stretches, the hops after it (an off-road goal the walk search did not plan).
+     * stretches, the hops after it (an off-road goal the walk search did not plan). {@code walked}: per line point,
+     * whether it is a walk search's cell (link C1), or null.
      */
-    private void takeRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
+    private void takeRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line, boolean[] walked,
                            List<RoadPlanner.GateCrossing> gates, List<PlazaCrossing> plazas,
                            List<NavPoint> headHops, List<NavPoint> tailHops) {
-        nav.follower = new RouteFollower(line, plazas);
+        nav.follower = new RouteFollower(line, plazas, walked);
         nav.trail = null;
         nav.gapLeg = null;
         nav.afterGap = false;
@@ -1272,8 +1273,9 @@ public final class NpcNavigationService {
                     combined.addAll(h.path());
                     offRoadWalks++;
                     ports.log().accept(String.format(Locale.ROOT, "%s off-road walk from %s joins the road at %s: %d "
-                        + "cells (%s)", nav.mover.name(), NavGeometry.block(at), NavGeometry.block(HopPlanner.feet(
-                        road.get(first))), h.path().size(), h.detail()));
+                        + "cells (%s); cells (floors): %s", nav.mover.name(), NavGeometry.block(at),
+                        NavGeometry.block(HopPlanner.feet(road.get(first))), h.path().size(), h.detail(),
+                        cellsOf(h.path())));
                 } else {
                     headHops = HopPlanner.hops(ports.world(), List.of(from, road.get(0)), nav.settings.hopBlocks());
                     offRoadHops++;
@@ -1288,8 +1290,9 @@ public final class NpcNavigationService {
                     tailPath = t.walk().path();
                     offRoadWalks++;
                     ports.log().accept(String.format(Locale.ROOT, "%s off-road walk to the goal %s from the road at %s:"
-                        + " %d cells (%s)", nav.mover.name(), NavGeometry.block(HopPlanner.feet(to)),
-                        NavGeometry.block(HopPlanner.feet(road.get(last))), tailPath.size(), t.walk().detail()));
+                        + " %d cells (%s); cells (floors): %s", nav.mover.name(), NavGeometry.block(HopPlanner.feet(to)),
+                        NavGeometry.block(HopPlanner.feet(road.get(last))), tailPath.size(), t.walk().detail(),
+                        cellsOf(tailPath)));
                 } else {
                     tailHops = HopPlanner.hops(ports.world(), List.of(road.get(last), to), nav.settings.hopBlocks());
                     offRoadHops++;
@@ -1298,9 +1301,15 @@ public final class NpcNavigationService {
                         t.walk().detail()));
                 }
             }
+            int walkedHead = combined.size();
             appendCells(combined, road.subList(first, last + 1));
+            int roadEnd = combined.size();
             appendCells(combined, tailPath);
-            takeRoute(nav, generation, now, combined, gates, plazas, headHops, tailHops);
+            boolean[] walked = new boolean[combined.size()];
+            for (int i = 0; i < walked.length; i++) {
+                walked[i] = i < walkedHead || i >= roadEnd;
+            }
+            takeRoute(nav, generation, now, combined, walked, gates, plazas, headHops, tailHops);
         }));
     }
 
@@ -1321,10 +1330,12 @@ public final class NpcNavigationService {
             }
             if (error == null && walk != null && walk.isFound()) {
                 offRoadWalks++;
-                ports.log().accept(String.format(Locale.ROOT, "%s walk-only trip from %s to %s: %d cells (%s)",
-                    nav.mover.name(), NavGeometry.block(at), NavGeometry.block(HopPlanner.feet(to)), walk.path().size(),
-                    walk.detail()));
-                takeRoute(nav, generation, now, walk.path(), List.of(), List.of(), List.of(), List.of());
+                ports.log().accept(String.format(Locale.ROOT, "%s walk-only trip from %s to %s: %d cells (%s); cells "
+                    + "(floors): %s", nav.mover.name(), NavGeometry.block(at), NavGeometry.block(HopPlanner.feet(to)),
+                    walk.path().size(), walk.detail(), cellsOf(walk.path())));
+                boolean[] walked = new boolean[walk.path().size()];
+                java.util.Arrays.fill(walked, true);
+                takeRoute(nav, generation, now, walk.path(), walked, List.of(), List.of(), List.of(), List.of());
                 return;
             }
             offRoadHops++;
@@ -1387,6 +1398,15 @@ public final class NpcNavigationService {
             }
         }
         return -1;
+    }
+
+    /** The cells of a walk as "x y z" floor blocks, comma-separated (the NPC log, link C1). */
+    private static String cellsOf(List<NavPoint> path) {
+        StringBuilder out = new StringBuilder();
+        for (NavPoint p : path) {
+            out.append(out.length() == 0 ? "" : ", ").append(NavGeometry.block(p));
+        }
+        return out.toString();
     }
 
     /** Appends floor points, leaving out one in the block (and floor) of the point before it (a joint). */

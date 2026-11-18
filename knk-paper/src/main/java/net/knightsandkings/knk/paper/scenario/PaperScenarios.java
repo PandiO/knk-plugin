@@ -33,6 +33,8 @@ import net.knightsandkings.knk.paper.scenario.scenarios.NpcDoorwayCrowdScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGuardLedgePushScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcJaggedStraightScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcSnapshotReplayScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepTowerReplayScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.NpcOffRoadScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseClimbScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseGroupScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcStairhouseSinglesScenario;
@@ -100,6 +102,11 @@ public final class PaperScenarios {
             .register(new NpcStairhouseGroupScenario(true))
             .register(new NpcStairhouseClimbScenario())
             .register(new NpcSnapshotReplayScenario())
+            // link C1 (PandiO/knk-workspace#700): off-road legs with the walk search
+            .register(new NpcOffRoadScenario(net.knightsandkings.knk.paper.scenario.NpcOffRoadScene.Kind.DETOUR))
+            .register(new NpcOffRoadScenario(net.knightsandkings.knk.paper.scenario.NpcOffRoadScene.Kind.UPSTAIRS))
+            .register(new NpcOffRoadScenario(net.knightsandkings.knk.paper.scenario.NpcOffRoadScene.Kind.RAVINE))
+            .register(new NpcKeepTowerReplayScenario())
             .register(new NpcJaggedStraightScenario(false))
             .register(new NpcJaggedStraightScenario(true))
             .register(new NpcDoorwayCrowdScenario(false))

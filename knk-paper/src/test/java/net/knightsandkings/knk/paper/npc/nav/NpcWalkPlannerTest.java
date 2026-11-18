@@ -173,4 +173,30 @@ class NpcWalkPlannerTest {
         assertTrue(goal.reached(10.5, 80, 1.5));
         assertFalse(goal.reached(10.5, 64, 0.5), "under the second target, a floor too low");
     }
+
+    @Test
+    void cellsABodyCannotStandInAreFoundOnAPathButNotItsStart() {
+        // an open trapdoor's panel at feet 65 on x 3 (link C1, the keep tower's decorative door)
+        NpcWalkPlanner.BodyCheck body = (world, x, feetY, z) -> x == 3 && feetY == 65 || x == 0;
+        List<NavPoint> path = List.of(floor(0.5, 0.5), floor(1.5, 0.5), floor(2.5, 0.5), floor(3.5, 0.5),
+            floor(4.5, 0.5));
+        List<int[]> blocked = NpcWalkPlanner.bodyBlocked(body, path);
+        assertEquals(1, blocked.size(), "the start's own cell is not judged");
+        assertEquals(List.of(3, 65, 0), List.of(blocked.get(0)[0], blocked.get(0)[1], blocked.get(0)[2]));
+    }
+
+    @Test
+    void aClosedCellIsWalkedRound() {
+        // what a search again after the body check does: the cell closed, the search goes round it
+        Grid grid = new Grid();
+        grid.wall(5, -10, -1);
+        grid.wall(5, 1, 10);
+        WalkTerrain terrain = new WalkTerrain(grid, GateCells.NONE, WalkCells.NONE);
+        CellAccess closed = (x, feetY, z) -> x == 5 && z == 0 ? CellAccess.BLOCKED : 0.0;
+        OffRoadWalks.Walk walk = NpcWalkPlanner.search(terrain, closed, NpcWalkPlanner.npcProfile(MovementProfile.PLAYER,
+            true), WalkBudget.DEFAULTS, new NavPoint(W, 0.5, 65, 0.5), List.of(floor(10.5, 0.5)), floor(10.5, 0.5), 1.5,
+            new WalkSearch());
+        assertTrue(walk.isFound(), walk.toString());
+        assertTrue(walk.path().stream().noneMatch(p -> p.blockX() == 5 && p.blockZ() == 0), "not through the gap");
+    }
 }

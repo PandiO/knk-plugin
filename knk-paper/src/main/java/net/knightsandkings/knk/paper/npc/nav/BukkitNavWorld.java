@@ -45,8 +45,23 @@ public final class BukkitNavWorld implements NavWorld {
         }
         Block floor = w.getBlockAt(x, floorY, z);
         Material type = floor.getType();
-        return type.isSolid() && !Tag.LEAVES.isTagged(type) && w.getBlockAt(x, floorY + 1, z).isPassable()
-            && w.getBlockAt(x, floorY + 2, z).isPassable();
+        return type.isSolid() && !Tag.LEAVES.isTagged(type) && passable(w.getBlockAt(x, floorY + 1, z))
+            && passable(w.getBlockAt(x, floorY + 2, z));
+    }
+
+    /**
+     * Whether a body passes through a block: no collision, or an open door or fence gate (link C1,
+     * PandiO/knk-workspace#700). An open door's panel stands at the side of its cell, so a walk through the doorway
+     * passes it; before, every door was a wall, and a walk through an open doorway (the keep tower's) was a gap no
+     * search could take.
+     */
+    static boolean passable(Block block) {
+        if (block.isPassable()) {
+            return true;
+        }
+        BlockData data = block.getBlockData();
+        return (data instanceof org.bukkit.block.data.type.Door || data instanceof org.bukkit.block.data.type.Gate)
+            && ((org.bukkit.block.data.Openable) data).isOpen();
     }
 
     @Override
@@ -81,7 +96,7 @@ public final class BukkitNavWorld implements NavWorld {
             if (block == null) {
                 break;
             }
-            if (!block.isPassable()) {
+            if (!passable(block)) {
                 return k + (isSlab(block.getBlockData(), Slab.Type.TOP) ? 0.5 : 0.0) - floorTop;
             }
         }
@@ -137,7 +152,7 @@ public final class BukkitNavWorld implements NavWorld {
     }
 
     static boolean blocksBody(Block block) {
-        if (block.isPassable()) {
+        if (passable(block)) {
             return false;
         }
         BlockData data = block.getBlockData();
