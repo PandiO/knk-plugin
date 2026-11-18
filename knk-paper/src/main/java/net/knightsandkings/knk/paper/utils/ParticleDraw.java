@@ -85,6 +85,21 @@ public final class ParticleDraw {
     }
 
     /**
+     * One particle at each of {@code points}, exactly there, for one viewer (the anchored walk trail, off-road
+     * navigation phase 6.2: the anchors are the particles, nothing is sampled in between). Points the viewer cannot see
+     * are skipped.
+     */
+    public static void points(Player viewer, List<Vector> points, Particle particle, Object data) {
+        Objects.requireNonNull(points, "points");
+        World world = viewer.getWorld();
+        for (Vector p : points) {
+            if (canSee(viewer, world, p.getX(), p.getY(), p.getZ())) {
+                spawn(viewer, particle, data, p);
+            }
+        }
+    }
+
+    /**
      * A vertical line of particles from {@code base} up {@code height} blocks, one every {@code spacing},
      * for one viewer - node markers of the road overlay.
      */

@@ -270,6 +270,74 @@ class TrailRendererTest {
         verify(world, never()).getBlockAt(anyInt(), anyInt(), anyInt());
     }
 
+    // ==================== off-road phase 6.2 (#711): anchored walk trails (DESIGN § 7.2, A17) ====================
+
+    @Test
+    void theAnchoredWindowSitsOnMultiplesOfTheSpacingFromThePathsStart() {
+        List<double[]> window = TrailRenderer.anchoredWindow(lPath(), 4.2, 12, 3);
+
+        assertEquals(4, window.size(), "anchors 6, 9, 12 and 15 along: at or after the cursor, within 12 of it");
+        assertEquals(6.5, window.get(0)[2], 1e-9, "6 along the first segment");
+        assertEquals(9.5, window.get(1)[2], 1e-9, "9 along");
+        assertEquals(2.5, window.get(2)[0], 1e-9, "12 along = 2 past the corner");
+        assertEquals(5.5, window.get(3)[0], 1e-9, "15 along");
+        assertEquals(64, window.get(0)[1], 1e-9, "floor y kept");
+
+        List<double[]> atTheEnd = TrailRenderer.anchoredWindow(lPath(), 25, 12, 4);
+        assertEquals(List.of(28.0, 30.0), atTheEnd.stream().map(p -> p[0] - 20.5 + 30).toList(),
+            "the anchor at 28 and the path's end (30 is no multiple of 4)");
+        assertTrue(TrailRenderer.anchoredWindow(List.of(), 0, 12, 3).isEmpty());
+        assertEquals(1, TrailRenderer.anchoredWindow(List.of(new double[] {1, 64, 1}), 0, 12, 3).size());
+    }
+
+    @Test
+    void aRedrawWithThePlayerStillOrSteppingMovesNoParticleAhead() {
+        // A17: two redraws standing still draw the same positions; a step of the player moves no particle ahead
+        List<double[]> still = TrailRenderer.anchoredWindow(lPath(), 7.3, 12, 3);
+        List<double[]> again = TrailRenderer.anchoredWindow(lPath(), 7.3, 12, 3);
+        assertEquals(still.size(), again.size());
+        for (int i = 0; i < still.size(); i++) {
+            org.junit.jupiter.api.Assertions.assertArrayEquals(still.get(i), again.get(i), 0.0);
+        }
+        List<double[]> stepped = TrailRenderer.anchoredWindow(lPath(), 8.1, 12, 3);
+        for (double[] p : stepped) {
+            boolean drawnBefore = still.stream().anyMatch(q -> java.util.Arrays.equals(p, q));
+            boolean newAtTheFarEnd = p == stepped.get(stepped.size() - 1);
+            assertTrue(drawnBefore || newAtTheFarEnd, "a particle ahead moved: " + java.util.Arrays.toString(p));
+        }
+        // today's window slides with the player instead: its first point is the projection itself
+        assertEquals(7.3 + 0.5, TrailRenderer.pathWindow(lPath(), new double[] {0.5, 64, 7.8}, 12, 3).get(0)[2], 1e-9);
+    }
+
+    @Test
+    void drawPathWithACursorSpawnsOneParticleAtEachAnchorInTheLegColour() {
+        World world = mock(World.class);
+        Player viewer = mock(Player.class);
+        when(viewer.getWorld()).thenReturn(world);
+        when(viewer.getLocation()).thenReturn(new Location(world, 0.5, 65, 0.5));
+        TrailRenderer renderer = new TrailRenderer(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 2.5),
+            new TickBudget(() -> 20.0));
+
+        renderer.drawPath(viewer, lPath(), 0);
+
+        // trail-leg-spacing 2.5: anchors 0, 2.5, ..., 30 along the 30-block path - 13 particles, each exactly there
+        verify(viewer, org.mockito.Mockito.times(13)).spawnParticle(eq(Particle.DUST), anyDouble(),
+            eq(64 + TrailRenderer.LIFT), anyDouble(), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any());
+        verify(viewer).spawnParticle(eq(Particle.DUST), eq(0.5), eq(64 + TrailRenderer.LIFT), eq(5.5), anyInt(),
+            anyDouble(), anyDouble(), anyDouble(), anyDouble(), any());
+        verify(viewer).spawnParticle(eq(Particle.DUST), eq(3.0), eq(64 + TrailRenderer.LIFT), eq(10.5), anyInt(),
+            anyDouble(), anyDouble(), anyDouble(), anyDouble(), any());
+        verify(world, never()).getBlockAt(anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    void theLegSpacingDefaultsToTodaysAndIsValidated() {
+        assertEquals(3.0, NavigationConfig.TrailConfig.defaults().legSpacing(), 1e-9);
+        assertEquals(TrailRenderer.LEG_SPACING, NavigationConfig.TrailConfig.DEFAULT_LEG_SPACING, 1e-9);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+            () -> new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 0.1).validate());
+    }
+
     @Test
     void unknownParticleNamesFallBackToDust() {
         assertEquals(Particle.DUST, TrailRenderer.particleOf("nonsense"));

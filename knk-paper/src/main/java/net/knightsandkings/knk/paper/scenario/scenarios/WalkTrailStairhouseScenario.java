@@ -210,7 +210,7 @@ public final class WalkTrailStairhouseScenario implements Scenario<ScenarioScene
             || live.isStandableFloor(w, x, floorY + 1, z);
     }
 
-    private static boolean overFloor(BukkitNavWorld live, String w, double[] p) {
+    static boolean overFloor(BukkitNavWorld live, String w, double[] p) {
         return open(live, w, (int) Math.floor(p[0]), floorOf(p), (int) Math.floor(p[2]));
     }
 
@@ -262,7 +262,7 @@ public final class WalkTrailStairhouseScenario implements Scenario<ScenarioScene
         return new NavPoint(w, p[0], floorOf(p) + 1, p[2]);
     }
 
-    private static String describe(double[] p) {
+    static String describe(double[] p) {
         return String.format(Locale.ROOT, "(%.2f, %.1f, %.2f)", p[0], p[1], p[2]);
     }
 }

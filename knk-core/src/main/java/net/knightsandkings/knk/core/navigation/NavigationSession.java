@@ -46,6 +46,13 @@ import java.util.function.Function;
  * </ul>
  * Positions are the player's <b>feet</b> block coordinates; the session compares them with the
  * route's floor-block polyline at {@code y + 1} (Phase 2c decision 1).
+ *
+ * <p><b>Winding back</b> ({@code navigation.guidance-v2}, off-road navigation DESIGN § 7.5, decision O15): built with
+ * {@link CursorParameters} the session keeps two numbers. {@link #along()} is the monotone {@code progress} (the ETA,
+ * the HUD's percentage, and through it the maneuvers already passed); {@link #cursor()} follows the player forwards and
+ * backwards ({@link PolylineCursor}, continuity within {@code cursor-jump}). The trail, the HUD distance, the maneuver
+ * ahead, the off-route distance and {@link #remainingBlocks()} come from the cursor. Without them (the flag off)
+ * {@code cursor() == along()} and everything is as before: {@code along = max(along, projection)} with the look-back.
  */
 public final class NavigationSession {
 
@@ -60,6 +67,8 @@ public final class NavigationSession {
     private final SessionParameters parameters;
     private Function<Route, List<Maneuver>> maneuvers;
     private final long startedTick;
+    /** {@code guidance-v2}'s cursor rules; null: today's monotone {@code along} alone. */
+    private final CursorParameters cursorParameters;
 
     private State state = State.PLANNING;
     private boolean started;
@@ -67,6 +76,13 @@ public final class NavigationSession {
     private List<Maneuver> routeManeuvers = List.of();
     private Optional<BlockedExplainer.Explanation> explanation = Optional.empty();
     private double along;
+    /**
+     * With {@link #cursorParameters}: the player's place on the route, forwards or backwards. A new route starts it at 0
+     * (a route starts where the player joins the road), so a route that passes its own start again keeps the first pass.
+     */
+    private double cursor;
+    /** {@link PolylineCursor#cumulative} of the route's polyline (with {@link #cursorParameters}). */
+    private double[] routeCumulative;
     private int offRouteTicks;
     private long lastRerouteRequestTick = Long.MIN_VALUE;
     private long lastImprovementRequestTick = Long.MIN_VALUE;
@@ -82,9 +98,19 @@ public final class NavigationSession {
      *                   the effects of {@link #start()}
      */
     public NavigationSession(SessionParameters parameters, Function<Route, List<Maneuver>> maneuvers, long nowTick) {
+        this(parameters, maneuvers, nowTick, null);
+    }
+
+    /**
+     * As above; with {@code cursor} ({@code navigation.guidance-v2}) the session winds back: a cursor that follows the
+     * player both ways beside the monotone progress (see the class description). Null: as before.
+     */
+    public NavigationSession(SessionParameters parameters, Function<Route, List<Maneuver>> maneuvers, long nowTick,
+                             CursorParameters cursor) {
         this.parameters = Objects.requireNonNull(parameters, "parameters");
         this.maneuvers = Objects.requireNonNull(maneuvers, "maneuvers");
         this.startedTick = nowTick;
+        this.cursorParameters = cursor;
     }
 
     // ==================== Queries ====================
@@ -111,9 +137,22 @@ public final class NavigationSession {
         return explanation;
     }
 
-    /** Polyline distance travelled along the current route. */
+    /** Polyline distance travelled along the current route: the monotone progress. */
     public double along() {
         return along;
+    }
+
+    /**
+     * The player's place on the route (polyline blocks from its start): with {@code guidance-v2} the cursor that follows
+     * them back as well as forwards; otherwise {@link #along()}.
+     */
+    public double cursor() {
+        return windsBack() ? cursor : along;
+    }
+
+    /** Whether the session keeps a cursor beside its progress ({@code guidance-v2}). */
+    public boolean windsBack() {
+        return cursorParameters != null;
     }
 
     public Optional<EndReason> endReason() {
@@ -214,9 +253,13 @@ public final class NavigationSession {
             return List.of();
         }
         double floorY = feetY - 1;
-        Route.Projection projection = route.project(feetX, floorY, feetZ,
-            along - parameters.offRouteLookBackBlocks());
-        along = Math.max(along, projection.along());
+        Route.Projection projection;
+        if (windsBack()) {
+            projection = followCursor(feetX, floorY, feetZ);
+        } else {
+            projection = route.project(feetX, floorY, feetZ, along - parameters.offRouteLookBackBlocks());
+            along = Math.max(along, projection.along());
+        }
         List<NavigationEffect> effects = new ArrayList<>();
         if (isAtEnd(feetX, floorY, feetZ)) {
             if (explanation.isEmpty()) {
@@ -329,6 +372,23 @@ public final class NavigationSession {
         this.explanation = why;
         this.along = 0;
         this.offRouteTicks = 0;
+        this.cursor = 0;
+        this.routeCumulative = windsBack() ? PolylineCursor.cumulative(candidate.polyline()) : null;
+    }
+
+    /**
+     * {@code guidance-v2}: one step of the cursor on the route ({@link PolylineCursor}): continuity within
+     * {@code cursor-jump}, off the route beyond {@code reroute-distance} (the cursor stays). The progress follows the
+     * cursor up, never down. The answer is the cursor's point and the off-route distance.
+     */
+    private Route.Projection followCursor(double x, double floorY, double z) {
+        PolylineCursor.Step step = PolylineCursor.follow(route.polyline(), routeCumulative, cursor, x, floorY, z,
+            cursorParameters.cursorJump(), parameters.rerouteDistance(), Double.POSITIVE_INFINITY);
+        if (step.onPolyline()) {
+            cursor = step.along();
+        }
+        along = Math.max(along, cursor);
+        return new Route.Projection(cursor, step.distance(), step.point());
     }
 
     private boolean isAtEnd(double x, double floorY, double z) {
@@ -337,8 +397,12 @@ public final class NavigationSession {
         return Math.sqrt(dx * dx + dy * dy + dz * dz) <= parameters.arriveDistance();
     }
 
-    /** Walked length still ahead, scaled from the polyline progress. */
+    /** Walked length still ahead, scaled from the polyline progress (with {@code guidance-v2}: from the cursor). */
     public double remainingBlocks() {
+        return remainingFrom(cursor());
+    }
+
+    private double remainingFrom(double at) {
         if (route == null) {
             return 0;
         }
@@ -346,24 +410,29 @@ public final class NavigationSession {
         if (total <= 0) {
             return 0;
         }
-        return Math.max(0, (1 - along / total) * route.length());
+        return Math.max(0, (1 - at / total) * route.length());
     }
 
+    /**
+     * The guidance: the trail, the HUD distance and the maneuver ahead from {@link #cursor()}; the ETA and the
+     * percentage from the progress {@link #along()} (the same number without {@code guidance-v2}).
+     */
     private GuidanceEffect guidance(Route.Projection projection) {
-        double remaining = remainingBlocks();
+        double at = cursor();
+        double remaining = remainingFrom(at);
         double total = route.polylineLength();
         double progress = total <= 0 ? 1 : Math.min(1, along / total);
-        double[] ahead = route.pointAt(along + 6);
+        double[] ahead = route.pointAt(at + 6);
         Optional<Maneuver> next = Optional.empty();
         double toNext = 0;
         for (Maneuver m : routeManeuvers) {
-            if (m.along() >= along - 0.5) {
+            if (m.along() >= at - 0.5) {
                 next = Optional.of(m);
-                toNext = Math.max(0, m.along() - along);
+                toNext = Math.max(0, m.along() - at);
                 break;
             }
         }
-        return new GuidanceEffect(along, projection.distance(), remaining, remaining / parameters.sprintSpeed(),
-            progress, ahead, next, toNext);
+        double eta = remainingFrom(along) / parameters.sprintSpeed();
+        return new GuidanceEffect(at, projection.distance(), remaining, eta, progress, ahead, next, toNext);
     }
 }
