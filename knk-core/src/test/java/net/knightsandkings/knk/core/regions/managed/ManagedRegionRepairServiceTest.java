@@ -109,6 +109,44 @@ class ManagedRegionRepairServiceTest {
         assertFalse(service.isManaged("spawn"));
     }
 
+    // Overview map (PandiO/knk-workspace#735): the domain regions of each run go to the after-run listener.
+    @Test
+    void theAfterRunListenerGetsTheDomainRegionsOfEveryRun() {
+        FakeWorldGuard wg = worldWithAllRegions();
+        ManagedRegionRepairService service = service(wg, towns(paged(townRows, new ArrayList<>())), null);
+        List<List<String>> runs = new ArrayList<>();
+        service.setAfterRun(specs -> runs.add(specs.stream().map(ManagedRegionSpec::regionId).toList()));
+
+        service.run().join();
+        service.run().join();
+
+        assertEquals(2, runs.size());
+        assertEquals(List.of("town_1", "town_2", "town_3", "district_4", "domain_5"), runs.get(0));
+    }
+
+    @Test
+    void aFailingAfterRunListenerDoesNotFailTheRepair() {
+        FakeWorldGuard wg = worldWithAllRegions();
+        ManagedRegionRepairService service = service(wg, towns(paged(townRows, new ArrayList<>())), null);
+        service.setAfterRun(specs -> {
+            throw new IllegalStateException("boom");
+        });
+
+        assertEquals(5, service.run().join().checked());
+    }
+
+    @Test
+    void theAfterRunListenerIsNotCalledWhenTheDomainDataCannotBeRead() {
+        FakeWorldGuard wg = worldWithAllRegions();
+        ManagedRegionRepairService service = service(wg,
+                towns(query -> CompletableFuture.failedFuture(new RuntimeException("API down"))), null);
+        List<Object> calls = new ArrayList<>();
+        service.setAfterRun(calls::add);
+
+        assertThrows(CompletionException.class, () -> service.run().join());
+        assertTrue(calls.isEmpty());
+    }
+
     @Test
     void runningTwiceIsSafeAndTheSecondRunChangesNothing() {
         FakeWorldGuard wg = worldWithAllRegions();

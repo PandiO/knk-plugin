@@ -1104,6 +1104,15 @@ regions:
       max-refusals-per-second: 20
       window-seconds: 3
       escalation-window-seconds: 60
+# Overview map in the web app (PandiO/knk-workspace#732; knk-workspace docs/specs/in-game-maps/OVERVIEW_MAP_DESIGN.md).
+# With reporting on, the plugin sends the outline (2D points, min/max Y) of every Town/District/Structure/Gate region to
+# the API over the game hub: after every managed-region repair (startup, /knk regions repair), after a world task's
+# region is renamed or redefined, and again on every game hub (re)connect. Needs realtime.enabled: true. Off by default:
+# off, nothing is read or sent and the plugin behaves as before.
+map:
+  reporting:
+    enabled: false
+
 # What players see when they type "/" (KNG-107). Commands are only left out of the suggestions; typing one still
 # works as before (each command still checks its own permission). Ops see everything.
 command-visibility:
