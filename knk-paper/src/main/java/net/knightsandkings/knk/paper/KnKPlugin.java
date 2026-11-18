@@ -310,6 +310,8 @@ public class KnKPlugin extends JavaPlugin {
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
+    /** Overview map reports (PandiO/knk-workspace#735); off unless map.reporting.enabled. */
+    private net.knightsandkings.knk.core.map.MapReportingService mapReporting;
     /** KNG-56: domain AllowEntry/AllowExit as WorldGuard flags (synced from the API, enforced by a WG session handler). */
     private net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync domainAccessSync;
     private net.knightsandkings.knk.paper.regions.access.DomainAccessService domainAccess;
@@ -606,6 +608,8 @@ public class KnKPlugin extends JavaPlugin {
             WgRegionIdTaskHandler wgRegionIdHandler = new WgRegionIdTaskHandler(worldTasksApi, this);
             worldTaskHandlerRegistry.registerHandler(wgRegionIdHandler);
 
+            this.mapReporting = net.knightsandkings.knk.paper.map.MapReporting.create(getConfig(), () -> realtimeService,
+                getLogger());
             // Managed WorldGuard regions: parent + priority + category flags for Town/District/Structure/Gate regions,
             // applied when a world task's region gets its final name and repaired at every startup
             // (docs/architecture/managed-worldguard-regions.md).
@@ -625,6 +629,12 @@ public class KnKPlugin extends JavaPlugin {
             // before that would see a region with access flags that no domain lists yet and clear them.
             wgRegionIdHandler.setSubRegionFinalizer((subRegionId, mainRegionId, world) ->
                 getServer().getScheduler().runTaskLater(this, () -> domainAccessSync.syncNow().exceptionally(error -> null), 100L));
+            // Overview map L1 (PandiO/knk-workspace#735): domain region outlines to the API, only with map.reporting.enabled.
+            if (mapReporting.enabled()) {
+                managedRegions.afterRepair(specs -> mapReporting.reportDomainRegions(
+                    net.knightsandkings.knk.paper.map.MapReporting.domainRegions(specs)));
+                wgRegionIdHandler.setRenameListener(mapReporting::regionRenamed);
+            }
             managedRegions.scheduleStartupRepair();
             domainAccessSync.setFallbackPolling(fallbackPolling); // S3 (#182): DomainAccessChanged is pushed
             domainAccessSync.schedule();
@@ -2396,6 +2406,9 @@ public class KnKPlugin extends JavaPlugin {
             }
             if (lootboxRuntime != null) {
                 hooks.register("lootbox runtime", () -> lootboxRuntime.refresh().exceptionally(error -> null));
+            }
+            if (mapReporting != null && mapReporting.enabled()) {
+                hooks.register("map region outlines", mapReporting::resendAll);
             }
             realtimePollMultiplier = settings.fallbackPollMultiplier();
             realtimeService = new net.knightsandkings.knk.paper.realtime.RealtimeService(this, settings,
