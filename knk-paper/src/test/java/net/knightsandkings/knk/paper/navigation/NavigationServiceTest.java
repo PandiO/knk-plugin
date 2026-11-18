@@ -2004,4 +2004,141 @@ class NavigationServiceTest {
         events.forEach(e -> lines.add(e.getEventName()));
         return lines;
     }
+
+    // ==================== plaza lines on the trail (off-road phase 7 step 2, #712) ====================
+
+    /** An open floor at 64 everywhere, no regions: every junction of the test network is a plaza of 15.2 blocks. */
+    private static final net.knightsandkings.knk.core.navigation.shape.NavWorld OPEN_FLOOR =
+        new net.knightsandkings.knk.core.navigation.shape.NavWorld() {
+            @Override
+            public boolean isLoaded(String w, int x, int z) {
+                return true;
+            }
+
+            @Override
+            public boolean isStandableFloor(String w, int x, int floorY, int z) {
+                return floorY == 64;
+            }
+
+            @Override
+            public Set<String> regionsAt(String w, int x, int feetY, int z) {
+                return Set.of();
+            }
+        };
+
+    private NavigationService plazaService(boolean on) {
+        NavigationConfig config = NavigationConfig.defaults()
+            .withPlazaLines(new NavigationConfig.PlazaLinesConfig(on, 0.35, 2, 0.65));
+        service = new NavigationService(new NavigationService.Deps(null, config, w -> network.snapshot, policies, shapes,
+            eligibility, hud, trail, Runnable::run, Runnable::run, tick::get, events::add, Logger.getLogger("test")));
+        service.setPlazaLines(() -> OPEN_FLOOR,
+            w -> net.knightsandkings.knk.core.navigation.shape.PlazaCurve.Options.defaults(4, 0.8));
+        return service;
+    }
+
+    /**
+     * To Kardenna Castle: east along Main Street to Cinix Keep's junction (200 0), a right angle, then south. Returns
+     * the session's numbers after each step, every HUD update and every chat line.
+     */
+    private List<String> castleTranscript(NavigationService s) {
+        moveTo(0.5, 65, 0.5);
+        s.navigate(player, Destination.point("Kardenna Castle", NavigationTestNetwork.WORLD, 200.5, 65, 200.5));
+        List<String> out = new ArrayList<>();
+        for (int x = 1; x <= 200; x += 2) {
+            moveTo(x + 0.5, 65, 0.5);
+            ticks(2);
+            s.sessionOf(playerId).ifPresent(session -> out.add(String.format(java.util.Locale.ROOT, "%.4f %.4f %d",
+                session.along(), session.route().orElseThrow().length(), session.maneuvers().size())));
+        }
+        for (int z = 1; z <= 60; z += 2) {
+            moveTo(200.5, 65, z + 0.5);
+            ticks(2);
+            s.sessionOf(playerId).ifPresent(session -> out.add(String.format(java.util.Locale.ROOT, "%.4f %.4f %d",
+                session.along(), session.route().orElseThrow().length(), session.maneuvers().size())));
+        }
+        ArgumentCaptor<String> label = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Double> remaining = ArgumentCaptor.forClass(Double.class);
+        ArgumentCaptor<Double> progress = ArgumentCaptor.forClass(Double.class);
+        verify(hud, atLeastOnce()).update(any(), label.capture(), remaining.capture(), progress.capture());
+        for (int i = 0; i < label.getAllValues().size(); i++) {
+            out.add("hud " + label.getAllValues().get(i) + " " + remaining.getAllValues().get(i) + " "
+                + progress.getAllValues().get(i));
+        }
+        out.addAll(messages());
+        return out;
+    }
+
+    @Test
+    void withPlazaLinesTheTrailRoundsTheJunctionOnThePlazaLine() {
+        // A22: the right angle at Cinix Keep's junction becomes the plaza line, pulled towards the node
+        plazaService(true);
+        castleTranscript(service);
+
+        ArgumentCaptor<net.knightsandkings.knk.core.navigation.PlazaTrail> plazas =
+            ArgumentCaptor.forClass(net.knightsandkings.knk.core.navigation.PlazaTrail.class);
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), any(),
+            org.mockito.ArgumentMatchers.anyBoolean(), plazas.capture());
+        var last = plazas.getValue();
+        // B (100 0) is crossed straight on: its line is the road itself; C (200 0) is the turn
+        assertEquals(2, last.segments().size(), "both junctions on the way are plazas on an open floor");
+        var straightOn = last.segments().get(0);
+        assertEquals(100 - 15.2, straightOn.from(), 0.6);
+        assertEquals(100 + 15.2, straightOn.to(), 0.6);
+        assertEquals(1.0, straightOn.points().stream().mapToDouble(p -> p[2]).max().orElseThrow() - 0.5 + 1, 1e-6,
+            "straight on the line is the road (z 0.5) itself");
+        var segment = last.segments().get(1);
+        assertEquals(200 - 15.2, segment.from(), 0.6, "the entry on Main Street");
+        assertEquals(200 + 15.2, segment.to(), 0.6, "the exit on the road south");
+        double[] middle = last.draw(List.of(new double[] {200.5, 64, 0.5}), new double[] {200}).get(0);
+        double fromNode = Math.hypot(middle[0] - 200.5, middle[2] - 0.5);
+        double chordMiddle = Math.hypot(15.2 / 2, 15.2 / 2);
+        assertEquals((1 - 0.35) * chordMiddle, fromNode, 0.3,
+            "the trail's spot at the node is drawn on the curve, pulled 35 % of the way to the node");
+        assertTrue(service.plazaLineStatus().startsWith("on; placed 2 of 2"), service.plazaLineStatus());
+    }
+
+    @Test
+    void plazaLinesChangeNeitherTheRouteNorItsNumbers() {
+        // A25: the route length, the progress, the ETA and remaining distance on the HUD, the maneuvers and their chat
+        // lines are the same with plaza lines on and off
+        plazaService(false);
+        List<String> off = castleTranscript(service);
+        clearInvocations(trail, hud, player);
+        events.clear();
+        tick.set(0);
+        plazaService(true);
+        List<String> on = castleTranscript(service);
+
+        int first = 0;
+        while (first < Math.min(off.size(), on.size()) && off.get(first).equals(on.get(first))) {
+            first++;
+        }
+        assertEquals(off, on, "first difference at " + first + ": " + (first < off.size() ? off.get(first) : "-")
+            + " / " + (first < on.size() ? on.get(first) : "-"));
+        assertTrue(off.stream().anyMatch(l -> l.startsWith("hud ")), "the HUD was updated");
+    }
+
+    @Test
+    void withPlazaLinesOffTheTrailIsDrawnAsToday() {
+        // A24: the flag off - even with the plaza world wired - draws through the old calls, no plaza trail
+        plazaService(false);
+        castleTranscript(service);
+
+        verify(trail, never()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.anyBoolean(),
+            any(net.knightsandkings.knk.core.navigation.PlazaTrail.class));
+        verify(trail, atLeastOnce()).drawRoute(any(), any(), anyDouble(), any());
+        assertEquals("off", service.plazaLineStatus());
+    }
+
+    @Test
+    void withoutAPlazaWorldTheFlagDrawsAsToday() {
+        NavigationConfig config = NavigationConfig.defaults()
+            .withPlazaLines(new NavigationConfig.PlazaLinesConfig(true, 0.35, 2, 0.65));
+        service = new NavigationService(new NavigationService.Deps(null, config, w -> network.snapshot, policies, shapes,
+            eligibility, hud, trail, Runnable::run, Runnable::run, tick::get, events::add, Logger.getLogger("test")));
+        castleTranscript(service);
+
+        verify(trail, never()).drawRoute(any(), any(), anyDouble(), any(), org.mockito.ArgumentMatchers.anyBoolean(),
+            any(net.knightsandkings.knk.core.navigation.PlazaTrail.class));
+    }
 }

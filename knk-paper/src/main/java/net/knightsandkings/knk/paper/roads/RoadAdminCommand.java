@@ -1491,6 +1491,10 @@ public class RoadAdminCommand implements SubcommandExecutor {
         net.knightsandkings.knk.paper.navigation.NavigationService nav = navigation.get();
         if (nav != null) {
             sender.sendMessage(RoadMessages.field("walk paths", nav.walkStatus()));
+            String plazaLines = nav.plazaLineStatus();
+            if (plazaLines != null) {
+                sender.sendMessage(RoadMessages.field("plaza lines", plazaLines));
+            }
             sendWalkMeasurements(sender, nav.walkMeasurementLines(WALK_RECENT));
         }
         LiveEdgeTags tags = liveTags.get();

@@ -349,4 +349,52 @@ class TrailRendererTest {
         SnapPoint start = network.routeAlongMainStreet().start();
         assertEquals(64, start.y(), 1e-9);
     }
+
+    // ==================== plaza lines (off-road phase 7 step 2, #712) ====================
+
+    private final World plazaWorld = mock(World.class);
+    private final Player plazaViewer = mock(Player.class);
+
+    @Test
+    void withAPlazaTrailTheSpotsInsideTheCrossingAreDrawnOnItsLine() {
+        when(plazaViewer.getWorld()).thenReturn(plazaWorld);
+        when(plazaViewer.getLocation()).thenReturn(new Location(plazaWorld, 0.5, 65, 0.5));
+        TrailRenderer renderer = new TrailRenderer(NavigationConfig.TrailConfig.defaults(), new TickBudget(() -> 20.0));
+        net.knightsandkings.knk.core.navigation.PlazaTrail plazas = new net.knightsandkings.knk.core.navigation.PlazaTrail(
+            List.of(new net.knightsandkings.knk.core.navigation.PlazaTrail.Crossing(1, 15)));
+        plazas.prepare(0, 30, c -> new net.knightsandkings.knk.core.navigation.PlazaTrail.Segment(10, 20, List.of(
+            new double[] {10.5, 64, 0.5}, new double[] {15.5, 64, 4.5}, new double[] {20.5, 64, 0.5})));
+
+        renderer.drawRoute(plazaViewer, network.routeAlongMainStreet(), 0, null, true, plazas);
+
+        // the line bends 4 blocks to the side: particles there; without the plaza trail none leave z 0.5
+        verify(plazaViewer, atLeast(1)).spawnParticle(eq(Particle.DUST), anyDouble(), anyDouble(),
+            org.mockito.ArgumentMatchers.doubleThat(z -> z > 3), anyInt(), anyDouble(), anyDouble(), anyDouble(),
+            anyDouble(), any());
+    }
+
+    @Test
+    void withoutAPlazaTrailTheRouteIsDrawnAsBefore() {
+        when(plazaViewer.getWorld()).thenReturn(plazaWorld);
+        when(plazaViewer.getLocation()).thenReturn(new Location(plazaWorld, 0.5, 65, 0.5));
+        TrailRenderer renderer = new TrailRenderer(NavigationConfig.TrailConfig.defaults(), new TickBudget(() -> 20.0));
+
+        renderer.drawRoute(plazaViewer, network.routeAlongMainStreet(), 0, null, true, null);
+
+        verify(plazaViewer, never()).spawnParticle(eq(Particle.DUST), anyDouble(), anyDouble(),
+            org.mockito.ArgumentMatchers.doubleThat(z -> z > 1), anyInt(), anyDouble(), anyDouble(), anyDouble(),
+            anyDouble(), any());
+        assertEquals(TrailRenderer.trailPoints(network.routeAlongMainStreet(), 0, 30, 1.5).size(),
+            TrailRenderer.trailPointAlongs(network.routeAlongMainStreet(), 0, 30, 1.5).length);
+    }
+
+    @Test
+    void theAlongsMatchTheCentredWindowsSpots() {
+        net.knightsandkings.knk.core.roads.route.TrailCentring.Ground flat = narrowingRoad();
+        for (double along : new double[] {0, 3.2, 58, 180, 199}) {
+            assertEquals(TrailRenderer.centredWindow(network.routeAlongMainStreet(), along, 30, 1.5, flat).size(),
+                TrailRenderer.centredWindowAlongs(network.routeAlongMainStreet(), along, 30, 1.5).length,
+                "at " + along);
+        }
+    }
 }

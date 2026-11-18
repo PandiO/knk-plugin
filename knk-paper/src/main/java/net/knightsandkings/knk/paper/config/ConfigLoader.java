@@ -489,7 +489,8 @@ public class ConfigLoader {
             new NavigationConfig.PlazaLinesConfig(
                 section.getBoolean("plaza-lines", defaults.plazaLines().enabled()),
                 section.getDouble("plaza-pull", defaults.plazaLines().pull()),
-                section.getDouble("plaza-guide-cost", defaults.plazaLines().guideCost())));
+                section.getDouble("plaza-guide-cost", defaults.plazaLines().guideCost()),
+                section.getDouble("plaza-curve-clearance", defaults.plazaLines().curveClearance())));
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */

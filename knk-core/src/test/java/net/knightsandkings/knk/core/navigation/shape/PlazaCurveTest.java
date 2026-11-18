@@ -344,6 +344,29 @@ class PlazaCurveTest {
     }
 
     @Test
+    void theCurveIsTakenDownToItsOwnClearance() {
+        // the developer's decision on #712: a curve 0.65 or more from an obstacle is taken (plaza-curve-clearance);
+        // here a post (off the route's own cells) passes 0.7 from a line across the plaza
+        plaza("wn");
+        world.wall(19, 12);
+        Corridor.Disc disc = new Corridor.Disc(15.5, 15.5, 8);
+        Corridor corridor = Corridor.build(world, westToNorth(), 4, false, List.of(disc));
+        List<PlazaLine.Point> line = new ArrayList<>();
+        for (int i = 0; i <= 28; i++) {
+            line.add(new PlazaLine.Point(8.5 + i * 0.5, 13.7, 64));
+        }
+
+        assertNull(PlazaCurve.check(corridor, disc, line, 0.65));
+        String why = PlazaCurve.check(corridor, disc, line, 0.8);
+        assertNotNull(why);
+        assertTrue(why.startsWith("0.70 from an obstacle (wanted 0.80)"), why);
+        assertEquals(0.65, DEFAULTS.curveClearance(), 1e-9, "the default");
+        assertEquals(0.8, new PlazaCurve.Options(4, 0.8, 16, 0.35, 2).curveClearance(), 1e-9, "step 1's options");
+        assertEquals(0.5, PlazaCurve.Options.defaults(4, 0.5).curveClearance(), 1e-9, "never above the clearance");
+        assertThrows(IllegalArgumentException.class, () -> DEFAULTS.withCurveClearance(0.2));
+    }
+
+    @Test
     void optionsAreChecked() {
         assertThrows(IllegalArgumentException.class, () -> new PlazaCurve.Options(0.5, 0.8, 16, 0.35, 2));
         assertThrows(IllegalArgumentException.class, () -> new PlazaCurve.Options(4, 0.2, 16, 0.35, 2));
