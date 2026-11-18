@@ -158,7 +158,7 @@ jobs:
         # Link C1 (#700) adds four (the keep tower replay with a leader and a group of 20, and the detour, upstairs and
         # ravine scenes): about 5.5 minutes more, 59 with the off-road chain's scenarios (L3, L4, L10).
         env:
-          MIN_SCENARIOS: 59
+          MIN_SCENARIOS: 61
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"

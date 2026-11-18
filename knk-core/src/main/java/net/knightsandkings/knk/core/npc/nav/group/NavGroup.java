@@ -19,6 +19,7 @@ import net.knightsandkings.knk.core.npc.nav.HopPlanner;
 import net.knightsandkings.knk.core.npc.nav.NavigationResult;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessProfile;
 import net.knightsandkings.knk.core.npc.nav.NpcAccessSubject;
+import net.knightsandkings.knk.core.npc.nav.RegionRule;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 import net.knightsandkings.knk.core.npc.nav.NpcNavState;
 import net.knightsandkings.knk.core.npc.nav.NpcNavigationMetrics;
@@ -156,7 +157,7 @@ public final class NavGroup {
         boolean cut;
         /** Followers ahead of it cut short by a rule: it stops this many spacings further back (a queue, not a pile). */
         int queue;
-        /** The waypoints it has lead into a region it did not stand in when it got them. */
+        /** The waypoints it has lead into a region it did not stand in, or out of one it stood in, when it got them. */
         boolean sentIntoRegion;
         /** The rules may have changed since it got its waypoints: they are handed out again. */
         boolean recheck;
@@ -253,6 +254,11 @@ public final class NavGroup {
     private boolean blockedReported;
     private BlockingElement reportedElement;
     private final Map<Verdict, Boolean> verdicts = new HashMap<>();
+    /**
+     * Per set of regions stood in, the ones that may not be left (PandiO/knk-workspace#701); asked again with the
+     * region verdicts.
+     */
+    private final Map<Set<String>, Set<String>> exitVerdicts = new HashMap<>();
     /** The gate doors on the leader's routes in this order: a door the leader has passed stays one (#507). */
     private final Set<Integer> routeDoors = new LinkedHashSet<>();
     private final Map<Integer, Optional<GateBox>> doorBoxes = new HashMap<>();
@@ -543,6 +549,7 @@ public final class NavGroup {
      */
     void rulesChanged() {
         verdicts.clear();
+        exitVerdicts.clear();
         path.forgetFits(); // the lanes' access verdicts (elastic, decision 2.6) are asked again
         doorVerdicts.clear();
         doorBoxes.clear();
@@ -690,6 +697,7 @@ public final class NavGroup {
             // a rule change that came without an event: ask again, and look again at waypoints that cross into
             // a region (the navigation service's own recheck does the same for the leader)
             verdicts.clear();
+            exitVerdicts.clear();
             doorVerdicts.clear();
             verdictTick = tick;
             for (Follower f : followers) {
@@ -1436,15 +1444,36 @@ public final class NavGroup {
         return new double[] {-fit.left() + margin, fit.right() - margin};
     }
 
-    /** The group's access verdict for a lane in other regions than the path's (decision 2.6, the cached verdicts). */
+    /**
+     * The group's access verdict for a lane in other regions than the path's (decision 2.6, the cached verdicts): it
+     * may not enter a region the path is not in that may not be entered, nor leave a region the path is in that may
+     * not be left (PandiO/knk-workspace#701).
+     */
     private boolean laneAllowed(String world, Set<String> pathRegions, Set<String> laneRegions) {
-        for (String region : laneRegions) {
-            if (!pathRegions.contains(region) && !verdicts.computeIfAbsent(new Verdict(pathRegions, region), v -> ports
-                .rules().mayEnter(new NpcAccessSubject(leader.name(), profile, world, pathRegions)).test(region))) {
-                return false;
+        return deniedStep(leader.name(), world, pathRegions, laneRegions) == null;
+    }
+
+    /**
+     * The first region a step from {@code from} into {@code to} may not cross under the current rules, with the cached
+     * verdicts: a region entered that may not be entered, else a region left that may not be left
+     * (PandiO/knk-workspace#701). Null when the step is allowed.
+     */
+    private RegionRule.Denied deniedStep(String name, String world, Set<String> from, Set<String> to) {
+        for (String region : to) {
+            if (!from.contains(region) && !verdicts.computeIfAbsent(new Verdict(from, region), v -> ports.rules()
+                .mayEnter(new NpcAccessSubject(name, profile, world, from)).test(region))) {
+                return new RegionRule.Denied(region, false);
             }
         }
-        return true;
+        if (!to.containsAll(from)) {
+            for (String region : exitVerdicts.computeIfAbsent(from, v -> ports.rules()
+                .regionRule(new NpcAccessSubject(name, profile, world, from)).exitDenied())) {
+                if (!to.contains(region)) {
+                    return new RegionRule.Denied(region, true);
+                }
+            }
+        }
+        return null;
     }
 
     private void step(Follower f, Formation.Slot slot, double leaderArc, double lookahead) {
@@ -1799,16 +1828,12 @@ public final class NavGroup {
         }
     }
 
-    /** Whether the current rules let a follower standing in {@code here} stand at a feet position. */
+    /**
+     * Whether the current rules let a follower standing in {@code here} stand at a feet position: no region entered
+     * that may not be entered, none left that may not be left (PandiO/knk-workspace#701).
+     */
     private boolean mayStand(Follower f, Set<String> here, NavPoint feet) {
-        Set<String> there = regionsAt(feet);
-        for (String region : there) {
-            if (!here.contains(region) && !verdicts.computeIfAbsent(new Verdict(here, region), v -> ports.rules()
-                .mayEnter(new NpcAccessSubject(f.mover.name(), profile, feet.world(), here)).test(region))) {
-                return false;
-            }
-        }
-        return true;
+        return deniedStep(f.mover.name(), feet.world(), here, regionsAt(feet)) == null;
     }
 
     private void spellFreed(Follower f, NavPoint at) {
@@ -2175,23 +2200,35 @@ public final class NavGroup {
     /**
      * The followers' trespass guard (PandiO/knk-workspace#506; the navigation service's guard watches leaders and
      * followers on a leg of their own): a region the follower stands in now and did not stand in at the last look
-     * was entered; the entry is judged by the current rules from the regions it came from. Logged and counted as
-     * {@link Event#TRESPASS}; must stay 0.
+     * was entered, one it stood in then and does not now was left (PandiO/knk-workspace#701); the step is judged by the
+     * current rules from the regions it came from. Logged and counted as {@link Event#TRESPASS}; must stay 0.
      */
     private void guard(Follower f, NavPoint at, Set<String> here) {
         Set<String> before = f.regions;
         f.regions = here;
         f.guardTick = now;
-        if (before == null || before.containsAll(here)) {
+        if (before == null || before.equals(here)) {
             return;
         }
+        List<RegionRule.Denied> denied = new ArrayList<>();
         for (String region : here) {
             if (!before.contains(region) && !verdicts.computeIfAbsent(new Verdict(before, region), v -> ports.rules()
                 .mayEnter(new NpcAccessSubject(f.mover.name(), profile, at.world(), before)).test(region))) {
-                ports.metrics().count(Event.TRESPASS);
-                ports.log().accept(String.format(Locale.ROOT, "TRESPASS %s entered %s at %d %d %d (a follower of group %d)",
-                    f.mover.name(), region, at.blockX(), at.blockY(), at.blockZ(), id));
+                denied.add(new RegionRule.Denied(region, false));
             }
+        }
+        if (!here.containsAll(before)) {
+            for (String region : exitVerdicts.computeIfAbsent(before, v -> ports.rules()
+                .regionRule(new NpcAccessSubject(f.mover.name(), profile, at.world(), before)).exitDenied())) {
+                if (!here.contains(region)) {
+                    denied.add(new RegionRule.Denied(region, true));
+                }
+            }
+        }
+        for (RegionRule.Denied d : denied) {
+            ports.metrics().count(Event.TRESPASS);
+            ports.log().accept(String.format(Locale.ROOT, "TRESPASS %s %s at %d %d %d (a follower of group %d)",
+                f.mover.name(), d.verb(), at.blockX(), at.blockY(), at.blockZ(), id));
         }
     }
 
@@ -2200,20 +2237,17 @@ public final class NavGroup {
         return mayEnterAll(f, here, path.regions(ports.world(), index), path.get(index).floor.world());
     }
 
-    /** Whether a follower standing in the regions {@code here} may walk into {@code regions} under the current rules. */
+    /**
+     * Whether a follower standing in the regions {@code here} may walk into {@code regions} under the current rules:
+     * every region there it is not in may be entered, and every region it is in that it may not leave is there too
+     * (PandiO/knk-workspace#701).
+     */
     private boolean mayEnterAll(Follower f, Set<String> here, Set<String> regions, String world) {
-        if (here.containsAll(regions)) {
-            return true; // a region it stands in is not entered
+        if (here.equals(regions)) {
+            return true; // no region entered or left
         }
         f.sentIntoRegion = true;
-        for (String region : regions) {
-            if (!here.contains(region) && !verdicts.computeIfAbsent(new Verdict(here, region), v -> ports.rules()
-                .mayEnter(new NpcAccessSubject(f.mover.name(), profile, world, here))
-                .test(region))) {
-                return false;
-            }
-        }
-        return true;
+        return deniedStep(f.mover.name(), world, here, regions) == null;
     }
 
     private void speed(Follower f) {
@@ -2500,8 +2534,8 @@ public final class NavGroup {
         int sent = -1;
         for (; k < f.trip.size() && waypoints.size() < MAX_WAYPOINTS; k++) {
             TripPoint p = f.trip.get(k);
-            if (!here.containsAll(p.regions())) {
-                f.sentIntoRegion = true;
+            if (!here.equals(p.regions())) {
+                f.sentIntoRegion = true; // into or out of a region (PandiO/knk-workspace#701)
             }
             if (!mayEnterAll(f, here, p.regions(), at.world()) || intoDoor(doors, inDoor, p.feet())) {
                 cut = true;
