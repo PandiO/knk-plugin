@@ -116,6 +116,25 @@ public final class PlazaLine {
      * or on the edge of the area), keeping {@code clearance} where the plaza allows.
      */
     public static Result search(Corridor corridor, Point start, Point goal, Corridor.Disc area, double clearance) {
+        return search(corridor, start, goal, area, clearance, null, 0);
+    }
+
+    /**
+     * As {@link #search(Corridor, Point, Point, Corridor.Disc, double)}, guided by a line (off-road navigation phase 7,
+     * DESIGN § 8.4, PandiO/knk-workspace#712): each step also costs {@code guideCost} per block of the entered cell
+     * centre's distance from {@code guide}, times the step's length, so the search keeps to the guide's side of an
+     * obstacle. A {@code null} or empty guide, or a {@code guideCost} of 0, is the plain search.
+     *
+     * @param guide     the line to keep near (the plaza curve that failed its check), or null
+     * @param guideCost cost per block of distance from the guide, per block walked ({@code plaza-guide-cost})
+     */
+    public static Result search(Corridor corridor, Point start, Point goal, Corridor.Disc area, double clearance,
+                                List<Point> guide, double guideCost) {
+        if (!(guideCost >= 0)) {
+            throw new IllegalArgumentException("guideCost must be >= 0 (got " + guideCost + ")");
+        }
+        boolean guided = guide != null && !guide.isEmpty() && guideCost > 0;
+        Map<Long, Double> guideDistance = guided ? new HashMap<>() : null;
         int sx = (int) Math.floor(start.x());
         int sz = (int) Math.floor(start.z());
         int gx = (int) Math.floor(goal.x());
@@ -165,8 +184,13 @@ public final class PlazaLine {
                         continue;
                     }
                     double lack = Math.max(0, clearance - corridor.cellClearance(nx, nz));
-                    double c = top[3] + (dx != 0 && dz != 0 ? Math.sqrt(2) : 1) + CLEARANCE_COST * lack;
+                    double step = dx != 0 && dz != 0 ? Math.sqrt(2) : 1;
+                    double c = top[3] + step + CLEARANCE_COST * lack;
                     long nk = key(nx, nz);
+                    if (guided) {
+                        double off = guideDistance.computeIfAbsent(nk, cell -> distanceTo(guide, nx + 0.5, nz + 0.5));
+                        c += guideCost * off * step;
+                    }
                     if (c < cost.getOrDefault(nk, Double.MAX_VALUE) - 1e-9) {
                         cost.put(nk, c);
                         parent.put(nk, k);
@@ -195,6 +219,24 @@ public final class PlazaLine {
             cells.set(cells.size() - 1, new Point(goal.x(), goal.z(), corridor.floorAt(gx, gz)));
         }
         return new Result(refine(grid, pull(grid, cells, clearance), clearance), expanded);
+    }
+
+    /** The horizontal distance from a point to the nearest piece of a line of points. */
+    static double distanceTo(List<Point> line, double px, double pz) {
+        if (line.size() == 1) {
+            return Math.hypot(px - line.get(0).x(), pz - line.get(0).z());
+        }
+        double best = Double.MAX_VALUE;
+        for (int k = 1; k < line.size(); k++) {
+            Point a = line.get(k - 1);
+            Point b = line.get(k);
+            double dx = b.x() - a.x();
+            double dz = b.z() - a.z();
+            double len2 = dx * dx + dz * dz;
+            double t = len2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((px - a.x()) * dx + (pz - a.z()) * dz) / len2));
+            best = Math.min(best, Math.hypot(px - (a.x() + t * dx), pz - (a.z() + t * dz)));
+        }
+        return best;
     }
 
     private static double h(int x, int z, int gx, int gz) {
