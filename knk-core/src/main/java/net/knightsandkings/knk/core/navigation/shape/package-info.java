@@ -7,7 +7,9 @@
  * {@link net.knightsandkings.knk.core.navigation.shape.CorridorShaper}, the free width across a line
  * {@link net.knightsandkings.knk.core.navigation.shape.FreeWidth} and the plaza line
  * {@link net.knightsandkings.knk.core.navigation.shape.PlazaLine} (moved from {@code core/npc/nav} and
- * {@code core/npc/nav/corridor} without a behaviour change). Pure knk-core, no engine types; imports nothing from
+ * {@code core/npc/nav/corridor} without a behaviour change). The players' plaza line
+ * {@link net.knightsandkings.knk.core.navigation.shape.PlazaCurve} (off-road navigation phase 7,
+ * PandiO/knk-workspace#712) is built on them. Pure knk-core, no engine types; imports nothing from
  * {@code core/npc} ({@code ArchitectureGuardTest}).
  */
 package net.knightsandkings.knk.core.navigation.shape;

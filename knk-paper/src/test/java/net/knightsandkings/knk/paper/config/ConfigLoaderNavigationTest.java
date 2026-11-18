@@ -147,6 +147,48 @@ class ConfigLoaderNavigationTest {
     }
 
     @Test
+    void thePlazaLineKeysAreInConfigYmlOffWithTheDesignDefaultsAndAreChecked() throws Exception {
+        // off-road phase 7 (#712, DESIGN § 8.7, O30): plaza-lines off, plaza-pull 0.35, plaza-guide-cost 2
+        YamlConfiguration bundled = bundledConfig();
+        assertTrue(bundled.contains("navigation.plaza-lines"));
+        assertTrue(bundled.contains("navigation.plaza-pull"));
+        assertTrue(bundled.contains("navigation.plaza-guide-cost"));
+        NavigationConfig loaded = ConfigLoader.load(bundled).navigation();
+        assertEquals(new NavigationConfig.PlazaLinesConfig(false, 0.35, 2), loaded.plazaLines());
+        assertEquals(loaded.plazaLines(), NavigationConfig.defaults().plazaLines());
+        assertEquals(NavigationConfig.PlazaLinesConfig.defaults(), new YamlNavigation().missing().plazaLines(),
+            "a config.yml without the keys: off, the defaults");
+
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.plaza-lines", true);
+        yaml.set("navigation.plaza-pull", 0.5);
+        yaml.set("navigation.plaza-guide-cost", 3);
+        NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+        navigation.validate();
+        assertEquals(new NavigationConfig.PlazaLinesConfig(true, 0.5, 3), navigation.plazaLines());
+        assertEquals(navigation.plazaLines(), navigation.withGuidanceV2(true).withCursorJump(4).plazaLines());
+
+        yaml.set("navigation.plaza-pull", 1.5);
+        IllegalArgumentException pull = assertThrows(IllegalArgumentException.class,
+            ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"))::validate);
+        assertTrue(pull.getMessage().contains("plaza-pull"), pull.getMessage());
+        yaml.set("navigation.plaza-pull", 0.35);
+        yaml.set("navigation.plaza-guide-cost", -1);
+        IllegalArgumentException cost = assertThrows(IllegalArgumentException.class,
+            ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"))::validate);
+        assertTrue(cost.getMessage().contains("plaza-guide-cost"), cost.getMessage());
+    }
+
+    /** A navigation section with none of the plaza-line keys. */
+    private static final class YamlNavigation {
+        NavigationConfig missing() {
+            YamlConfiguration yaml = new YamlConfiguration();
+            yaml.set("navigation.enabled", true);
+            return ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+        }
+    }
+
+    @Test
     void thePhase62KeysAreInConfigYmlWithTheDesignDefaultsAndAreChecked() throws Exception {
         // off-road phase 6.2 (#711, DESIGN § 7.6 corrected: trail-leg-spacing 3.0 per O20 and § 7.2.2)
         YamlConfiguration bundled = bundledConfig();

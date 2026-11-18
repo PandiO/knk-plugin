@@ -17,6 +17,7 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnOnGroundScen
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnUnderRoofScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersLineScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.PlazaLineRealPlazaScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.WalkTrailCursorScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.WalkTrailStairhouseScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
@@ -86,6 +87,10 @@ public final class PaperScenarios {
             .register(new WalkTrailStairhouseScenario())
             // off-road navigation phase 6.2 (PandiO/knk-workspace#711): the walk leg's cursor and anchored particles
             .register(new WalkTrailCursorScenario())
+            // off-road navigation phase 7 step 1 (PandiO/knk-workspace#712): plaza lines on real plazas of Cinix
+            .register(PlazaLineRealPlazaScenario.brink())
+            .register(PlazaLineRealPlazaScenario.cinixSouthSquare())
+            .register(PlazaLineRealPlazaScenario.cinixNorthernGateSquare())
             .register(new NpcCornersWalkScenario())
             .register(new NpcStuckLadderScenario())
             .register(new NpcGroupNarrowsScenario())

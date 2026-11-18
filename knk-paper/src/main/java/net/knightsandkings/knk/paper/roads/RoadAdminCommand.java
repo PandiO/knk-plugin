@@ -66,7 +66,8 @@ import net.kyori.adventure.text.Component;
  * profile|unlabel}, {@code edge delete <id>}, {@code edge confirm|unconfirm <id|here>}, {@code tiles [page]},
  * {@code tile curate|uncurate [@x,z]} and {@code proposal [page]|list|accept|reject|clear|rejected|unreject}
  * (curated tiles, rev. 6 Part B: {@link RoadProposals}), {@code why}, {@code reload}, {@code status [reset]},
- * {@code goto <x> <y> <z>} (the target of every clickable teleport).
+ * {@code goto <x> <y> <z>} (the target of every clickable teleport), {@code plazaline [<plaza or junction>]} (the plaza-line
+ * preview of off-road navigation phase 7, {@link net.knightsandkings.knk.paper.navigation.PlazaLinePreview}).
  */
 public class RoadAdminCommand implements SubcommandExecutor {
 
@@ -74,13 +75,13 @@ public class RoadAdminCommand implements SubcommandExecutor {
     /** Largest designed plaza radius (the web-api's {@code RoadNetworkService.MaxPlazaRadius}). */
     static final int MAX_PLAZA_RADIUS = 32;
 
-    public static final String USAGE = "/knk road <survey|profile|build|seed|show|hide|street|node|record|edge|tiles|tile|proposal|reload|status|why>";
+    public static final String USAGE = "/knk road <survey|profile|build|seed|show|hide|street|node|record|edge|tiles|tile|proposal|reload|status|why|plazaline>";
     static final int PAGE_SIZE = 10;
     /** How far from the admin a node/edge may be for "here". */
     static final double HERE_DISTANCE = 6.0;
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final List<String> ROOTS = List.of("survey", "profile", "build", "seed", "show", "hide", "street",
-        "node", "record", "edge", "tiles", "tile", "proposal", "reload", "status", "why", "goto");
+        "node", "record", "edge", "tiles", "tile", "proposal", "reload", "status", "why", "goto", "plazaline");
 
     private final RoadNetworkQueryApi queryApi;
     private final RoadNetworkCommandApi commandApi;
@@ -98,6 +99,8 @@ public class RoadAdminCommand implements SubcommandExecutor {
     /** Rev. 6 Part B (plan §5.7): proposals of curated tiles; null until navigation started. */
     private volatile Supplier<RoadProposals> proposals = () -> null;
     private volatile Supplier<LiveEdgeTags> liveTags = () -> null;
+    /** Off-road phase 7 step 1 (#712): {@code plazaline}; null when not wired. */
+    private volatile net.knightsandkings.knk.paper.navigation.PlazaLinePreview plazaLines;
 
     public RoadAdminCommand(RoadNetworkQueryApi queryApi, RoadNetworkCommandApi commandApi, StreetsQueryApi streetsQueryApi,
                             Executor mainThread, BiPredicate<Player, String> knkPermission,
@@ -156,6 +159,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "status" -> status(sender, rest);
                 case "why" -> why(sender, rest);
                 case "goto" -> gotoBlock(sender, rest);
+                case "plazaline" -> plazaLine(sender, rest);
                 default -> sender.sendMessage(RoadMessages.usage(USAGE));
             }
         } catch (RuntimeException e) {
@@ -216,6 +220,7 @@ public class RoadAdminCommand implements SubcommandExecutor {
                 case "status" -> prefix(List.of("reset"), last);
                 case "proposal" -> prefix(RoadProposals.ACTIONS, last);
                 case "street" -> prefix(streetNames(sender), last);
+                case "plazaline" -> prefix(plazaNodeNames(sender), last);
                 default -> Collections.emptyList();
             };
         }
@@ -283,6 +288,18 @@ public class RoadAdminCommand implements SubcommandExecutor {
         }
         return c.snapshot(player.getWorld().getName()).streets().values().stream()
             .map(RoadNetworkSnapshot.Street::name).map(RoadAdminCommand::quoteIfSpaced).toList();
+    }
+
+    /** Names of the nodes in the player's world that may be plazas: designed plazas and named junctions (#712). */
+    private List<String> plazaNodeNames(CommandSender sender) {
+        RoadNetworkCache c = cache.get();
+        if (c == null || !(sender instanceof Player player)) {
+            return List.of();
+        }
+        return c.snapshot(player.getWorld().getName()).namedNodes().stream()
+            .filter(n -> n.isPlazaCentre() || n.kind() == net.knightsandkings.knk.core.domain.roads.RoadNodeKind.JUNCTION)
+            .map(n -> n.name()).distinct().sorted(String.CASE_INSENSITIVE_ORDER)
+            .map(RoadAdminCommand::quoteIfSpaced).toList();
     }
 
     static String quoteIfSpaced(String name) {
@@ -1352,6 +1369,11 @@ public class RoadAdminCommand implements SubcommandExecutor {
         this.liveTags = liveTags == null ? () -> null : liveTags;
     }
 
+    /** Off-road navigation phase 7 step 1 (#712): the plaza-line preview; null leaves the subcommand unavailable. */
+    public void setPlazaLines(net.knightsandkings.knk.paper.navigation.PlazaLinePreview plazaLines) {
+        this.plazaLines = plazaLines;
+    }
+
     public void setNavigation(Supplier<net.knightsandkings.knk.paper.navigation.NavigationService> navigation,
                               Supplier<net.knightsandkings.knk.paper.navigation.NavigationDestinations> destinations) {
         this.navigation = navigation == null ? () -> null : navigation;
@@ -1486,6 +1508,24 @@ public class RoadAdminCommand implements SubcommandExecutor {
             String label = i == 0 ? "walk search" : i <= 3 ? "walk cost" : "walk recent";
             sender.sendMessage(RoadMessages.field(label, lines.get(i)));
         }
+    }
+
+    /**
+     * {@code plazaline [<plaza or junction>]} (off-road navigation phase 7 step 1, PandiO/knk-workspace#712): draws the
+     * plaza lines of the player's route, or of every pair of roads at a named node, for a few seconds, with
+     * {@code navigation.plaza-lines} on or off. Changes nothing.
+     */
+    private void plazaLine(CommandSender sender, String[] args) {
+        Player player = requirePlayer(sender);
+        if (player == null) {
+            return;
+        }
+        net.knightsandkings.knk.paper.navigation.PlazaLinePreview preview = plazaLines;
+        if (preview == null) {
+            sender.sendMessage(RoadMessages.bad("The plaza-line preview is not available."));
+            return;
+        }
+        preview.run(player, args);
     }
 
     private void gotoBlock(CommandSender sender, String[] args) {
