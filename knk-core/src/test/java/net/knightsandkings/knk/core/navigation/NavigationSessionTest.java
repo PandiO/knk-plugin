@@ -311,6 +311,21 @@ class NavigationSessionTest {
     }
 
     @Test
+    void foundWalkLinksAskForAnImprovementWithoutTheGateRateLimit() {
+        // off-road phase 2 (#705): links the last route asked for were found - a better route, kept unless clearly shorter
+        NavigationSession s = guided(0);
+        s.onElementOpened(10);
+        only(s.onRouteResult(routeAtoE(AccessPolicy.ALL_OPEN), 11), RouteKeptEffect.class);
+        ComputeRouteEffect compute = only(s.onWalkLinksFound(20), ComputeRouteEffect.class);
+        assertEquals(RouteReason.IMPROVEMENT, compute.reason());
+        assertTrue(compute.keepCurrentUnlessShorter(), "an improvement: kept unless clearly shorter");
+        only(s.onRouteResult(routeAtoE(AccessPolicy.ALL_OPEN), 21), RouteKeptEffect.class);
+        assertTrue(s.onElementOpened(30).isEmpty(), "the gate rate limit is not reset by it");
+        s.end(net.knightsandkings.knk.core.navigation.NavigationEffect.EndReason.STOPPED);
+        assertTrue(s.onWalkLinksFound(40).isEmpty(), "an ended session asks for nothing");
+    }
+
+        @Test
     void partialRouteRetriesWithoutTheShorterCondition() {
         NavigationSession s = session(0);
         s.start();

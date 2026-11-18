@@ -238,7 +238,15 @@ public final class NavigationMessages {
         return info("No walkable way straight to " + name + " - following the roads instead.");
     }
 
-    /** A partial route's blocking element opened: the full route is taken. */
+    /**
+     * Off-road phase 2 (#705), road-first: a target close enough for one walk path is reached over the road, which
+     * carries most of the way.
+     */
+    public static Component roadFirst(String name) {
+        return info("Following the roads to " + name + " - they carry most of the way.");
+    }
+
+        /** A partial route's blocking element opened: the full route is taken. */
     public static Component reopened(String name) {
         return good("The way to " + name + " is open again - following it now.");
     }

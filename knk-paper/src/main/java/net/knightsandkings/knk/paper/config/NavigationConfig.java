@@ -60,6 +60,9 @@ import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
  * @param plazaLines         {@code navigation.plaza-lines}, {@code plaza-pull} and {@code plaza-guide-cost} (off-road
  *                           navigation phase 7, PandiO/knk-workspace#712): plaza lines for the players' trail. Default
  *                           off: routes and trails exactly as before (A24)
+ * @param walkLinks          {@code navigation.walk-links} and the {@code walk-link-*} and {@code road-first-*} keys
+ *                           (off-road navigation phase 2, PandiO/knk-workspace#705): walk links in the middle of a
+ *                           route and the road-first rule. Default off: routes, trails and sessions exactly as before
  */
 public record NavigationConfig(
     boolean enabled,
@@ -83,7 +86,8 @@ public record NavigationConfig(
     WalkConfig walk,
     boolean guidanceV2,
     double cursorJump,
-    PlazaLinesConfig plazaLines
+    PlazaLinesConfig plazaLines,
+    WalkLinksConfig walkLinks
 ) {
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
@@ -418,6 +422,86 @@ public record NavigationConfig(
         builder = builder == null ? BuilderConfig.defaults() : builder;
         walk = walk == null ? WalkConfig.defaults() : walk;
         plazaLines = plazaLines == null ? PlazaLinesConfig.defaults() : plazaLines;
+        walkLinks = walkLinks == null ? WalkLinksConfig.defaults() : walkLinks;
+    }
+
+    /**
+     * Walk links and mixed routes (off-road navigation phase 2, DESIGN § 5.1, § 5.2, decisions O12, O17, O18, O28,
+     * PandiO/knk-workspace#705). Budgets from the phase 0 measurements report (2026-11-17, § 3.3): a link search is a
+     * plain walk search within the {@code walk:} budget (budget 2: 150 ms p95 for 144 blocks; a link is at most
+     * {@code walk-link-range} straight), shares the walk executor ({@code walk.max-concurrent-searches} 2, budget 5) and
+     * is dropped first under load (at most that many link searches at once); its capture goes through the walk capture's
+     * tick budget (budget 1).
+     *
+     * @param enabled          {@code navigation.walk-links}: the road A* may take walk links, and the road-first rule
+     *                         applies in direct mode. Default false: today's routes exactly
+     * @param range            {@code walk-link-range}: the longest straight distance of a link, blocks (default 40, O28)
+     * @param ratio            {@code walk-link-ratio}: a pair of nodes is a candidate when the road between is more than
+     *                         this times the straight distance (default 2.0, O28)
+     * @param ttlSeconds       {@code walk-link-ttl-seconds}: a found link is kept this long without a block change in its
+     *                         box (the backstop of the block-change hook, O18; default 600)
+     * @param retrySeconds     {@code walk-link-retry-seconds}: "no link" is kept this long (default 600)
+     * @param searchesPerRoute {@code walk-link-searches-per-route}: the most link searches one route asks for, the
+     *                         cheapest first (default 4)
+     * @param roadFirstShare   {@code road-first-share}: direct mode takes the road when the road carries at least this
+     *                         part of the way (0..1, default 0.6; the developer confirms)
+     * @param roadFirstMaxRatio {@code road-first-max-ratio}: ... and the whole way is at most this times the single walk
+     *                         path (at least 1, default 1.5; the developer confirms)
+     */
+    public record WalkLinksConfig(boolean enabled, double range, double ratio, int ttlSeconds, int retrySeconds,
+                                  int searchesPerRoute, double roadFirstShare, double roadFirstMaxRatio) {
+        public static final double DEFAULT_RANGE = 40;
+        public static final double DEFAULT_RATIO = 2.0;
+        public static final int DEFAULT_TTL_SECONDS = 600;
+        public static final int DEFAULT_RETRY_SECONDS = 600;
+        public static final int DEFAULT_SEARCHES_PER_ROUTE = 4;
+
+        public static WalkLinksConfig defaults() {
+            return new WalkLinksConfig(false, DEFAULT_RANGE, DEFAULT_RATIO, DEFAULT_TTL_SECONDS, DEFAULT_RETRY_SECONDS,
+                DEFAULT_SEARCHES_PER_ROUTE, net.knightsandkings.knk.core.roads.links.RoadFirstRule.DEFAULT_SHARE,
+                net.knightsandkings.knk.core.roads.links.RoadFirstRule.DEFAULT_MAX_RATIO);
+        }
+
+        public WalkLinksConfig withEnabled(boolean on) {
+            return new WalkLinksConfig(on, range, ratio, ttlSeconds, retrySeconds, searchesPerRoute, roadFirstShare,
+                roadFirstMaxRatio);
+        }
+
+        public net.knightsandkings.knk.core.roads.links.RoadFirstRule roadFirst() {
+            return new net.knightsandkings.knk.core.roads.links.RoadFirstRule(roadFirstShare, roadFirstMaxRatio);
+        }
+
+        public void validate() {
+            if (!(range >= 2 && range <= 128)) {
+                throw new IllegalArgumentException("navigation.walk-link-range must be 2..128 (got: " + range + ")");
+            }
+            if (!(ratio > 1)) {
+                throw new IllegalArgumentException("navigation.walk-link-ratio must be above 1 (got: " + ratio + ")");
+            }
+            if (ttlSeconds < 1 || retrySeconds < 1) {
+                throw new IllegalArgumentException("navigation.walk-link-ttl-seconds and walk-link-retry-seconds must be "
+                    + "at least 1 (got: " + ttlSeconds + ", " + retrySeconds + ")");
+            }
+            if (searchesPerRoute < 0 || searchesPerRoute > 32) {
+                throw new IllegalArgumentException("navigation.walk-link-searches-per-route must be 0..32 (got: "
+                    + searchesPerRoute + ")");
+            }
+            roadFirst(); // validates road-first-share and road-first-max-ratio
+        }
+    }
+
+    /** Without the walk-link keys (callers from before #705): the defaults, walk links off. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
+                            double destinationSnapVerticalWeight, double maxStartDistance, double maxDestinationDistance,
+                            double destinationWalkRange, TrailConfig trail, double rerouteDistance, int rerouteAfterTicks,
+                            double arriveDistance, int maxSessionMinutes, double sprintSpeed, SurveyConfig survey,
+                            BuilderConfig builder, WalkConfig walk, boolean guidanceV2, double cursorJump,
+                            PlazaLinesConfig plazaLines) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, walk,
+            guidanceV2, cursorJump, plazaLines, null);
     }
 
     /**
@@ -523,7 +607,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
     }
 
     /** This config with {@code guidance-v2} on or off. */
@@ -531,7 +615,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
     }
 
     /** This config with another trail block ({@code trail-*} keys). */
@@ -539,7 +623,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
     }
 
     /** This config with another {@code cursor-jump}. */
@@ -547,7 +631,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
     }
 
     /** This config with other plaza-line keys. */
@@ -555,7 +639,15 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
+    }
+
+    /** This config with other walk-link keys. */
+    public NavigationConfig withWalkLinks(WalkLinksConfig walkLinks) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
     }
 
     /** {@code guidance-v2}'s route cursor ({@code cursor-jump}); null with the flag off: the session as before. */
@@ -637,6 +729,7 @@ public record NavigationConfig(
         builder.validate();
         walk.validate();
         plazaLines.validate();
+        walkLinks.validate();
     }
 
     /** Snapping and class costs for the router (Phases 2d/4); the snap weight is the player's start's. */

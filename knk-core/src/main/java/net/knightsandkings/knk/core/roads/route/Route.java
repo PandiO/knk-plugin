@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * A computed route (DESIGN §6.2 step 5, plan 2d "router output for Phase 4"): the ordered edge
@@ -33,7 +34,7 @@ public final class Route {
      * @param verdict       the access verdict the route was computed with
      */
     public record Step(RoadEdge edge, boolean forward, double entryAlong, double exitAlong, double length, double cost,
-                       double startDistance, EdgeVerdict verdict) {
+                       double startDistance, EdgeVerdict verdict) implements Piece {
         public Step {
             Objects.requireNonNull(edge, "edge");
             Objects.requireNonNull(verdict, "verdict");
@@ -65,6 +66,57 @@ public final class Route {
         }
     }
 
+    /**
+     * A piece of a route as the router hands it to {@link #build(RoadNetworkSnapshot, SnapPoint, SnapPoint, List, Map)}:
+     * a road {@link Step}, or a {@link LinkStep} (off-road navigation phase 2, DESIGN § 5.1, a walk link between two road
+     * nodes, behind {@code navigation.walk-links}).
+     */
+    public sealed interface Piece permits Step, LinkStep {
+    }
+
+    /**
+     * A walk link walked from its From node to its To node (DESIGN § 5.2).
+     *
+     * @param link the link
+     * @param cost its routing cost (what the router added for it)
+     */
+    public record LinkStep(WalkLink link, double cost) implements Piece {
+        public LinkStep {
+            Objects.requireNonNull(link, "link");
+        }
+    }
+
+    /**
+     * Where a walk link lies on the route (DESIGN § 5.1: the route as a list of legs).
+     *
+     * @param beforeStep    index of the road step that follows the link ({@code steps().size()} when none follows)
+     * @param link          the link
+     * @param polylineFrom  polyline distance where the link starts (what {@link #project} measures)
+     * @param polylineTo    ... and where it ends
+     * @param startDistance route length before the link
+     * @param cost          its routing cost
+     */
+    public record WalkLinkStretch(int beforeStep, WalkLink link, double polylineFrom, double polylineTo,
+                                  double startDistance, double cost) {
+    }
+
+    /** One leg of the route's own list (DESIGN § 5.1): a stretch on roads or a walk link, in route order. */
+    public sealed interface Leg permits RoadLeg, WalkLinkLeg {
+        /** Polyline distance where the leg starts. */
+        double polylineFrom();
+
+        /** Polyline distance where the leg ends. */
+        double polylineTo();
+    }
+
+    /** Road steps {@code [firstStep, endStep)}. */
+    public record RoadLeg(double polylineFrom, double polylineTo, int firstStep, int endStep) implements Leg {
+    }
+
+    /** A walk link. */
+    public record WalkLinkLeg(double polylineFrom, double polylineTo, WalkLinkStretch stretch) implements Leg {
+    }
+
     /** The player's projection onto the route: the nearest polyline point and its route distance. */
     public record Projection(double along, double distance, double[] point) {
     }
@@ -78,9 +130,19 @@ public final class Route {
     private final SnapPoint end;
     private final List<Integer> nodeIds;
     private final Map<RoadClass, Double> classCost;
+    /** Phase 2 (#705): the walk links on the route, in order; empty for a road-only route. */
+    private final List<WalkLinkStretch> walkLinks;
+    /** Polyline distance where each step starts; null for a road-only route (its steps follow each other). */
+    private final double[] stepStarts;
 
     private Route(List<Step> steps, List<double[]> polyline, double length, double cost, SnapPoint start, SnapPoint end,
                   List<Integer> nodeIds, Map<RoadClass, Double> classCost) {
+        this(steps, polyline, length, cost, start, end, nodeIds, classCost, List.of(), null);
+    }
+
+    private Route(List<Step> steps, List<double[]> polyline, double length, double cost, SnapPoint start, SnapPoint end,
+                  List<Integer> nodeIds, Map<RoadClass, Double> classCost, List<WalkLinkStretch> walkLinks,
+                  double[] stepStarts) {
         this.steps = Collections.unmodifiableList(steps);
         this.polyline = Collections.unmodifiableList(polyline);
         this.cumulative = new double[polyline.size()];
@@ -93,6 +155,8 @@ public final class Route {
         this.end = end;
         this.nodeIds = Collections.unmodifiableList(nodeIds);
         this.classCost = classCost;
+        this.walkLinks = List.copyOf(walkLinks);
+        this.stepStarts = stepStarts;
     }
 
     /**
@@ -131,6 +195,82 @@ public final class Route {
         return new Route(normalised, polyline, distance, cost, start, end, nodes, Map.copyOf(classCost));
     }
 
+    /**
+     * Phase 2 (#705, DESIGN § 5.1): a route of road steps and walk links in any order. Road steps are normalised as by
+     * {@link #build(RoadNetworkSnapshot, SnapPoint, SnapPoint, List, Map)}; a link adds its path to the polyline, its
+     * length to the route's and its routing cost to the cost. Without a {@link LinkStep} it is that method's route.
+     */
+    public static Route buildPieces(RoadNetworkSnapshot snapshot, SnapPoint start, SnapPoint end, List<? extends Piece> pieces,
+                                    Map<RoadClass, Double> classCost) {
+        if (pieces.stream().noneMatch(p -> p instanceof LinkStep)) {
+            List<Step> steps = new ArrayList<>(pieces.size());
+            pieces.forEach(p -> steps.add((Step) p));
+            return build(snapshot, start, end, steps, classCost);
+        }
+        List<Step> normalised = new ArrayList<>();
+        List<double[]> polyline = new ArrayList<>();
+        List<Integer> nodes = new ArrayList<>();
+        List<int[]> stepRanges = new ArrayList<>(); // polyline index where each step starts
+        List<Object[]> linkRanges = new ArrayList<>(); // {beforeStep, link, fromIndex, toIndex, startDistance, cost}
+        double distance = 0;
+        double cost = 0;
+        polyline.add(start.point().clone());
+        for (int i = 0; i < pieces.size(); i++) {
+            Piece piece = pieces.get(i);
+            int fromIndex = polyline.size() - 1;
+            boolean more = i + 1 < pieces.size();
+            if (piece instanceof Step s) {
+                EdgePolyline p = snapshot.polyline(s.edge());
+                double fraction = p.length() <= 0 ? 0 : Math.abs(s.exitAlong() - s.entryAlong()) / p.length();
+                double stepLength = fraction * s.edge().length();
+                double stepCost = stepLength * snapshot.costFactor(s.edge(), classCost);
+                normalised.add(new Step(s.edge(), s.forward(), s.entryAlong(), s.exitAlong(), stepLength, stepCost,
+                    distance, s.verdict()));
+                stepRanges.add(new int[] {fromIndex});
+                distance += stepLength;
+                cost += stepCost;
+                for (double[] pt : p.subPolyline(s.entryAlong(), s.exitAlong())) {
+                    append(polyline, pt);
+                }
+                if (more) {
+                    int exitNode = s.exitNode(p);
+                    if (exitNode >= 0) {
+                        nodes.add(exitNode);
+                    }
+                }
+            } else {
+                LinkStep l = (LinkStep) piece;
+                double startDistance = distance;
+                distance += l.link().length();
+                cost += l.cost();
+                for (double[] pt : l.link().path()) {
+                    append(polyline, pt.clone());
+                }
+                linkRanges.add(new Object[] {normalised.size(), l.link(), fromIndex, polyline.size() - 1, startDistance,
+                    l.cost()});
+                if (more) {
+                    nodes.add(l.link().toNode());
+                }
+            }
+        }
+        append(polyline, end.point().clone());
+        double[] cumulative = new double[polyline.size()];
+        for (int i = 1; i < polyline.size(); i++) {
+            cumulative[i] = cumulative[i - 1] + EdgePolyline.distance(polyline.get(i - 1), polyline.get(i));
+        }
+        double[] stepStarts = new double[stepRanges.size()];
+        for (int i = 0; i < stepStarts.length; i++) {
+            stepStarts[i] = cumulative[stepRanges.get(i)[0]];
+        }
+        List<WalkLinkStretch> links = new ArrayList<>(linkRanges.size());
+        for (Object[] r : linkRanges) {
+            links.add(new WalkLinkStretch((Integer) r[0], (WalkLink) r[1], cumulative[(Integer) r[2]],
+                cumulative[(Integer) r[3]], (Double) r[4], (Double) r[5]));
+        }
+        return new Route(normalised, polyline, distance, cost, start, end, nodes, Map.copyOf(classCost), links,
+            stepStarts);
+    }
+
     /** A route without steps: the start point only. */
     public static Route empty(SnapPoint start) {
         return new Route(List.of(), List.of(start.point().clone()), 0, 0, start, start, List.of(), Map.of());
@@ -151,7 +291,68 @@ public final class Route {
     }
 
     public boolean isEmpty() {
-        return steps.isEmpty();
+        return steps.isEmpty() && walkLinks.isEmpty();
+    }
+
+    /** Phase 2 (#705): the walk links on the route, in route order; empty for a road-only route (every route with the flag off). */
+    public List<WalkLinkStretch> walkLinks() {
+        return walkLinks;
+    }
+
+    public boolean hasWalkLinks() {
+        return !walkLinks.isEmpty();
+    }
+
+    /** The walk link at a polyline distance, if the route walks one there. */
+    public Optional<WalkLinkStretch> walkLinkAt(double polylineAlong) {
+        for (WalkLinkStretch w : walkLinks) {
+            if (polylineAlong >= w.polylineFrom() - 1e-9 && polylineAlong <= w.polylineTo() + 1e-9) {
+                return Optional.of(w);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Polyline distance where step {@code i} starts. On a road-only route the steps follow each other: the sum of the
+     * earlier steps' stretches, as the D13 re-check has always counted.
+     */
+    public double stepPolylineStart(int i) {
+        if (stepStarts != null) {
+            return stepStarts[i];
+        }
+        double at = 0;
+        for (int k = 0; k < i; k++) {
+            at += Math.abs(steps.get(k).exitAlong() - steps.get(k).entryAlong());
+        }
+        return at;
+    }
+
+    /**
+     * The route as its list of legs (DESIGN § 5.1): road stretches and walk links in order. A road-only route is one
+     * road leg (none when it has no steps). The walk to the road and the last walk after it are the runtime's legs
+     * around this list.
+     */
+    public List<Leg> legs() {
+        List<Leg> out = new ArrayList<>();
+        if (walkLinks.isEmpty()) {
+            if (!steps.isEmpty()) {
+                out.add(new RoadLeg(0, polylineLength(), 0, steps.size()));
+            }
+            return out;
+        }
+        int step = 0;
+        for (WalkLinkStretch w : walkLinks) {
+            if (w.beforeStep() > step) {
+                out.add(new RoadLeg(stepPolylineStart(step), w.polylineFrom(), step, w.beforeStep()));
+                step = w.beforeStep();
+            }
+            out.add(new WalkLinkLeg(w.polylineFrom(), w.polylineTo(), w));
+        }
+        if (step < steps.size()) {
+            out.add(new RoadLeg(stepPolylineStart(step), polylineLength(), step, steps.size()));
+        }
+        return out;
     }
 
     /** Floor-block points from the start snap point to the end snap point. */
@@ -208,6 +409,9 @@ public final class Route {
         List<Step> head = new ArrayList<>(steps.subList(0, count));
         Step last = head.get(count - 1);
         SnapPoint newEnd = SnapPoint.onEdge(snapshot, last.edge().id(), last.exitAlong());
+        if (!walkLinks.isEmpty()) {
+            return buildPieces(snapshot, start, newEnd, pieces(head, count), classCost);
+        }
         return build(snapshot, start, newEnd, head, classCost);
     }
 
@@ -217,7 +421,24 @@ public final class Route {
         for (Step s : steps) {
             re.add(s.withVerdict(policy.check(s.edge())));
         }
+        if (!walkLinks.isEmpty()) {
+            return buildPieces(snapshot, start, end, pieces(re, re.size()), classCost);
+        }
         return build(snapshot, start, end, re, classCost);
+    }
+
+    /** {@code steps} (this route's, re-verdicted) with this route's walk links before step {@code endStep} put back. */
+    private List<Piece> pieces(List<Step> steps, int endStep) {
+        List<Piece> out = new ArrayList<>();
+        int link = 0;
+        for (int i = 0; i < endStep; i++) {
+            while (link < walkLinks.size() && walkLinks.get(link).beforeStep() == i) {
+                out.add(new LinkStep(walkLinks.get(link).link(), walkLinks.get(link).cost()));
+                link++;
+            }
+            out.add(steps.get(i));
+        }
+        return out;
     }
 
     /** The point {@code along} polyline blocks from the start (clamped). */
@@ -283,9 +504,16 @@ public final class Route {
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder("Route{length=").append(String.format("%.1f", length)).append(", edges=[");
+        int link = 0;
         for (int i = 0; i < steps.size(); i++) {
+            while (link < walkLinks.size() && walkLinks.get(link).beforeStep() == i) {
+                sb.append(i > 0 || link > 0 ? ", " : "").append("~").append(walkLinks.get(link++).link().id());
+            }
             Step s = steps.get(i);
-            sb.append(i > 0 ? ", " : "").append(s.forward() ? "" : "-").append(s.edge().id());
+            sb.append(i > 0 || link > 0 ? ", " : "").append(s.forward() ? "" : "-").append(s.edge().id());
+        }
+        while (link < walkLinks.size()) {
+            sb.append(!steps.isEmpty() || link > 0 ? ", " : "").append("~").append(walkLinks.get(link++).link().id());
         }
         return sb.append("]}").toString();
     }

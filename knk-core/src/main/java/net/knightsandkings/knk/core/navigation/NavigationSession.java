@@ -315,6 +315,19 @@ public final class NavigationSession {
     }
 
     /**
+     * Off-road phase 2 (#705, DESIGN § 5.2.2): walk links the last route asked for were found. Asks for a fresh route
+     * and keeps the current one unless the new one is clearly shorter - an improvement, as when a gate opened, but not
+     * held back by that rate limit (the runtime asks at most once per link search round). A partial route takes any.
+     */
+    public List<NavigationEffect> onWalkLinksFound(long nowTick) {
+        if (state != State.GUIDING || route == null) {
+            return List.of();
+        }
+        boolean partial = explanation.isPresent();
+        return List.of(requestRoute(RouteReason.IMPROVEMENT, !partial, nowTick));
+    }
+
+    /**
      * The road network (or its routing view, rev. 7 Part A) was replaced: the current route and its instructions
      * belong to the old one, whose edge ids may not exist any more. A new route is computed on the new network
      * and taken as it is; {@code maneuvers} builds its instructions.

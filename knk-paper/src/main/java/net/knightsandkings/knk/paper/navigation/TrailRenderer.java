@@ -160,12 +160,48 @@ public final class TrailRenderer {
         if (fromPlayer && distance(player, first) > LEG_MIN) {
             drawLeg(viewer, player, first);
         }
-        ParticleDraw.polyline(viewer, lifted(trail), SPACING, particle, routeData);
+        if (route.hasWalkLinks()) {
+            drawWithWalkLinks(viewer, route, trail, centred ? centredWindowAlongs(route, along, length, SPACING)
+                : trailPointAlongs(route, along, length, SPACING));
+        } else {
+            ParticleDraw.polyline(viewer, lifted(trail), SPACING, particle, routeData);
+        }
         if (target != null && along + length >= route.polylineLength()) {
             double[] end = route.end().point();
             if (distance(end, target) > LEG_MIN) {
                 drawLeg(viewer, end, target);
             }
+        }
+    }
+
+    /**
+     * Off-road phase 2 (#705, DESIGN § 5.1): a route with walk links - the window's spots on a road leg drawn as the road
+     * trail, those on a walk link at the route's own point (not centred on a road) in the leg colour, as a walk trail is
+     * (O20). The spots are the road trail's fixed spots, so they stay put between redraws.
+     */
+    private void drawWithWalkLinks(Player viewer, Route route, List<double[]> trail, double[] alongs) {
+        if (alongs.length != trail.size()) {
+            ParticleDraw.polyline(viewer, lifted(trail), SPACING, particle, routeData);
+            return;
+        }
+        List<double[]> road = new ArrayList<>();
+        List<double[]> walk = new ArrayList<>();
+        for (int i = 0; i < trail.size(); i++) {
+            if (route.walkLinkAt(alongs[i]).isPresent()) {
+                if (road.size() > 0) {
+                    ParticleDraw.polyline(viewer, lifted(road), SPACING, particle, routeData);
+                    road = new ArrayList<>();
+                }
+                walk.add(centre(route.pointAt(alongs[i])));
+            } else {
+                road.add(trail.get(i));
+            }
+        }
+        if (!road.isEmpty()) {
+            ParticleDraw.polyline(viewer, lifted(road), SPACING, particle, routeData);
+        }
+        if (!walk.isEmpty()) {
+            ParticleDraw.points(viewer, lifted(walk), particle, legData);
         }
     }
 

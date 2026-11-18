@@ -290,6 +290,8 @@ public class KnKPlugin extends JavaPlugin {
     // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
     private net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService walkSnapshots;
     private java.util.concurrent.ExecutorService walkSearches;
+    /** Off-road phase 2 (#705): the block-change hook of the walk links; null with navigation.walk-links off. */
+    private net.knightsandkings.knk.paper.navigation.walk.WalkTerrainListener walkTerrainListener;
     /** Link C1 (PandiO/knk-workspace#700): the walk navigator's parts NPCs plan their off-road legs with; null when off. */
     private net.knightsandkings.knk.paper.npc.nav.NpcWalkPlanner.Sources npcWalkSources;
     private net.knightsandkings.knk.paper.navigation.walk.WalkAccessFactory walkAccessFactory;
@@ -1463,6 +1465,10 @@ public class KnKPlugin extends JavaPlugin {
         if (navigationRouting != null) {
             navigationRouting.shutdownNow();
         }
+        if (walkTerrainListener != null) {
+            walkTerrainListener.stop();
+            walkTerrainListener = null;
+        }
         if (walkSnapshots != null) {
             walkSnapshots.stop();
         }
@@ -2018,6 +2024,7 @@ public class KnKPlugin extends JavaPlugin {
         // navigation.plaza-lines on (read per redraw; off draws today's trail)
         navigationService.setPlazaLines(() -> new net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld(
             regionTracker == null ? null : regionTracker.regionIds()), this::plazaLineOptions);
+        startWalkLinks(navigation, walk, access);
         navigationService.start();
 
         // KNG-234: the navigation compass - any item matching the web app's material + display name rule.
@@ -2253,6 +2260,36 @@ public class KnKPlugin extends JavaPlugin {
             net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService::of, navigation.walk(), search,
             walkSearches, task -> org.bukkit.Bukkit.getScheduler().runTask(this, task), org.bukkit.Bukkit::getWorld);
         return new net.knightsandkings.knk.paper.navigation.NavigationService.Walk(preparer, search, walkSearches);
+    }
+
+    /**
+     * Off-road navigation phase 2 (PandiO/knk-workspace#705): with {@code navigation.walk-links} on (and walk paths on),
+     * the walk-link cache, its tagger (WorldGuard regions at the path, the gate cells' doors) and the block-change hook
+     * (O18) are set up; off, nothing is made and navigation routes exactly as before.
+     */
+    private void startWalkLinks(net.knightsandkings.knk.paper.config.NavigationConfig navigation,
+                                net.knightsandkings.knk.paper.navigation.NavigationService.Walk walk,
+                                net.knightsandkings.knk.paper.navigation.NavigationAccess access) {
+        if (!navigation.walkLinks().enabled()) {
+            return;
+        }
+        if (walk == null) {
+            getLogger().warning("navigation.walk-links is on but walk paths are off (navigation.walk.enabled: false):"
+                + " walk links stay off");
+            return;
+        }
+        var cache = new net.knightsandkings.knk.core.roads.links.WalkLinkCache(System::currentTimeMillis,
+            navigation.walkLinks().ttlSeconds(), navigation.walkLinks().retrySeconds(),
+            net.knightsandkings.knk.core.roads.links.WalkLinkCache.DEFAULT_MAX_ENTRIES);
+        navigationService.setWalkLinks(new net.knightsandkings.knk.paper.navigation.NavigationService.WalkLinks(
+            navigation.walkLinks(), cache, new net.knightsandkings.knk.core.roads.links.WalkLinkCounters(),
+            new net.knightsandkings.knk.paper.navigation.walk.WalkLinkTagger(access::regionsAt,
+                world -> net.knightsandkings.knk.paper.roads.GateCellsIndex.of(gateManager, world))));
+        this.walkTerrainListener = new net.knightsandkings.knk.paper.navigation.walk.WalkTerrainListener(cache);
+        walkTerrainListener.start(this);
+        getLogger().info("Walk links on (navigation.walk-links): range " + navigation.walkLinks().range()
+            + ", ratio " + navigation.walkLinks().ratio() + ", road-first share " + navigation.walkLinks().roadFirstShare()
+            + " / max ratio " + navigation.walkLinks().roadFirstMaxRatio());
     }
 
     /**

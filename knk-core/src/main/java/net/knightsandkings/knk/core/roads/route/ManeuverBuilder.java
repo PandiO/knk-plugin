@@ -39,13 +39,46 @@ public final class ManeuverBuilder {
         this.snapshot = snapshot;
     }
 
+    /** The text of a {@link Maneuver.Kind#WALK} maneuver. */
+    public static final String WALK_TEXT = "Leave the road and walk across";
+
     public List<Maneuver> build(Route route) {
+        if (route.hasWalkLinks()) {
+            return buildWithLinks(route);
+        }
         List<Maneuver> out = new ArrayList<>();
         List<Route.Step> steps = route.steps();
         if (steps.size() < 2) {
             return out;
         }
-        double along = 0; // polyline distance at the boundary before step i
+        buildSteps(route, steps, 0, out);
+        return out;
+    }
+
+    /**
+     * Off-road phase 2 (#705, DESIGN § 5.1): each road leg's instructions as on a road-only route, and a
+     * {@link Maneuver.Kind#WALK} where a walk link leaves the road.
+     */
+    private List<Maneuver> buildWithLinks(Route route) {
+        List<Maneuver> out = new ArrayList<>();
+        for (Route.Leg leg : route.legs()) {
+            if (leg instanceof Route.RoadLeg road) {
+                List<Route.Step> steps = route.steps().subList(road.firstStep(), road.endStep());
+                if (steps.size() >= 2) {
+                    buildSteps(route, steps, road.polylineFrom(), out);
+                }
+            } else if (leg instanceof Route.WalkLinkLeg walk) {
+                out.add(new Maneuver(Maneuver.Kind.WALK, route.pointAt(walk.polylineFrom()), walk.polylineFrom(), 0, null,
+                    WALK_TEXT));
+            }
+        }
+        out.sort(java.util.Comparator.comparingDouble(Maneuver::along));
+        return out;
+    }
+
+    /** The instructions between consecutive {@code steps} (at least two), the first starting at {@code startAlong}. */
+    private void buildSteps(Route route, List<Route.Step> steps, double startAlong, List<Maneuver> out) {
+        double along = startAlong; // polyline distance at the boundary before step i
         Optional<String> lastStreet = streetOf(steps.get(0));
         for (int i = 0; i < steps.size() - 1; i++) {
             Route.Step current = steps.get(i);
@@ -80,7 +113,6 @@ public final class ManeuverBuilder {
                     levelText(level.get())));
             }
         }
-        return out;
     }
 
     private Optional<String> streetOf(Route.Step step) {
