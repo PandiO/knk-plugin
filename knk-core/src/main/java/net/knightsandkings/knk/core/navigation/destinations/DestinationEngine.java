@@ -22,6 +22,11 @@ import net.knightsandkings.knk.core.util.NamedTargets;
  * Names resolve through {@link NamedTargets} over {@link Candidate}, so {@code type:name}, {@code type:#id},
  * ambiguity choices, suggestions and completion behave the same in every scope - in a match as in the world.
  * Pure and deterministic for a context and model version; main thread.
+ *
+ * <p>No list is cached here (E18): every call builds the list again. A siege match list depends on the board and on
+ * live gate states (#176), so it is rebuilt per call; only lists built from the navigation model alone may be cached,
+ * by (scope, world, model version), and that cache belongs to the model-backed providers of phase 2/3, not to match
+ * lists.
  */
 public final class DestinationEngine {
 
@@ -38,7 +43,7 @@ public final class DestinationEngine {
 
     /** {@link #resolve}'s answer. */
     public record Resolution(Outcome outcome, AllowedDestination destination, Candidate candidate, List<Candidate> choices,
-                             List<Candidate> suggestions, String reason, DestinationList list) {
+                             List<Candidate> suggestions, Reason reason, DestinationList list) {
 
         public enum Outcome {
             /** One candidate; {@link #destination()} is the handle. */
@@ -85,13 +90,13 @@ public final class DestinationEngine {
      * {@link #revalidate}'s answer: still allowed (with the candidate as listed now, whose kind or detail may have
      * changed), or ended with the reason the session is told.
      */
-    public record Revalidation(boolean allowed, Candidate candidate, String reason) {
+    public record Revalidation(boolean allowed, Candidate candidate, Reason reason) {
 
         static Revalidation stillAllowed(Candidate candidate) {
             return new Revalidation(true, candidate, null);
         }
 
-        static Revalidation ended(String reason) {
+        static Revalidation ended(Reason reason) {
             return new Revalidation(false, null, Objects.requireNonNull(reason, "reason"));
         }
     }
@@ -148,7 +153,7 @@ public final class DestinationEngine {
             : listed.ordering().thenComparing(BY_PRIORITY_THEN_LABEL);
         here.sort(order);
         elsewhere.sort(order);
-        String reason = here.isEmpty() ? listed.reasonWhenEmpty() : null;
+        Reason reason = here.isEmpty() ? listed.reasonWhenEmpty() : null;
         return new DestinationList(scope.id(), scope.displayName(), here, elsewhere, reason, false, null, ctx.modelVersion());
     }
 
@@ -232,8 +237,8 @@ public final class DestinationEngine {
             .orElseGet(() -> Revalidation.ended(noLongerListed(handle.candidate(), list)));
     }
 
-    /** "Keep Gate is no longer part of this match." */
-    static String noLongerListed(Candidate candidate, DestinationList list) {
-        return candidate.label() + " is no longer part of " + list.displayName() + ".";
+    /** {@code no-longer-listed}: "Keep Gate is no longer part of this match." */
+    static Reason noLongerListed(Candidate candidate, DestinationList list) {
+        return Reason.of(Reason.NO_LONGER_LISTED, candidate.label() + " is no longer part of " + list.displayName() + ".");
     }
 }

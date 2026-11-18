@@ -34,7 +34,10 @@ public record NavigationContext(UUID player, String world, ActiveMode mode, bool
      * @param matchRunning   that lobby's match is running now (implies {@code lobbyMember})
      * @param team           the member's team id, when in a match and known; null otherwise
      * @param scenario       the scenario id of the running match, when known; null otherwise
-     * @param compassEnabled the compass setting {@code siegeEnabled}: navigation in sieges is switched on
+     * @param compassEnabled the compass serves sieges: the compass item is enabled <em>and</em> the compass setting
+     *                       {@code siegeEnabled} is on - the adapter builds it from both, as
+     *                       {@code NavigationCompassService.destinationsOf} decides today
+     *                       ({@code item().enabled() && siegeEnabled()}, DESIGN § 2.1 item 4); false yields scope 55
      */
     public record Siege(boolean lobbyMember, boolean matchRunning, Integer team, Integer scenario, boolean compassEnabled) {
 

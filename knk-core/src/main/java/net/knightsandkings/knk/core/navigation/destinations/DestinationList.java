@@ -14,14 +14,14 @@ import java.util.Optional;
  * @param candidates   the navigable candidates, ordered
  * @param otherWorld   candidates whose place is in another world than the player: not navigable, hidden from
  *                     completion, but a name among them still resolves to today's "is in another world" (E11)
- * @param reason       why nothing is navigable, when {@code candidates} is empty for a policy reason; null otherwise
- *                     (an empty catalogue has no reason)
+ * @param reason       why nothing is navigable, when {@code candidates} is empty for a policy reason: a code and a
+ *                     default text (E15); null otherwise (an empty world catalogue has no reason)
  * @param degraded     some places are missing because the model has none (limited mode, §7.4) or is stale (§7.3)
  * @param degradedText the note that goes with {@code degraded}; null otherwise
  * @param modelVersion the model version the list was built from
  */
 public record DestinationList(String scopeId, String displayName, List<Candidate> candidates, List<Candidate> otherWorld,
-                              String reason, boolean degraded, String degradedText, long modelVersion) {
+                              Reason reason, boolean degraded, String degradedText, long modelVersion) {
 
     public DestinationList {
         Objects.requireNonNull(scopeId, "scopeId");
@@ -31,8 +31,18 @@ public record DestinationList(String scopeId, String displayName, List<Candidate
     }
 
     /** Nothing navigable, for {@code reason}. */
-    public static DestinationList empty(String scopeId, String displayName, String reason, long modelVersion) {
+    public static DestinationList empty(String scopeId, String displayName, Reason reason, long modelVersion) {
         return new DestinationList(scopeId, displayName, List.of(), List.of(), reason, false, null, modelVersion);
+    }
+
+    /** The reason's code, or null when the list has no reason. */
+    public String reasonCode() {
+        return reason == null ? null : reason.code();
+    }
+
+    /** The reason's default text, or null when the list has no reason. */
+    public String reasonText() {
+        return reason == null ? null : reason.text();
     }
 
     public boolean isEmpty() {

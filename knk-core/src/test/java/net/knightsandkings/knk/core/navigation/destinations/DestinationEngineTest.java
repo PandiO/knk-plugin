@@ -52,7 +52,7 @@ class DestinationEngineTest {
     void theHighestApplicableScopeDecidesWhateverTheRegistrationOrder() {
         DestinationEngine engine = new DestinationEngine(List.of(
             always("low", 10, catalogue),
-            Scope.empty("high", 100, "x", c -> true, "nope"),
+            Scope.empty("high", 100, "x", c -> true, reason("nope")),
             never("highest", 200, catalogue)));
 
         assertEquals(List.of("highest", "high", "low"), engine.scopes().stream().map(Scope::id).toList());
@@ -60,21 +60,21 @@ class DestinationEngineTest {
         DestinationList list = engine.listFor(ctx);
         assertEquals("high", list.scopeId());
         assertTrue(list.isEmpty() && list.refused());
-        assertEquals("nope", list.reason());
+        assertEquals("nope", list.reason().text());
         assertEquals("x", list.displayName());
     }
 
     @Test
     void onATieTheScopeRegisteredFirstDecides() {
         DestinationEngine engine = new DestinationEngine(List.of(
-            Scope.empty("first", 110, "x", c -> true, "first's reason"),
-            Scope.empty("second", 110, "x", c -> true, "second's reason")));
-        assertEquals("first's reason", engine.listFor(ctx).reason());
+            Scope.empty("first", 110, "x", c -> true, reason("first's reason")),
+            Scope.empty("second", 110, "x", c -> true, reason("second's reason"))));
+        assertEquals("first's reason", engine.listFor(ctx).reason().text());
 
         DestinationEngine swapped = new DestinationEngine(List.of(
-            Scope.empty("second", 110, "x", c -> true, "second's reason"),
-            Scope.empty("first", 110, "x", c -> true, "first's reason")));
-        assertEquals("second's reason", swapped.listFor(ctx).reason());
+            Scope.empty("second", 110, "x", c -> true, reason("second's reason")),
+            Scope.empty("first", 110, "x", c -> true, reason("first's reason"))));
+        assertEquals("second's reason", swapped.listFor(ctx).reason().text());
     }
 
     @Test
@@ -86,17 +86,17 @@ class DestinationEngineTest {
     @Test
     void aScopeYieldsForTheContextItIsAskedAbout() {
         Scope scope = new Scope("mood", 1, "x", c -> true,
-            c -> c.frozen() ? new Empty("cold") : Listed.of(List.of(catalogue)));
+            c -> c.frozen() ? new Empty(reason("cold")) : Listed.of(List.of(catalogue)));
         DestinationEngine engine = new DestinationEngine(List.of(scope));
         assertFalse(engine.listFor(ctx).isEmpty());
-        assertEquals("cold", engine.listFor(ctx.withFrozen(true)).reason());
+        assertEquals("cold", engine.listFor(ctx.withFrozen(true)).reason().text());
     }
 
     @Test
     void filteredAndOrderedLeaveAnEmptyYieldAlone() {
-        Scope empty = Scope.empty("e", 1, "x", c -> true, "r").filtered(c -> false).ordered(Comparator.comparing(Candidate::key));
+        Scope empty = Scope.empty("e", 1, "x", c -> true, reason("r")).filtered(c -> false).ordered(Comparator.comparing(Candidate::key));
         assertInstanceOf(Empty.class, empty.yield(ctx));
-        assertEquals("r", ((Empty) empty.yield(ctx)).reason());
+        assertEquals("r", ((Empty) empty.yield(ctx)).reason().text());
         assertEquals("Scope e (1)", empty.toString());
     }
 
@@ -169,11 +169,11 @@ class DestinationEngineTest {
 
     @Test
     void theReasonWhenEmptyAppliesOnlyWhenNothingIsNavigable() {
-        Scope hub = Scope.listing("hub", 1, "the hub", c -> true, List.of(Provider.fixed("hub", List.of(farTown))), "in a siege");
+        Scope hub = Scope.listing("hub", 1, "the hub", c -> true, List.of(Provider.fixed("hub", List.of(farTown))), reason("in a siege"));
         DestinationEngine engine = new DestinationEngine(List.of(hub));
         DestinationList away = engine.listFor(ctx);
         assertTrue(away.refused(), "only a place in another world: nothing navigable");
-        assertEquals("in a siege", away.reason());
+        assertEquals("in a siege", away.reason().text());
         assertEquals(List.of(farTown), away.otherWorld());
         DestinationList here = engine.listFor(ctx.withWorld("nether"));
         assertFalse(here.refused());
@@ -259,10 +259,10 @@ class DestinationEngineTest {
 
     @Test
     void aRefusedListResolvesAndCompletesToNothing() {
-        DestinationEngine engine = new DestinationEngine(List.of(Scope.empty("e", 1, "x", c -> true, "no way")));
+        DestinationEngine engine = new DestinationEngine(List.of(Scope.empty("e", 1, "x", c -> true, reason("no way"))));
         Resolution refused = engine.resolve(ctx, "Kardenna", Mode.DEFAULT);
         assertEquals(Outcome.NOT_ALLOWED, refused.outcome());
-        assertEquals("no way", refused.reason());
+        assertEquals("no way", refused.reason().text());
         assertNull(refused.destination());
         assertEquals(List.of(), engine.complete(ctx, List.of("")));
         assertFalse(engine.isComplete(ctx, List.of("Kardenna")));
@@ -299,18 +299,19 @@ class DestinationEngineTest {
         listed.set(List.of(Fixtures.teamSpawn(3, "Team spawn", 2)));
         Revalidation dropped = engine.revalidate(ctx, handle);
         assertFalse(dropped.allowed());
-        assertEquals("Keep Gate is no longer part of the m.", dropped.reason());
+        assertEquals("Keep Gate is no longer part of the m.", dropped.reason().text());
+        assertEquals(Reason.NO_LONGER_LISTED, dropped.reason().code());
         assertNull(dropped.candidate());
     }
 
     @Test
     void aRefusingScopeEndsTheSessionWithItsReason() {
-        Scope frozen = Scope.empty("frozen", 100, "x", NavigationContext::frozen, "You can't navigate while frozen.");
+        Scope frozen = Scope.empty("frozen", 100, "x", NavigationContext::frozen, reason("You can't navigate while frozen."));
         DestinationEngine engine = new DestinationEngine(List.of(frozen, always("w", 1, catalogue)));
         AllowedDestination handle = engine.resolve(ctx, "Kardenna", Mode.DEFAULT).destination();
         Revalidation ended = engine.revalidate(ctx.withFrozen(true), handle);
         assertFalse(ended.allowed());
-        assertEquals("You can't navigate while frozen.", ended.reason());
+        assertEquals("You can't navigate while frozen.", ended.reason().text());
         assertTrue(engine.revalidate(ctx, handle).allowed());
     }
 
@@ -321,5 +322,10 @@ class DestinationEngineTest {
         NavigationContext other = NavigationContext.of(UUID.randomUUID(), "world");
         assertThrows(IllegalArgumentException.class, () -> engine.revalidate(other, handle));
         assertThrows(NullPointerException.class, () -> engine.revalidate(ctx, null));
+    }
+
+    /** A reason with the test code and {@code text}. */
+    private static Reason reason(String text) {
+        return Reason.of("test", text);
     }
 }

@@ -25,7 +25,7 @@ public final class Scope {
      * hub provider has destinations.
      */
     public record Listed(List<Provider> providers, Predicate<Candidate> filter, Comparator<Candidate> ordering,
-                         String reasonWhenEmpty) implements Yield {
+                         Reason reasonWhenEmpty) implements Yield {
         public Listed {
             providers = providers == null ? List.of() : List.copyOf(providers);
             filter = filter == null ? c -> true : filter;
@@ -36,8 +36,8 @@ public final class Scope {
         }
     }
 
-    /** Nothing may be navigated to, and this is why (today's player-facing text). */
-    public record Empty(String reason) implements Yield {
+    /** Nothing may be navigated to, and this is why: a code and today's player-facing text (E15). */
+    public record Empty(Reason reason) implements Yield {
         public Empty {
             Objects.requireNonNull(reason, "reason");
         }
@@ -74,14 +74,14 @@ public final class Scope {
 
     /** A scope that lists what {@code providers} offer, or gives {@code reasonWhenEmpty} when that is nothing. */
     public static Scope listing(String id, int priority, String displayName, Predicate<NavigationContext> applies,
-                                List<Provider> providers, String reasonWhenEmpty) {
+                                List<Provider> providers, Reason reasonWhenEmpty) {
         Listed listed = new Listed(providers, null, null, reasonWhenEmpty);
         return new Scope(id, priority, displayName, applies, ctx -> listed);
     }
 
     /** A scope that yields nothing, with {@code reason}. */
     public static Scope empty(String id, int priority, String displayName, Predicate<NavigationContext> applies,
-                              String reason) {
+                              Reason reason) {
         Empty empty = new Empty(reason);
         return new Scope(id, priority, displayName, applies, ctx -> empty);
     }

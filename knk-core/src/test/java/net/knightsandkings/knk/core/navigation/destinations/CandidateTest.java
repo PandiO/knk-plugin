@@ -73,6 +73,25 @@ class CandidateTest {
     }
 
     @Test
+    void aPointMayCarryAnArrivalRadius() {
+        Place.Point plain = new Place.Point("world", 1, 2, 3);
+        assertNull(plain.arrivalRadius(), "none: arrived within the usual arrive-distance");
+        assertFalse(plain.hasArrivalRadius());
+
+        Place.Point wide = plain.withArrivalRadius(6.5);
+        assertTrue(wide.hasArrivalRadius());
+        assertEquals(6.5, wide.arrivalRadius());
+        assertEquals(new Place.Point("world", 1, 2, 3, 6.5), wide);
+        assertEquals(plain, wide.withArrivalRadius(null));
+        assertFalse(plain.equals(wide), "the radius is part of the place");
+
+        assertThrows(IllegalArgumentException.class, () -> plain.withArrivalRadius(0.0));
+        assertThrows(IllegalArgumentException.class, () -> plain.withArrivalRadius(-1.0));
+        assertThrows(IllegalArgumentException.class, () -> plain.withArrivalRadius(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> plain.withArrivalRadius(Double.POSITIVE_INFINITY));
+    }
+
+    @Test
     void aNodeKeepsItsOwnCopyOfTheFloor() {
         double[] floor = {1, 2, 3};
         Place.Node node = new Place.Node("world", 1, floor);

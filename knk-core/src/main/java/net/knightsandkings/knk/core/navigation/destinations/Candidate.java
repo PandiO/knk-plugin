@@ -9,7 +9,9 @@ import java.util.Optional;
  * One navigable thing a {@link Provider} offers (destination engine DESIGN §3): what the name lookup, tab completion
  * and the compass cycle work on, and what the handle ({@link AllowedDestination}) points at. The {@code key} is
  * stable across re-orderings and renames ({@code domain:Town:12}, {@code objective:7}, {@code street:5}), so a running
- * session is re-validated by key (§8); ids, never names. The {@link Place} holds everything a routable destination
+ * session is re-validated by key (§8); ids, never names. Key forms: {@code domain:<Type>:<id>}, {@code location:<id>},
+ * {@code street:<id>}, {@code node:<id>}, {@code objective:<id>}, {@code spawn:<id>}, and {@code landmark:<id>} for the
+ * landmark provider of off-road phase 5.1 (§ 3.2, E16; the landmark's id, stable across renames). The {@link Place} holds everything a routable destination
  * needs, synchronously: no API call at click time (§7.1).
  *
  * @param key      stable id, unique within a list
@@ -58,10 +60,33 @@ public record Candidate(String key, String label, String typeWord, List<String> 
 
         String world();
 
-        /** A Location or a siege objective / spawnpoint: feet coordinates. */
-        record Point(String world, double x, double y, double z) implements Place {
+        /**
+         * A Location, a siege objective / spawnpoint or a landmark: feet coordinates, and optionally the radius within
+         * which the player has arrived (a landmark's {@code Radius} extent, § 3.2, E16). Without one the player
+         * arrives within the usual {@code arrive-distance}.
+         *
+         * @param arrivalRadius blocks, positive; null for none
+         */
+        record Point(String world, double x, double y, double z, Double arrivalRadius) implements Place {
             public Point {
                 Objects.requireNonNull(world, "world");
+                if (arrivalRadius != null && !(arrivalRadius > 0 && Double.isFinite(arrivalRadius))) {
+                    throw new IllegalArgumentException("arrivalRadius must be positive and finite: " + arrivalRadius);
+                }
+            }
+
+            /** A point arrived at within the usual {@code arrive-distance}. */
+            public Point(String world, double x, double y, double z) {
+                this(world, x, y, z, null);
+            }
+
+            public boolean hasArrivalRadius() {
+                return arrivalRadius != null;
+            }
+
+            /** The same point arrived at within {@code radius} blocks (null: the usual distance). */
+            public Point withArrivalRadius(Double radius) {
+                return new Point(world, x, y, z, radius);
             }
         }
 

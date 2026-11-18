@@ -199,13 +199,37 @@ class InitialScopesTest {
     }
 
     @Test
-    void aMatchWithoutDestinationsListsNothingWithoutAReason() {
+    void aMatchWithoutDestinationsListsNothingWithTodaysText() {
         match = List.of();
         DestinationList list = engine.listFor(inMatch);
         assertEquals(InitialScopes.SIEGE_MATCH, list.scopeId());
         assertTrue(list.isEmpty());
-        assertFalse(list.refused(), "KNG-234: a match without destinations - nothing to navigate to, no policy reason");
-        assertEquals(Outcome.NOT_FOUND, engine.resolve(inMatch, "Kardenna", Mode.DEFAULT).outcome());
+        assertEquals(InitialScopes.MATCH_EMPTY_REASON, list.reason(),
+            "a member without a team or a board without objectives: today's noMatchDestinations text (DESIGN § 2.1 item 4)");
+        assertEquals(InitialScopes.SIEGE_MATCH_EMPTY_CODE, list.reasonCode());
+        assertEquals("This match has no destinations to navigate to.", list.reasonText());
+        Resolution refused = engine.resolve(inMatch, "Kardenna", Mode.DEFAULT);
+        assertEquals(Outcome.NOT_ALLOWED, refused.outcome());
+        assertEquals(InitialScopes.MATCH_EMPTY_REASON, refused.reason());
+    }
+
+    @Test
+    void aMatchListIsRebuiltOnEveryCallNotCached() {
+        java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+        Provider counting = Provider.of("siege-match", ctx -> {
+            asked.incrementAndGet();
+            return match;
+        });
+        DestinationEngine live = new DestinationEngine(InitialScopes.create(List.of(catalogue), counting));
+
+        assertEquals(List.of("objective:7", "objective:8", "spawn:3"), keys(live.listFor(inMatch)));
+        match = List.of(wallObjective.withPlace(new Candidate.Place.Point("world", 50, 64, 50)), teamSpawn);
+        DestinationList after = live.listFor(inMatch);
+        assertEquals(List.of("objective:8", "spawn:3"), keys(after), "the board changed: the next list shows it (E18)");
+        assertEquals(new Candidate.Place.Point("world", 50, 64, 50), after.find("objective:8").orElseThrow().place(),
+            "a gate approach that changed with the gate state (#176) is in the next list");
+        live.complete(inMatch, List.of(""));
+        assertEquals(3, asked.get(), "the same model version, asked three times: three builds, no cache");
     }
 
     @Test
@@ -214,6 +238,9 @@ class InitialScopesTest {
         DestinationList list = engine.listFor(off);
         assertEquals(InitialScopes.SIEGE_MATCH_COMPASS_OFF, list.scopeId());
         assertEquals(InitialScopes.COMPASS_OFF_REASON, list.reason());
+        assertEquals(InitialScopes.SIEGE_COMPASS_OFF_CODE, list.reasonCode());
+        assertEquals("This match has no destinations to navigate to.", list.reasonText(),
+            "today's text (CompassMessages.noMatchDestinations), not the October draft's (DESIGN § 2.1 item 4)");
         assertEquals(InitialScopes.SIEGE_MATCH, engine.listFor(off.withSiege(off.siege().withCompassEnabled(true))).scopeId());
         assertEquals(InitialScopes.WORLD, engine.listFor(player.withSiege(Siege.NONE.withCompassEnabled(false))).scopeId(),
             "the setting means nothing outside a match");
@@ -265,7 +292,8 @@ class InitialScopesTest {
         match = List.of(wallObjective, teamSpawn);
         Revalidation captured = engine.revalidate(inMatch, handle);
         assertFalse(captured.allowed());
-        assertEquals("Keep Gate is no longer part of this match.", captured.reason());
+        assertEquals("Keep Gate is no longer part of this match.", captured.reason().text());
+        assertEquals(Reason.NO_LONGER_LISTED, captured.reason().code());
     }
 
     @Test
@@ -285,7 +313,7 @@ class InitialScopesTest {
         AllowedDestination toTown = engine.resolve(player, "Kardenna", Mode.DEFAULT).destination();
         Revalidation joined = engine.revalidate(player.withSiege(Siege.match(1, 1)), toTown);
         assertFalse(joined.allowed(), "a town is not part of the match");
-        assertEquals("Kardenna is no longer part of this match.", joined.reason());
+        assertEquals("Kardenna is no longer part of this match.", joined.reason().text());
         assertTrue(engine.revalidate(player.withSiege(Siege.match(1, 1)).withMode(ActiveMode.OWNER), toTown).allowed(),
             "owner mode: the bypass lists the town again");
 
