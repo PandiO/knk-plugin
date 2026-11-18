@@ -169,6 +169,48 @@ public final class NavigationModelRuntime {
     /** The API through the data accesses: the domain search, the Location search and the compass settings. */
     public static NavigationModelRefresher.Source source(DomainCatalogDataAccess domains, LocationsDataAccess locations,
                                                          NavigationCompassSettingsApi compass) {
+        return source(domains, locations, compass, null);
+    }
+
+    /**
+     * As above plus the landmarks of {@code api/landmarks} (off-road phase 5.1, PandiO/knk-workspace#708), only when
+     * {@code landmarks} is given ({@code navigation.landmarks} on); null keeps the section empty.
+     */
+    public static NavigationModelRefresher.Source source(DomainCatalogDataAccess domains, LocationsDataAccess locations,
+                                                         NavigationCompassSettingsApi compass,
+                                                         net.knightsandkings.knk.core.ports.api.LandmarksApi landmarks) {
+        NavigationModelRefresher.Source base = baseSource(domains, locations, compass);
+        if (landmarks == null) {
+            return base;
+        }
+        return new NavigationModelRefresher.Source() {
+            @Override
+            public CompletableFuture<java.util.List<net.knightsandkings.knk.core.domain.domains.KnkDomainSummary>> domains() {
+                return base.domains();
+            }
+
+            @Override
+            public CompletableFuture<java.util.List<KnkLocation>> locations() {
+                return base.locations();
+            }
+
+            @Override
+            public CompletableFuture<net.knightsandkings.knk.core.navigation.compass.CompassSettings> compass() {
+                return base.compass();
+            }
+
+            @Override
+            public CompletableFuture<java.util.List<net.knightsandkings.knk.core.navigation.model.Landmark>> landmarks() {
+                return landmarks.list(null).thenApply(list -> list.stream()
+                    .map(net.knightsandkings.knk.core.domain.landmarks.KnkLandmark::toModel)
+                    .filter(Objects::nonNull)
+                    .toList());
+            }
+        };
+    }
+
+    private static NavigationModelRefresher.Source baseSource(DomainCatalogDataAccess domains, LocationsDataAccess locations,
+                                                              NavigationCompassSettingsApi compass) {
         Objects.requireNonNull(domains, "domains");
         Objects.requireNonNull(locations, "locations");
         Objects.requireNonNull(compass, "compass");

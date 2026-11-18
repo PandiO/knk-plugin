@@ -58,6 +58,16 @@ public final class NavigationModelRefresher {
 
         /** The navigation compass settings. */
         CompletableFuture<CompassSettings> compass();
+
+        /**
+         * The landmarks (off-road phase 5.1, PandiO/knk-workspace#708, E16): {@code GET api/landmarks}, only with
+         * {@code navigation.landmarks} on. Default: none (the section stays empty). A failed read keeps the landmarks of
+         * the current model, so an API from before #708 (404) or a hiccup never drops them, and never fails the
+         * domain/Location/compass refresh.
+         */
+        default CompletableFuture<List<Landmark>> landmarks() {
+            return CompletableFuture.completedFuture(List.of());
+        }
     }
 
     /** The per-domain fallback (today's {@code DomainLocationResolver}). */
@@ -151,10 +161,12 @@ public final class NavigationModelRefresher {
         CompletableFuture<List<KnkDomainSummary>> domains;
         CompletableFuture<List<KnkLocation>> locations;
         CompletableFuture<CompassSettings> compass;
+        CompletableFuture<List<Landmark>> landmarks;
         try {
             domains = source.domains();
             locations = source.locations();
             compass = source.compass();
+            landmarks = landmarksOrCurrent(source);
         } catch (RuntimeException e) {
             refreshing.set(false);
             LOGGER.log(Level.WARNING, "[Navigation] Could not start the navigation model refresh", e);
@@ -163,6 +175,8 @@ public final class NavigationModelRefresher {
         return domains.thenCombine(locations, (d, l) -> build(d, l, null))
             .thenCombine(compass, (model, c) -> new NavigationModel(model.asOf(), model.domains(), model.locations(), c,
                 model.landmarks()))
+            .thenCombine(landmarks, (model, l) -> new NavigationModel(model.asOf(), model.domains(), model.locations(),
+                model.compass(), l))
             .handle((model, error) -> {
                 try {
                     if (error != null || model == null) {
@@ -175,6 +189,29 @@ public final class NavigationModelRefresher {
                     refreshing.set(false);
                 }
             });
+    }
+
+    /** The source's landmarks; on a failure (or none sent) the current model's, with a warning. */
+    private CompletableFuture<List<Landmark>> landmarksOrCurrent(Source source) {
+        CompletableFuture<List<Landmark>> asked;
+        try {
+            asked = source.landmarks();
+        } catch (RuntimeException e) {
+            asked = CompletableFuture.failedFuture(e);
+        }
+        if (asked == null) {
+            asked = CompletableFuture.completedFuture(null);
+        }
+        return asked.handle((landmarks, error) -> {
+            if (error == null && landmarks != null) {
+                return landmarks;
+            }
+            NavigationModel current = holder.current();
+            if (error != null) {
+                LOGGER.warning("[Navigation] Landmarks not refreshed, keeping the last ones: " + rootMessage(error));
+            }
+            return current == null ? List.<Landmark>of() : current.landmarks();
+        });
     }
 
     private boolean apply(NavigationModel fresh, boolean forgetLookedUpPlaces) {

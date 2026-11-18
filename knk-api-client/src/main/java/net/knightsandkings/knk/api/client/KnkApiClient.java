@@ -159,6 +159,8 @@ public class KnkApiClient {
     private final CurrencyApi currencyApi;
     private final RoadNetworkQueryApi roadNetworkQueryApi;
     private final net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi navigationCompassSettingsApi;
+    /** Off-road navigation phase 5.1 (PandiO/knk-workspace#708): api/landmarks. */
+    private final net.knightsandkings.knk.core.ports.api.LandmarksApi landmarksApi;
     private final RoadNetworkCommandApi roadNetworkCommandApi;
     private final net.knightsandkings.knk.core.ports.api.LocationRetentionApi locationRetentionApi;
     private final net.knightsandkings.knk.core.ports.api.PrivacyErasuresApi privacyErasuresApi;
@@ -240,6 +242,7 @@ public class KnkApiClient {
         this.itemInstancesApi = new net.knightsandkings.knk.api.impl.ItemInstancesApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkQueryApi = new RoadNetworkQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.navigationCompassSettingsApi = new net.knightsandkings.knk.api.impl.NavigationCompassSettingsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.landmarksApi = new net.knightsandkings.knk.api.impl.LandmarksApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.roadNetworkCommandApi = new RoadNetworkCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.locationRetentionApi = new net.knightsandkings.knk.api.impl.LocationRetentionApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.privacyErasuresApi = new net.knightsandkings.knk.api.impl.PrivacyErasuresApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -416,6 +419,10 @@ public class KnkApiClient {
     }
 
     /** The navigation compass item rule and where it works (KNG-234). */
+    public net.knightsandkings.knk.core.ports.api.LandmarksApi getLandmarksApi() {
+        return landmarksApi;
+    }
+
     public net.knightsandkings.knk.core.ports.api.NavigationCompassSettingsApi getNavigationCompassSettingsApi() {
         return navigationCompassSettingsApi;
     }

@@ -279,6 +279,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.navigation.NavigationDestinations navigationDestinations;
     // Destination engine P2 (PandiO/knk-workspace#103): the navigation model and its snapshot; nothing reads it before P3.
     private net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime navigationModel;
+    /** {@code navigation.landmarks} (off-road phase 5.1, #708); see {@link #landmarksConfig()}. */
+    private net.knightsandkings.knk.paper.navigation.engine.LandmarksConfig landmarksConfig;
     private net.knightsandkings.knk.paper.navigation.NavigationCompassService navigationCompass;
     /** Destination engine phase 3 (PandiO/knk-workspace#69): set only with navigation.destination-engine on. */
     private net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine navigationEngine;
@@ -2056,8 +2058,15 @@ public class KnKPlugin extends JavaPlugin {
             (objective, team) -> gateManager == null ? java.util.Optional.empty()
                 : net.knightsandkings.knk.paper.navigation.SiegeGateApproaches.of(gateManager).approach(objective, team),
             net.knightsandkings.knk.paper.navigation.CompassMessages::siegeDetail);
+        // off-road phase 5.1 (#708, destination engine § 3.2): the landmarks are one more World provider, only with
+        // navigation.landmarks on (never through the old catalogue)
+        java.util.List<net.knightsandkings.knk.core.navigation.destinations.Provider> worldProviders =
+            new java.util.ArrayList<>(java.util.List.of(catalogue));
+        if (landmarksConfig().enabled()) {
+            worldProviders.add(new net.knightsandkings.knk.core.navigation.engine.LandmarkProvider(holder::current));
+        }
         this.navigationEngine = net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine.create(
-            java.util.List.of(catalogue), match,
+            java.util.List.copyOf(worldProviders), match,
             new net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine.Sources(
                 uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
                 uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
@@ -2082,6 +2091,14 @@ public class KnKPlugin extends JavaPlugin {
             + "the compass and road access use the navigation model");
     }
 
+    /** {@code navigation.landmarks} (off-road phase 5.1, #708), read once at start-up. */
+    private net.knightsandkings.knk.paper.navigation.engine.LandmarksConfig landmarksConfig() {
+        if (landmarksConfig == null) {
+            landmarksConfig = net.knightsandkings.knk.paper.navigation.engine.LandmarksConfig.from(getConfig());
+        }
+        return landmarksConfig;
+    }
+
     /** With the engine on: the compass settings of the navigation model (persisted, E1), else the live store's. */
     private net.knightsandkings.knk.core.navigation.compass.CompassSettings engineCompassSettings(
             net.knightsandkings.knk.paper.navigation.CompassSettingsStore store) {
@@ -2099,7 +2116,9 @@ public class KnKPlugin extends JavaPlugin {
         try {
             this.navigationModel = net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime.create(
                 net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime.source(
-                    domainCatalogDataAccess, locationsDataAccess, apiClient.getNavigationCompassSettingsApi()),
+                    domainCatalogDataAccess, locationsDataAccess, apiClient.getNavigationCompassSettingsApi(),
+                    // off-road phase 5.1 (#708): the landmarks section only with navigation.landmarks on
+                    landmarksConfig().enabled() ? apiClient.getLandmarksApi() : null),
                 net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime.placeLookup(domainLocations),
                 getDataFolder().toPath(),
                 net.knightsandkings.knk.paper.navigation.model.NavigationModelConfig.from(getConfig()));
@@ -3110,6 +3129,20 @@ public class KnKPlugin extends JavaPlugin {
             } catch (RuntimeException | LinkageError e) {
                 getLogger().log(java.util.logging.Level.WARNING, "[NPC] navigation module failed to start", e);
             }
+            // off-road phase 5.1 (#708): /knk landmark, acting only with navigation.landmarks on
+            var landmarkCommand = new net.knightsandkings.knk.paper.commands.LandmarkAdminCommand(
+                landmarksConfig().enabled(), apiClient.getLandmarksApi(),
+                () -> navigationModel == null ? null : navigationModel.holder().current(),
+                () -> {
+                    if (navigationModel != null) {
+                        navigationModel.refreshNow();
+                    }
+                },
+                task -> getServer().getScheduler().runTask(this, task));
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.commands.LandmarkAdminCommand.metadata(),
+                landmarkCommand::execute,
+                landmarkCommand::complete);
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this,
                     tempRegionRetentionTask);
