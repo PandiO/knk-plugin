@@ -177,6 +177,23 @@ public final class TrailRenderer {
     }
 
     /**
+     * {@code navigation.guidance-v2} (off-road phase 6.2, #711, DESIGN § 7.2): the walk trail on fixed anchors - one
+     * particle at every multiple of {@code trail-leg-spacing} from the path's start, the anchors at or after
+     * {@code cursorAlong} (the leg's cursor, followed with continuity by the caller) within {@code trail-length} (half
+     * under lag), and the path's end once the window reaches it ({@link #anchoredWindow}). A redraw with the player
+     * standing still puts every particle where it was; a step moves none of those ahead (A17). Leg colour (O20).
+     * Main thread.
+     */
+    public void drawPath(Player viewer, List<double[]> floorPoints, double cursorAlong) {
+        double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();
+        List<double[]> window = anchoredWindow(floorPoints, cursorAlong, length, config.legSpacing());
+        if (window.isEmpty()) {
+            return;
+        }
+        ParticleDraw.points(viewer, lifted(window), particle, legData);
+    }
+
+    /**
      * The viewer's road surface: the world's, with the road cells in a region the viewer may not enter blocked
      * (KNG-110), so the centred trail keeps to the free part of a road a region covers in part.
      */
@@ -306,6 +323,31 @@ public final class TrailRenderer {
             out.add(pointAt(points, a));
         }
         out.add(pointAt(points, stop));
+        return out;
+    }
+
+    /**
+     * The fixed anchors of a floor-point polyline (DESIGN § 7.2.2): the points at {@code k * spacing} from its start
+     * with {@code cursorAlong <= k * spacing <= cursorAlong + length}, then the polyline's end when the window reaches
+     * it and it is no anchor itself. The anchors depend on the polyline and the spacing only, never on the player.
+     * Empty for an empty polyline.
+     */
+    public static List<double[]> anchoredWindow(List<double[]> points, double cursorAlong, double length, double spacing) {
+        List<double[]> out = new ArrayList<>();
+        if (points == null || points.isEmpty() || spacing <= 0) {
+            return out;
+        }
+        double total = polylineLength(points);
+        double start = Math.max(0, Math.min(cursorAlong, total));
+        double stop = Math.min(total, start + length);
+        int first = (int) Math.ceil(start / spacing - 1e-9);
+        int last = (int) Math.floor(stop / spacing + 1e-9);
+        for (int k = first; k <= last; k++) {
+            out.add(pointAt(points, k * spacing));
+        }
+        if (stop >= total - 1e-9 && total - last * spacing > 1e-6) {
+            out.add(points.get(points.size() - 1).clone());
+        }
         return out;
     }
 

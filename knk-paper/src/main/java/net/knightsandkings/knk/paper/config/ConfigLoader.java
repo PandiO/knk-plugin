@@ -414,7 +414,8 @@ public class ConfigLoader {
             section.getInt("trail-length", trailDefaults.length()),
             section.getInt("trail-period-ticks", trailDefaults.periodTicks()),
             section.getString("trail-particle", trailDefaults.particle()),
-            section.getString("trail-color", trailDefaults.color()));
+            section.getString("trail-color", trailDefaults.color()),
+            section.getDouble("trail-leg-spacing", trailDefaults.legSpacing()));
 
         NavigationConfig.SurveyConfig surveyDefaults = defaults.survey();
         ConfigurationSection survey = section.getConfigurationSection("survey");
@@ -483,7 +484,8 @@ public class ConfigLoader {
             surveyConfig,
             builderConfig,
             walkConfig,
-            section.getBoolean("guidance-v2", defaults.guidanceV2()));
+            section.getBoolean("guidance-v2", defaults.guidanceV2()),
+            section.getDouble("cursor-jump", defaults.cursorJump()));
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */

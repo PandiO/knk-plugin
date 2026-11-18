@@ -1123,7 +1123,7 @@ class NavigationServiceTest {
         List<double[]> expected = new WalkPathShaper().shape(path, searched.get(0).terrain(), searched.get(0).profile(),
             CellAccess.OPEN, NavigationConfig.WalkConfig.defaults().shaping()).trail();
         ArgumentCaptor<List<double[]>> drawn = pathCaptor();
-        verify(trail).drawPath(any(), drawn.capture());
+        verify(trail).drawPath(any(), drawn.capture(), anyDouble()); // phase 6.2: on anchors from the leg's cursor
         assertEquals(expected.size(), drawn.getValue().size(), "the shaped trail, computed on the walk thread");
         for (int i = 0; i < expected.size(); i++) {
             assertArrayEquals(expected.get(i), drawn.getValue().get(i), 1e-12);
@@ -1171,7 +1171,7 @@ class NavigationServiceTest {
         runSearches();
 
         ArgumentCaptor<List<double[]>> drawn = pathCaptor();
-        verify(trail).drawPath(any(), drawn.capture());
+        verify(trail).drawPath(any(), drawn.capture(), anyDouble()); // phase 6.2: on anchors from the leg's cursor
         assertEquals(wellDetour().size(), drawn.getValue().size());
         assertTrue(walking.walkStatus().contains("shaped 0 (mean 0.00 ms)"), walking.walkStatus());
     }
@@ -1776,6 +1776,221 @@ class NavigationServiceTest {
         assertTrue(walkTargets.isEmpty(), "no capture, no search");
         verify(trail, never()).drawPath(any(), any());
         assertTrue(service.walkStatus().startsWith("off"));
+    }
+
+    // ==================== off-road phase 6.2 (#711): anchored walk trails and winding back ====================
+
+    /** A route walk on Main Street and a direct walk leg, forwards and back: the scenario of the A16 transcript. */
+    private void forwardsAndBackScenario() {
+        moveTo(0.5, 65, 0.5);
+        service.navigate(player, cinixKeep());
+        for (int x = 1; x <= 60; x++) {
+            moveTo(x + 0.5, 65, 0.5);
+            ticks(1);
+        }
+        for (int x = 59; x >= 30; x--) {
+            moveTo(x + 0.5, 65, 0.5);
+            ticks(1);
+        }
+        ticks(NavigationService.RECHECK_TICKS);
+        service.stop(player);
+        moveTo(0.5, 65, 0.5);
+        service.navigate(player, well());
+        runSearches();
+        for (double[] p : List.of(new double[] {0.5, 4.5}, new double[] {0.5, 8.5}, new double[] {10.5, 8.5},
+            new double[] {18.5, 8.5}, new double[] {8.5, 8.5}, new double[] {0.5, 8.5}, new double[] {0.5, 3.5})) {
+            moveTo(p[0], 65, p[1]);
+            ticks(NavigationService.RECHECK_TICKS / 2);
+        }
+    }
+
+    @Test
+    void withTheFlagOffTheNewKeysChangeNothing() {
+        // A16: guidance-v2 off - trail-leg-spacing and cursor-jump do nothing; the trail, the HUD, the chat and the
+        // events are today's, call for call, and the anchored drawPath is never used
+        walkService(NavigationConfig.defaults());
+        tick.set(100);
+        forwardsAndBackScenario();
+        List<String> today = deepTranscript();
+        verify(trail, never()).drawPath(any(), any(), anyDouble());
+        assertTrue(today.stream().anyMatch(l -> l.contains("heading away")),
+            "today a walk leg walked back along says it is heading away");
+
+        clearInvocations(trail, hud, player);
+        events.clear();
+        walkTargets.clear();
+        walkSearches.clear(); // the first run's last request (after "heading away") must not reach its old service
+        tick.set(100);
+        walkService(NavigationConfig.defaults().withCursorJump(4)
+            .withTrail(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 1.5)));
+        forwardsAndBackScenario();
+
+        assertEquals(today, deepTranscript(), "guidance-v2: false = before #711");
+        verify(trail, never()).drawPath(any(), any(), anyDouble());
+    }
+
+    @Test
+    void withTheFlagOffWalkingBackOnTheRoadKeepsTheTrailAtTheFarthestPoint() {
+        // today's behaviour, pinned (A16): the trail is drawn from the farthest point reached
+        service.navigate(player, cinixKeep());
+        for (int x = 1; x <= 60; x++) {
+            moveTo(x + 0.5, 65, 0.5);
+            ticks(1);
+        }
+        for (int x = 59; x >= 40; x--) {
+            moveTo(x + 0.5, 65, 0.5);
+            ticks(1);
+        }
+        clearInvocations(trail);
+        ticks(10);
+        ArgumentCaptor<Double> along = ArgumentCaptor.forClass(Double.class);
+        verify(trail).drawRoute(any(), any(), along.capture(), any());
+        assertEquals(60, along.getValue(), 0.6);
+    }
+
+    @Test
+    void withGuidanceV2WalkingBackOnTheRoadDrawsTheRoadTrailFromThePlayer() {
+        // A18: 20 blocks back along the road - the road trail from the player's place, no walk leg, no re-route
+        NavigationService v2 = walkService(NavigationConfig.defaults().withGuidanceV2(true));
+        v2.navigate(player, cinixKeep());
+        for (int x = 1; x <= 60; x++) {
+            moveTo(x + 0.5, 65, 0.5);
+            ticks(1);
+        }
+        for (int x = 59; x >= 40; x--) {
+            moveTo(x + 0.5, 65, 0.5);
+            ticks(1);
+            assertTrue(v2.startLegOf(playerId).isEmpty(), "no walk leg at x = " + x);
+        }
+        clearInvocations(trail, hud);
+        ticks(10);
+        ArgumentCaptor<Double> along = ArgumentCaptor.forClass(Double.class);
+        verify(trail).drawRoute(any(), any(), along.capture(), any());
+        assertEquals(40, along.getValue(), 0.6, "the trail from the cursor");
+        ArgumentCaptor<Double> remaining = ArgumentCaptor.forClass(Double.class);
+        verify(hud, atLeastOnce()).update(any(), anyString(), remaining.capture(), anyDouble());
+        assertEquals(160, remaining.getValue(), 1.0, "the HUD distance from the cursor");
+        NavigationSession session = v2.sessionOf(playerId).orElseThrow();
+        assertEquals(60, session.along(), 0.6, "the progress stays");
+        assertTrue(messages().stream().noneMatch(m -> m.contains("You left the road")), messages().toString());
+        assertTrue(walkTargets.isEmpty(), "no walk search");
+    }
+
+    @Test
+    void withGuidanceV2AWalkLegIsNotRecomputedWhileThePlayerIsNearItAlsoWalkingBack() {
+        // A21, and A17's cursor: forwards along the detour, then back along it - one search, the trail on anchors from
+        // the cursor, no "heading away"
+        NavigationService v2 = walkService(NavigationConfig.defaults().withGuidanceV2(true));
+        v2.navigate(player, well());
+        runSearches();
+        assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(v2));
+        double[][] walk = {{0.5, 4.5}, {0.5, 8.5}, {8.5, 8.5}, {15.5, 8.5}};
+        for (double[] p : walk) {
+            moveTo(p[0], 65, p[1]);
+            ticks(NavigationService.RECHECK_TICKS / 2);
+        }
+        ArgumentCaptor<Double> cursor = ArgumentCaptor.forClass(Double.class);
+        verify(trail, atLeastOnce()).drawPath(any(), any(), cursor.capture());
+        assertEquals(8 + 15, cursor.getValue(), 1e-6, "8 north and 15 east along the detour");
+        for (double[] p : new double[][] {{8.5, 8.5}, {0.5, 8.5}, {0.5, 3.5}}) {
+            moveTo(p[0], 65, p[1]);
+            ticks(NavigationService.RECHECK_TICKS / 2);
+        }
+        verify(trail, atLeastOnce()).drawPath(any(), any(), cursor.capture());
+        assertEquals(3, cursor.getValue(), 1e-6, "the cursor wound back with the player");
+        assertEquals(1, walkTargets.size(), "not recomputed: " + walkTargets.size());
+        assertTrue(messages().stream().noneMatch(m -> m.contains("heading away")), messages().toString());
+        assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(v2));
+        verify(trail, never()).drawPath(any(), any());
+    }
+
+    @Test
+    void withGuidanceV2AWalkLegBeyondRecomputeDistanceIsRecomputedAtMostOncePerInterval() {
+        NavigationService v2 = walkService(NavigationConfig.defaults().withGuidanceV2(true));
+        v2.navigate(player, well());
+        runSearches();
+        moveTo(10.5, 65, -10.5); // 15 blocks from the detour (recompute-distance 6)
+        ticks(NavigationService.RECHECK_TICKS);
+        assertEquals(2, walkTargets.size(), "recomputed from the player's position");
+        assertArrayEquals(new double[] {20.5, 64, 0.5}, walkTargets.get(1), 1e-9, "a Location target stays put");
+        assertTrue(messages().stream().noneMatch(m -> m.contains("heading away")), messages().toString());
+        verify(trail, atLeastOnce()).drawPath(any(), any(), anyDouble()); // the old path stays drawn meanwhile
+        runSearches(); // the fake search returns the same detour: still 15 away
+        ticks(NavigationService.RECHECK_TICKS);
+        assertEquals(2, walkTargets.size(), "within reroute-min-interval (60 ticks) of the last recompute");
+        ticks(NavigationService.RECHECK_TICKS);
+        assertEquals(3, walkTargets.size(), "once the interval has passed");
+    }
+
+    @Test
+    void withGuidanceV2ThePlayerOffTheRoadJoinsItAtTheLeastRemainingCost() {
+        // A19: 30 blocks off Main Street at x 50 - the walk goes to the road ahead (about x 78), not to the nearest point
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {77.5, 64, 0.5}));
+        NavigationService v2 = walkService(NavigationConfig.defaults().withGuidanceV2(true));
+        moveTo(50.5, 65, 30.5);
+        v2.navigate(player, cinixKeep());
+        assertTrue(v2.startLegOf(playerId).isPresent());
+        double[] join = walkTargets.get(0);
+        assertEquals(0, join[2], 1e-6, "on Main Street");
+        assertEquals(50.5 + 30.5 / Math.sqrt(1.25), join[0], 1.0, "the join point with the least remaining cost");
+    }
+
+    @Test
+    void withGuidanceV2TheStartLegStaysWhileThePlayerWalksBackAlongIt() {
+        // N16's two-measure "heading away" is replaced by the distance to the leg's path (DESIGN § 7.5.5)
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 15.5},
+            new double[] {50.5, 64, 9.5}));
+        NavigationService v2 = walkService(NavigationConfig.defaults().withGuidanceV2(true));
+        moveTo(50.5, 65, 30.5);
+        v2.navigate(player, cinixKeep());
+        runSearches();
+        moveTo(50.5, 65, 10.5);
+        ticks(1);
+        moveTo(50.5, 65, 30.5); // 20 back along the path, 20 farther from the road
+        ticks(1);
+        assertTrue(v2.startLegOf(playerId).isPresent(), "on the leg's path: it stays");
+        ticks(NavigationService.RECHECK_TICKS);
+        assertTrue(messages().stream().noneMatch(m -> m.contains("You left the road")), messages().toString());
+
+        moveTo(85.5, 65, 45.5); // 35 blocks from the path: beyond recompute-distance
+        ticks(1);
+        assertTrue(v2.startLegOf(playerId).isEmpty(), "the leg goes; the session re-routes from the player");
+        ticks(NavigationService.RECHECK_TICKS * 2);
+        assertTrue(messages().stream().anyMatch(m -> m.contains("You left the road")), messages().toString());
+        assertTrue(v2.startLegOf(playerId).isPresent(), "a new walk to the new route's join point");
+    }
+
+    @Test
+    void withTheFlagOffTheStartLegWalkedBackAlongIsHeadingAwayAsToday() {
+        walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 15.5},
+            new double[] {50.5, 64, 9.5}));
+        NavigationService off = walkService(NavigationConfig.defaults());
+        moveTo(50.5, 65, 30.5);
+        off.navigate(player, cinixKeep());
+        runSearches();
+        moveTo(50.5, 65, 10.5);
+        ticks(1);
+        moveTo(50.5, 65, 30.5);
+        ticks(1);
+        assertTrue(off.startLegOf(playerId).isEmpty(), "N16: farther along the leg and farther from the road");
+    }
+
+    /** {@link #transcript()} with the points of a drawn path written out (a list of arrays prints them by identity). */
+    private List<String> deepTranscript() {
+        List<String> lines = new ArrayList<>();
+        for (Object mock : List.of(trail, hud)) {
+            mockingDetails(mock).getInvocations().forEach(i -> {
+                StringBuilder sb = new StringBuilder(i.getMethod().getName());
+                for (Object arg : i.getArguments()) {
+                    sb.append(' ').append(arg instanceof List<?> list
+                        ? java.util.Arrays.deepToString(list.toArray()) : java.util.Arrays.deepToString(new Object[] {arg}));
+                }
+                lines.add(sb.toString());
+            });
+        }
+        lines.addAll(messages());
+        events.forEach(e -> lines.add(e.getEventName()));
+        return lines;
     }
 
     /** Every trail and HUD call with its arguments, the chat lines and the events, in order. */

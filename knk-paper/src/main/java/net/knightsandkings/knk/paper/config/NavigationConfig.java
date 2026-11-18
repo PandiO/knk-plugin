@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 
 import net.knightsandkings.knk.core.domain.roads.RoadClass;
+import net.knightsandkings.knk.core.navigation.CursorParameters;
 import net.knightsandkings.knk.core.navigation.SessionParameters;
 import net.knightsandkings.knk.core.roads.build.BuildParameters;
 import net.knightsandkings.knk.core.roads.build.PassabilityRules;
@@ -53,6 +54,9 @@ import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
  * @param guidanceV2         {@code navigation.guidance-v2} (off-road navigation phase 6, PandiO/knk-workspace#710): the
  *                           trail-quality pass - walk paths with the clearance cost, shaped and drawn as checked curves.
  *                           Default false: walk paths, trails and the search exactly as before (DESIGN § 7.6, A16)
+ * @param cursorJump         {@code navigation.cursor-jump} (phase 6.2, PandiO/knk-workspace#711; with {@code guidance-v2}
+ *                           only): how far along the route the cursor may move in one tick before only a player who left
+ *                           the previous stretch makes it jump (loops and switchbacks, DESIGN § 7.5.6). Default 12
  */
 public record NavigationConfig(
     boolean enabled,
@@ -74,7 +78,8 @@ public record NavigationConfig(
     SurveyConfig survey,
     BuilderConfig builder,
     WalkConfig walk,
-    boolean guidanceV2
+    boolean guidanceV2,
+    double cursorJump
 ) {
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
@@ -97,8 +102,18 @@ public record NavigationConfig(
      * @param periodTicks ticks between two trail redraws
      * @param particle    a Bukkit {@code Particle} name (DUST takes the colour)
      * @param color       {@code #RRGGBB}
+     * @param legSpacing  {@code navigation.trail-leg-spacing} (phase 6.2, #711; with {@code guidance-v2} only): blocks
+     *                    between the fixed anchors of a walk trail. Default 3.0, today's spacing (O20, DESIGN § 7.2.2)
      */
-    public record TrailConfig(int length, int periodTicks, String particle, String color) {
+    public record TrailConfig(int length, int periodTicks, String particle, String color, double legSpacing) {
+        /** Default of {@code navigation.trail-leg-spacing}: today's walk-trail spacing (O20). */
+        public static final double DEFAULT_LEG_SPACING = 3.0;
+
+        /** Without {@code trail-leg-spacing} (callers from before #711): the default. */
+        public TrailConfig(int length, int periodTicks, String particle, String color) {
+            this(length, periodTicks, particle, color, DEFAULT_LEG_SPACING);
+        }
+
         public static TrailConfig defaults() {
             return new TrailConfig(30, 10, "DUST", "#E8C66A");
         }
@@ -115,6 +130,9 @@ public record NavigationConfig(
             }
             if (color == null || !color.matches("#[0-9A-Fa-f]{6}")) {
                 throw new IllegalArgumentException("navigation.trail-color must be #RRGGBB (got: " + color + ")");
+            }
+            if (!(legSpacing >= 0.5 && legSpacing <= 16)) {
+                throw new IllegalArgumentException("navigation.trail-leg-spacing must be between 0.5 and 16 (got: " + legSpacing + ")");
             }
         }
 
@@ -397,6 +415,19 @@ public record NavigationConfig(
         walk = walk == null ? WalkConfig.defaults() : walk;
     }
 
+    /** Without {@code cursor-jump} (callers from before #711): the default. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
+                            double destinationSnapVerticalWeight, double maxStartDistance, double maxDestinationDistance,
+                            double destinationWalkRange, TrailConfig trail, double rerouteDistance, int rerouteAfterTicks,
+                            double arriveDistance, int maxSessionMinutes, double sprintSpeed, SurveyConfig survey,
+                            BuilderConfig builder, WalkConfig walk, boolean guidanceV2) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, walk,
+            guidanceV2, CursorParameters.DEFAULT_CURSOR_JUMP);
+    }
+
     /** Without {@code guidance-v2} (callers from before #710): off. */
     public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
                             boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
@@ -433,7 +464,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2);
+            survey, builder, walk, guidanceV2, cursorJump);
     }
 
     /** This config with {@code guidance-v2} on or off. */
@@ -441,7 +472,28 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2);
+            survey, builder, walk, guidanceV2, cursorJump);
+    }
+
+    /** This config with another trail block ({@code trail-*} keys). */
+    public NavigationConfig withTrail(TrailConfig trail) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump);
+    }
+
+    /** This config with another {@code cursor-jump}. */
+    public NavigationConfig withCursorJump(double cursorJump) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump);
+    }
+
+    /** {@code guidance-v2}'s route cursor ({@code cursor-jump}); null with the flag off: the session as before. */
+    public CursorParameters cursorParameters() {
+        return guidanceV2 ? new CursorParameters(cursorJump) : null;
     }
 
     /** {@code class-cost} keys as the API spells them ({@code Main}, {@code Road}, {@code Path}), any case. */
@@ -509,6 +561,9 @@ public record NavigationConfig(
         }
         if (!(sprintSpeed > 0)) {
             throw new IllegalArgumentException("navigation.sprint-speed must be positive (got: " + sprintSpeed + ")");
+        }
+        if (!(cursorJump > 0)) {
+            throw new IllegalArgumentException("navigation.cursor-jump must be positive (got: " + cursorJump + ")");
         }
         trail.validate();
         survey.validate();
