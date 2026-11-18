@@ -8,6 +8,7 @@ import java.util.stream.Stream;
 import net.knightsandkings.knk.core.messaging.PrivateMessageNodes;
 import net.knightsandkings.knk.paper.commands.EnderchestCommand;
 import net.knightsandkings.knk.paper.commands.FlyCommand;
+import net.knightsandkings.knk.paper.commands.GamemodeCommand;
 import net.knightsandkings.knk.paper.commands.InventoryCommand;
 import net.knightsandkings.knk.paper.commands.RestoreCommand;
 import net.knightsandkings.knk.paper.currency.PlayerCurrencyService;
@@ -16,6 +17,7 @@ import net.knightsandkings.knk.paper.modes.ModeService;
 import net.knightsandkings.knk.paper.navigation.NavigateCommand;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 import net.knightsandkings.knk.paper.teleport.BackService;
+import net.knightsandkings.knk.paper.teleport.TeleportExemptions;
 import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 
 /**
@@ -34,10 +36,11 @@ import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 public final class CommandNodes {
 
     private static final Map<String, List<String>> ANY_OF = Map.ofEntries(
-            Map.entry("tp", List.of(TeleportNodes.STAFF, TeleportNodes.LEGACY_ADMIN_TP, TeleportNodes.STAFF_OTHERS)),
-            Map.entry("tphere", List.of(TeleportNodes.STAFF_OTHERS)),
+            Map.entry("tp", List.of(TeleportNodes.STAFF, TeleportNodes.LEGACY_ADMIN_TP, TeleportNodes.STAFF_OTHERS,
+                    TeleportExemptions.Type.TP.allNode())),
+            Map.entry("tphere", List.of(TeleportNodes.STAFF_OTHERS, TeleportExemptions.Type.TPHERE.allNode())),
             Map.entry("tpahere", List.of(TeleportNodes.REQUEST_HERE)),
-            Map.entry("spawn", List.of(TeleportNodes.SPAWN, TeleportNodes.STAFF_OTHERS)),
+            Map.entry("spawn", List.of(TeleportNodes.SPAWN, TeleportNodes.STAFF_OTHERS, TeleportExemptions.Type.SPAWN.allNode())),
             Map.entry("warp", List.of(TeleportNodes.WARP, TeleportNodes.STAFF_OTHERS)),
             Map.entry("warps", List.of(TeleportNodes.WARP)),
             Map.entry("back", Stream.concat(BackService.PLAYER_NODES.stream(), Stream.of(TeleportNodes.STAFF_BACK_OTHERS)).toList()),
@@ -46,6 +49,7 @@ public final class CommandNodes {
             Map.entry("baltop", List.of(PlayerCurrencyService.BALTOP_NODE)),
             Map.entry("transactions", List.of(PlayerCurrencyService.TRANSACTIONS_NODE, PlayerCurrencyService.TRANSACTIONS_OTHERS_NODE)),
             Map.entry("fly", List.of(FlyCommand.NODE, FlyCommand.NODE_OTHERS)),
+            Map.entry("gamemode", GamemodeCommand.NODES),
             Map.entry("heal", restoreNodes(RestoreCommand.Kind.HEAL)),
             Map.entry("feed", restoreNodes(RestoreCommand.Kind.FEED)),
             Map.entry("enderchest", List.of(EnderchestCommand.NODE, EnderchestCommand.NODE_OPEN)),

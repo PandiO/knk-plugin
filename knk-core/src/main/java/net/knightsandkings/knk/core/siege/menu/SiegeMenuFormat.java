@@ -45,6 +45,7 @@ public final class SiegeMenuFormat {
             case HUB -> "Preparing";
             case IN_PROGRESS -> "In progress";
             case ENDING -> "Ending";
+            case POST_MATCH -> "Match over";
             case COOLDOWN -> "Cooldown";
         };
     }

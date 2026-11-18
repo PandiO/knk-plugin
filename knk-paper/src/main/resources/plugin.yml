@@ -1,12 +1,17 @@
 name: KnightsAndKings
 api: "1.21"
-version: 0.1.0
+# Set at build time (knk-paper/build.gradle.kts): "0.1.0+<git short sha>", or "dev" without git.
+version: "${pluginVersion}"
 main: net.knightsandkings.knk.paper.KnKPlugin
 api-version: "26.3"
 depend:
   - WorldGuard
 softdepend:
   - WorldEdit
+  # Optional: Bedrock players (Geyser) get delayed menu switches - menus.bedrock-transition-delay-ticks.
+  - floodgate
+  # Optional: NPC navigation (npc.navigation.enabled) needs Citizens; without it NPC navigation reports unavailable.
+  - Citizens
   
 commands:
   knk:
@@ -30,8 +35,8 @@ commands:
     # No permission: here (KNG-77) - gated on knk.gatedoor.* / knk.gate.* inside GateDoorCommand.
 
   account:
-    description: "Manage your in-game account (create, link, view status)"
-    usage: "/account [create|link|status]"
+    description: "Manage your in-game account (link a web login, view status)"
+    usage: "/account [link|status]"
     aliases: [acc]
     permission: knk.account.use
 
@@ -72,6 +77,10 @@ commands:
     aliases: [sc]
     # No permission: here (KNG-24) - gated on knk.staffchat through KnkPermissible inside the executor
     # and hidden from players lacking it by GatedCommandVisibilityListener.
+
+  chattoken:
+    description: "Answers the chat-token share prompt (PandiO/knk-workspace#233): /chattoken <id> <public|plain|never>; clicked, not typed"
+    usage: "/chattoken <id> <public|plain|never>"
 
   msg:
     description: "Send a private message to another player (rebuild of v1's MessageCommands)"
@@ -132,7 +141,7 @@ commands:
 
   siege:
     description: "Siege minigame: lobbies, join/leave, vote, spawn choice, admin controls (docs/specs/siege-minigame/DESIGN.md §11.1)"
-    usage: "/siege [join|leave|menu|info|vote|spawn|skip|admin] ..."
+    usage: "/siege [join|leave|menu|info|vote|spawn|history|skip|admin] ..."
     # No permission: here - each subcommand is gated on its own knk.siege.* node through
     # KnkPermissible inside SiegeCommand, same reasoning as /kit and /knk.
 
@@ -181,6 +190,15 @@ commands:
     description: "Toggle or set flight for yourself or an online player"
     usage: "/fly [on|off] [player]"
 
+  # PandiO/knk-workspace#158: vanilla /gamemode needs minecraft.command.gamemode (op), which in-house grants never
+  # reach. Declaring it here makes the bare label resolve to this plugin (as /tp); vanilla stays reachable as
+  # /minecraft:gamemode. No permission: entry - knk.gamemode.<mode> and knk.gamemode.others are checked through
+  # KnkPermissible inside GamemodeCommand.
+  gamemode:
+    description: "Set your game mode, or an online player's"
+    usage: "/gamemode <survival|creative|adventure|spectator> [player]"
+    aliases: [gm]
+
   heal:
     description: "Heal yourself, an online player, or everyone online"
     usage: "/heal [player|all]"
@@ -205,11 +223,11 @@ commands:
   # KnkPermissible inside StaffTeleportCommand (same reasoning as /kit and /fly).
   tp:
     description: "Staff teleport: to a player, a player to a player, or to coordinates"
-    usage: "/tp <player> [-s] | /tp <player> <target> [-s] | /tp <x> <y> <z> [world] [yaw pitch]"
+    usage: "/tp <player> [-s] | /tp <player> <target> [-s] | /tp <x> <y> <z> [world] [yaw pitch] | /tp all <player> [-s]"
 
   tphere:
     description: "Staff teleport: bring a player to you"
-    usage: "/tphere <player> [-s]"
+    usage: "/tphere <player> [-s] | /tphere all [-s]"
 
   # Player teleport requests (DESIGN.md §3.5, Phase 3). Nodes checked in TeleportRequestCommand.
   tpa:
@@ -238,7 +256,7 @@ commands:
   # the main world's spawn. Nodes checked in SpawnCommand.
   spawn:
     description: "Teleport to the server spawn, or send a player there"
-    usage: "/spawn | /spawn <player> [-s]"
+    usage: "/spawn | /spawn <player> [-s] | /spawn all [-s]"
 
   # Domain teleports (DESIGN.md §3.7, Phase 5) - Towns/Districts/Structures enabled as destinations
   # in the web app. Nodes checked in WarpCommand; the web API checks requirements and the price.
@@ -266,7 +284,7 @@ commands:
     aliases: [nav]
   hub:
     description: "Teleport to the hub (the hub spawn on the Game Settings page); /hub return is the outage return button"
-    usage: "/hub | /hub <player> [-s] | /hub return"
+    usage: "/hub | /hub <player> [-s] | /hub all [-s] | /hub return"
     # KNG-188: /hub is open to every player (no node) and goes through the teleport engine like /spawn (warmup,
     # cooldown, the groups' spawn price). /hub <player> [-s] needs knk.teleport.staff.others (and .silent).
   lootbox:
@@ -306,6 +324,8 @@ permissions:
       knk.admin.location.retention: true
       knk.admin.enchantments: true
       knk.admin.itemblueprints: true
+      knk.admin.item: true
+      knk.admin.item.more: true
       knk.admin.menu: true
       knk.admin.streets: true
       knk.admin.street: true
@@ -324,13 +344,14 @@ permissions:
       knk.admin.discovery: true
       knk.admin.currency: true
       knk.admin.road: true
+      knk.admin.npc: true
 
   knk.admin.health:
     description: Access to /knk health
     default: false
 
   knk.admin.regions:
-    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region) and /knk regions temp [purge [hours]] (reports leftover tempregion_worldtask_* regions and unused domain_<id> regions; purge deletes unused temp regions)
+    description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region), /knk regions sync (domain access flags now, and every sub-region made a copy of its main region) and /knk regions temp [purge [hours]] (reports leftover tempregion_worldtask_* regions and unused domain_<id> regions; purge deletes unused temp regions)
     default: false
 
   knk.admin.cache:
@@ -401,6 +422,18 @@ permissions:
 
   knk.admin.itemblueprints:
     description: Access to /knk itemblueprints
+    default: false
+
+  knk.admin.item:
+    description: >-
+      /knk item - rename your held item, edit its lore, and list/search/apply enchantment definitions
+      (PandiO/knk-workspace#158; until then the knk.admin umbrella itself).
+    default: false
+  knk.admin.item.more:
+    description: >-
+      /knk item more [amount] - fill the held stack to its max, or give another full stack when it's full; with an
+      amount, exactly that many more (any amount, any max stack size; given until the inventory is full, nothing dropped). Items with an
+      instance id get new instances from the API (one per copy). Needs knk.admin.item too (PandiO/knk-workspace#175).
     default: false
 
   knk.admin.menu:
@@ -533,7 +566,13 @@ permissions:
     default: false
 
   knk.tasks:
-    description: Access to /knk tasks, /knk task-claim, /knk task-status (world task management)
+    description: Access to /knk tasks, /knk task <task code> (alias task-claim), /knk task accept|decline <id>, /knk task-status (world task management); with the realtime channel, tasks sent from the web app are offered to holders
+    default: op
+
+  # PandiO/knk-workspace#180: claiming a world task by its numeric id instead of its task code (owner/rescue only;
+  # not given to any rank by a seed, so in practice only holders of * have it).
+  knk.tasks.any:
+    description: Claim any world task by numeric id with /knk task <id>
     default: op
 
   knk.mode.owner:
@@ -601,6 +640,14 @@ permissions:
 
   # Lootboxes (docs/specs/lootboxes/DESIGN.md §3.4). Resolved through KnkPermissible, like knk.kit.*; the two player
   # nodes are granted to the Default permission group by knk-web-api's LootboxSeed, the admin nodes never are.
+  # Chat hashtag tokens (PandiO/knk-workspace#233). Checked through KnkPermissible: knk-web-api's SeedChatTokenNodes
+  # grants knk.chat.token.* to the Default group and knk.chat.tokens.bypass to Staff, Moderator and Admin.
+  knk.chat.token.*:
+    description: Every chat token (#hand, #stats, #kills, #deaths, #kd, #streak, #wins, #playtime, #balance, #title, #xp, #discoveries, #location, #tokens).
+    default: true
+  knk.chat.tokens.bypass:
+    description: Skips the Game Settings chat-token limits (tokens per message, statistics-token cooldown).
+    default: op
   knk.lootbox.open:
     description: Open (claim) a lootbox in the world by clicking it, or a lootbox token item by right-clicking it.
     default: true
@@ -682,6 +729,38 @@ permissions:
 
   knk.feed.all:
     description: Feed every online player with /feed all (KNG-9).
+    default: op
+
+  # PandiO/knk-workspace#158: /gamemode (GamemodeCommand). Resolved through KnkPermissible, same caveat as
+  # knk.kit.list. A mode needs its own node; another player also needs knk.gamemode.others.
+  knk.gamemode.*:
+    description: Every game mode, for yourself and (with .others) for online players.
+    default: op
+    children:
+      knk.gamemode.survival: true
+      knk.gamemode.creative: true
+      knk.gamemode.adventure: true
+      knk.gamemode.spectator: true
+      knk.gamemode.others: true
+
+  knk.gamemode.survival:
+    description: /gamemode survival (s, 0)
+    default: op
+
+  knk.gamemode.creative:
+    description: /gamemode creative (c, 1)
+    default: op
+
+  knk.gamemode.adventure:
+    description: /gamemode adventure (a, 2)
+    default: op
+
+  knk.gamemode.spectator:
+    description: /gamemode spectator (sp, 3)
+    default: op
+
+  knk.gamemode.others:
+    description: /gamemode <mode> <player> - set an online player's game mode (also needs that mode's node).
     default: op
 
   knk.enderchest:
@@ -890,6 +969,68 @@ permissions:
     description: Allows reloading custom enchantment config with /ce reload
     default: op
 
+  # Custom enchantments (PandiO/knk-workspace#193). Resolved through KnkPermissible as well as Bukkit
+  # (EnchantmentPermissions): a rank grant works, ops pass through default: op. An enchantment <id> may be
+  # used with customenchantments.<id> or customenchantments.use.<id>; grant customenchantments.use.* to give
+  # every enchantment, including ones added later. Not customenchantments.*: in-house it would also grant
+  # the /ce admin nodes above. Checked today for abilities on right-click and /ce add <id>; attack effects
+  # on hit have no permission check.
+  customenchantments.use.*:
+    description: Use every custom enchantment (grant this one to a rank)
+    default: op
+
+  customenchantments.poison:
+    description: Use the Poison (attack) custom enchantment
+    default: op
+
+  customenchantments.wither:
+    description: Use the Wither (attack) custom enchantment
+    default: op
+
+  customenchantments.freeze:
+    description: Use the Freeze (attack) custom enchantment
+    default: op
+
+  customenchantments.blindness:
+    description: Use the Blindness (attack) custom enchantment
+    default: op
+
+  customenchantments.confusion:
+    description: Use the Confusion (attack) custom enchantment
+    default: op
+
+  customenchantments.strength:
+    description: Use the Strength (attack) custom enchantment
+    default: op
+
+  customenchantments.cleaving:
+    description: Use the Cleaving (attack) custom enchantment
+    default: op
+
+  customenchantments.chaos:
+    description: Use the Chaos (ability) custom enchantment
+    default: op
+
+  customenchantments.flash_chaos:
+    description: Use the Flash Chaos (ability) custom enchantment
+    default: op
+
+  customenchantments.health_boost:
+    description: Use the Health Boost (ability) custom enchantment
+    default: op
+
+  customenchantments.armor_repair:
+    description: Use the Armor Repair (ability) custom enchantment
+    default: op
+
+  customenchantments.resistance:
+    description: Use the Resistance (ability) custom enchantment
+    default: op
+
+  customenchantments.invisibility:
+    description: Use the Invisibility (ability) custom enchantment
+    default: op
+
   # Teleports (docs/specs/teleport/DESIGN.md §3.3, KNG-17). Resolved through KnkPermissible, same
   # caveat as knk.kit.list (ops pass via the op bypass; non-ops need a real grant or group membership).
   knk.teleport.staff:
@@ -900,8 +1041,45 @@ permissions:
     default: op
 
   knk.teleport.staff.others:
-    description: Move other players - /tp <player> <target>, /tphere <player>, /spawn <player> and /warp <destination> <player>. You must outrank everyone involved.
+    description: Move other players - /tp <player> <target>, /tphere <player>, /spawn <player>, /hub <player> and /warp <destination> <player>. Everyone involved must be of your rank or lower (PandiO/knk-workspace#171; was strictly lower).
     default: op
+
+  # PandiO/knk-workspace#171: the all forms move every online player of your rank or lower who isn't exempt and not in
+  # staff or owner mode (never you). One node per form.
+  knk.teleport.all.hub:
+    description: /hub all [-s] - send every eligible player to the hub.
+    default: op
+  knk.teleport.all.spawn:
+    description: /spawn all [-s] - send every eligible player to their spawn.
+    default: op
+  knk.teleport.all.tp:
+    description: /tp all <player> [-s] - send every eligible player to that player.
+    default: op
+  knk.teleport.all.tphere:
+    description: /tphere all [-s] - bring every eligible player to you.
+    default: op
+  # #171: not moved by other players' teleports of that type, nor by its all form. Staff and owner mode exempt by
+  # default. The console and knk.admin.user.manage.all still move an exempt player they name (not with all).
+  knk.teleport.exempt.*:
+    description: Exempt from every kind of teleport by other players (/hub, /spawn, /tp, /tphere and their all forms).
+    default: false
+    children:
+      knk.teleport.exempt.hub: true
+      knk.teleport.exempt.spawn: true
+      knk.teleport.exempt.tp: true
+      knk.teleport.exempt.tphere: true
+  knk.teleport.exempt.hub:
+    description: Not sent to the hub by other players (/hub <you>, /hub all).
+    default: false
+  knk.teleport.exempt.spawn:
+    description: Not sent to spawn by other players (/spawn <you>, /spawn all).
+    default: false
+  knk.teleport.exempt.tp:
+    description: Not moved by other players' /tp <you> <target> or /tp all <player>.
+    default: false
+  knk.teleport.exempt.tphere:
+    description: Not pulled by other players' /tphere <you> or /tphere all.
+    default: false
 
   knk.teleport.staff.silent:
     description: The -s flag on staff teleports - no message to the moved or visited player. Vanished staff are always silent.
@@ -999,6 +1177,22 @@ permissions:
       staff teleport of another player carries the staff member's bypass (e.g. putting someone in a jail).
     default: op
 
+  knk.region.bypass.containers:
+    description: >-
+      Open chests, barrels, shulker boxes, hoppers and other storage (and storage minecarts and boats) in
+      regions whose rules refuse it - towns and other domains refuse it to non-members unless the region
+      allows it (PandiO/knk-workspace#157). Meant for moderators and admins, not the general staff rank.
+      Players in staff mode or owner mode always pass. knk.region.bypass doesn't cover it.
+    default: op
+
+  knk.notify.joinattempt:
+    description: >-
+      Get a chat line when a player's join is refused - vanilla ban, whitelist or full server, the invite-only
+      admission gate (no admitted account, account deactivated, access can't be checked), a missing world or an
+      unusable hub - with the reason (PandiO/knk-workspace#159). One line per player per
+      join-refusal-notify.cooldown-seconds.
+    default: op
+
   # Siege minigame (docs/specs/siege-minigame/DESIGN.md §11.1). Checked through KnkPermissible, like
   # the kit nodes: these declarations are documentation, an op short-circuits to allowed, and a
   # non-op needs a PermissionGrant/group membership. DESIGN §11.1: no Bukkit default beyond
@@ -1017,6 +1211,10 @@ permissions:
 
   knk.siege.admin.control:
     description: /siege admin start|stop|skip|kick - start matchmaking, abort (restore, no rewards), skip, remove a member
+    default: false
+
+  knk.siege.admin.join:
+    description: /siege join <player> [lobby] [team] - put a player into a round, also at the hub or in a running match (team given, their kept team after a disconnect, or the smallest). Admin only, not the general staff rank (PandiO/knk-workspace#152)
     default: false
 
   knk.siege.admin.reload:
@@ -1046,6 +1244,11 @@ permissions:
       the web app's discovery admin page. Also granted through the in-house permission system.
     default: false
 
+  knk.admin.npc:
+    description: >-
+      /knk npc - NPC navigation admin (PandiO/knk-workspace#358): status and settings with their layer, the NPC event
+      audit (which events reach K&K listeners for NPCs), test NPCs, and route following for testing (/knk npc nav).
+    default: op
   knk.admin.road:
     description: >-
       /knk road - road navigation admin tools (KNG-27, docs/specs/navigation/DESIGN.md §7): survey

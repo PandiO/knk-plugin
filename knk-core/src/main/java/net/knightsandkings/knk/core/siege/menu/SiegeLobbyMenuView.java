@@ -61,6 +61,7 @@ public final class SiegeLobbyMenuView implements MenuRowKey {
             case IN_PROGRESS -> "Ends in:";
             case COOLDOWN -> "Next round in:";
             case ENDING -> "The match is ending";
+            case POST_MATCH -> "Return in:";
             case DISABLED -> "Not running";
         };
     }
@@ -68,7 +69,7 @@ public final class SiegeLobbyMenuView implements MenuRowKey {
     /** Formatted countdown, or "-" when the phase has none. */
     public String getTimeRemaining() {
         return switch (lobby.phase()) {
-            case MATCHMAKING, HUB, IN_PROGRESS, COOLDOWN -> SiegeMenuFormat.duration(lobby.secondsRemaining());
+            case MATCHMAKING, HUB, IN_PROGRESS, POST_MATCH, COOLDOWN -> SiegeMenuFormat.duration(lobby.secondsRemaining());
             case ENDING, DISABLED -> "-";
         };
     }
@@ -126,7 +127,7 @@ public final class SiegeLobbyMenuView implements MenuRowKey {
         return switch (lobby.phase()) {
             case MATCHMAKING -> "GREEN_BANNER";
             case HUB, IN_PROGRESS -> "RED_BANNER";
-            case ENDING -> "ORANGE_BANNER";
+            case ENDING, POST_MATCH -> "ORANGE_BANNER";
             case COOLDOWN, DISABLED -> "WHITE_BANNER";
         };
     }

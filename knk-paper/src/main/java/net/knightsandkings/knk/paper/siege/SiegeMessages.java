@@ -75,6 +75,7 @@ public final class SiegeMessages {
             case HUB -> "Starting (hub)";
             case IN_PROGRESS -> "In progress";
             case ENDING -> "Ending";
+            case POST_MATCH -> "Match over";
             case COOLDOWN -> "Cooldown";
         };
     }
@@ -124,6 +125,26 @@ public final class SiegeMessages {
             case NO_VOTES -> "nobody voted, picked at random";
             case CANDIDATES_UNAVAILABLE -> "the voted scenarios became unavailable";
         };
+    }
+
+    // ==================== Final countdown (alpha run 1, PandiO/knk-workspace#199) ====================
+
+    /** The last seconds of the countdown that also show as a title (the rest only on the action bar). */
+    public static final int FINAL_COUNTDOWN_TITLE_SECONDS = 5;
+
+    /** "The siege ends in 12 seconds" on the action bar. */
+    public static Component finalCountdownBar(int secondsLeft) {
+        return Component.text("The siege ends in ", HIGHLIGHT)
+                .append(Component.text(duration(secondsLeft), secondsLeft <= FINAL_COUNTDOWN_TITLE_SECONDS ? BAD : NamedTextColor.WHITE));
+    }
+
+    /** A big "3" with "The siege ends" under it, shown for a second. */
+    public static net.kyori.adventure.title.Title finalCountdownTitle(int secondsLeft) {
+        return net.kyori.adventure.title.Title.title(
+                Component.text(String.valueOf(Math.max(0, secondsLeft)), BAD),
+                Component.text("The siege ends", HIGHLIGHT),
+                net.kyori.adventure.title.Title.Times.times(java.time.Duration.ZERO, java.time.Duration.ofMillis(1100),
+                        java.time.Duration.ofMillis(200)));
     }
 
     public static String endReason(SiegeEndReason reason) {

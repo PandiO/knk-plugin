@@ -2,6 +2,8 @@ package net.knightsandkings.knk.paper.listeners;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
@@ -61,9 +63,19 @@ public class UserAccountListener implements Listener {
     private final Logger logger;
     /** The balance line in /balance's format (currency ledger); null if the currency service failed to start. */
     private final PlayerCurrencyService currencyService;
-    /** Marked by PlayerListener when the API created the account at this join (KNG-128). */
+    /** Marked here when this join is the player's first (KNG-128, PandiO/knk-workspace#486). */
     private final NewPlayerWindow newPlayers;
     private final KnkConfig.OnboardingConfig onboarding;
+    /** PandiO/knk-workspace#486: true once when the player's previous account was erased since their last join (and forgets it). */
+    private volatile Predicate<UUID> takeErasedSince = uuid -> false;
+    /** Asks the API for the first-join kits of (player, user id); PlayerListener#requestFirstJoinKits. */
+    private volatile BiConsumer<UUID, Integer> firstJoinKits = (uuid, userId) -> { };
+
+    /** The erasure mark ({@code ErasedPlayerMarks#take}) and the first-join kit request; none until set. */
+    public void setFirstJoinHooks(Predicate<UUID> takeErasedSince, BiConsumer<UUID, Integer> firstJoinKits) {
+        this.takeErasedSince = takeErasedSince != null ? takeErasedSince : uuid -> false;
+        this.firstJoinKits = firstJoinKits != null ? firstJoinKits : (uuid, userId) -> { };
+    }
 
     public UserAccountListener(
         Plugin plugin,
@@ -111,6 +123,8 @@ public class UserAccountListener implements Listener {
 
         logger.info("Player " + player.getName() + " joined, syncing account data...");
         joinLoadingGuard.hold(player);
+        // Read now: whether the server had player data for them when they joined.
+        boolean playedBefore = player.hasPlayedBefore();
 
         userManager.onPlayerJoinAsync(player).thenAccept(userData -> {
             // Release the hold as soon as the account is known; the welcome lines wait for the
@@ -119,12 +133,51 @@ public class UserAccountListener implements Listener {
                 // Player may have disconnected again before the fetch finished.
                 Player online = Bukkit.getPlayer(uuid);
                 if (online != null) {
+                    // Before the welcome below and before UserDataLoadedEvent starts the join's discoveries.
+                    decideFirstJoin(uuid, online.getName(), userData, playedBefore);
                     joinLoadingGuard.release(online);
                 }
             });
             balanceLine(uuid, userData).thenAccept(balanceLine ->
                 Bukkit.getScheduler().runTask(plugin, () -> sendJoinMessages(uuid, userData, balanceLine)));
         });
+    }
+
+    /**
+     * The one first-join decision of a join (PandiO/knk-workspace#486), made once the join's sync knows the account,
+     * never from the user cache at {@code PlayerJoinEvent} (an erasure empties it, and so does a website account that
+     * has no UUID yet). A first join is an account the API created while this player connected, a player the server
+     * has no player data for (KNG-214), or a player whose previous account was erased since their last join (the
+     * erasure's mark, taken here whatever the cache holds). It marks the join for the first-join welcome and the quiet
+     * discovery minutes ({@link NewPlayerWindow}) and asks the API for the first-join kits: all three follow from this
+     * decision. Without an account (the API didn't answer) nothing is decided and the erasure mark waits for the next
+     * join. Main thread; returns whether this is a first join.
+     */
+    boolean decideFirstJoin(UUID uuid, String name, PlayerUserData userData, boolean hasPlayedBefore) {
+        if (userData == null || userData.userId() == null) {
+            logger.info("First join: no account for " + name + " after the join's sync, not decided");
+            return false;
+        }
+        // Both read on every join, so neither note outlives the join it was made for.
+        boolean created = newPlayers != null && newPlayers.takeAccountCreated(uuid);
+        boolean erasedSince = takeErasedSince.test(uuid);
+        if (!NewPlayerWindow.isFirstJoin(created, hasPlayedBefore, erasedSince)) {
+            return false;
+        }
+        if (newPlayers != null) {
+            newPlayers.markFirstJoin(uuid);
+        }
+        logger.info("First join: " + name + " (user " + userData.userId() + ") "
+            + (created ? "has a new account"
+                : erasedSince ? "returns after their previous account was erased"
+                : "joins for the first time with an existing account")
+            + "; first-join welcome, quiet discovery minutes, asking the API for the first-join kits");
+        try {
+            firstJoinKits.accept(uuid, userData.userId());
+        } catch (RuntimeException ex) {
+            logger.warning("First-join kits for user " + userData.userId() + " not requested: " + ex.getMessage());
+        }
+        return true;
     }
 
     private void sendJoinMessages(UUID uuid, PlayerUserData userData, String balanceLine) {
@@ -151,8 +204,8 @@ public class UserAccountListener implements Listener {
                 online.sendMessage(getPrefixComponent().append(linkPrompt(onboarding.unlinkedReminder())));
             }
         } catch (Exception ex) {
-            logger.severe("Failed to display join messages for " + online.getName() + ": " + ex.getMessage());
-            ex.printStackTrace();
+            logger.log(java.util.logging.Level.SEVERE,
+                "Failed to display join messages for " + online.getName() + ": " + ex.getMessage(), ex);
 
             online.sendMessage(
                 getPrefixComponent()

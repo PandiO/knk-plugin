@@ -7,12 +7,14 @@ import java.util.Map;
 import java.util.Set;
 
 import net.knightsandkings.knk.core.domain.roads.RoadClass;
+import net.knightsandkings.knk.core.navigation.CursorParameters;
 import net.knightsandkings.knk.core.navigation.SessionParameters;
 import net.knightsandkings.knk.core.roads.build.BuildParameters;
 import net.knightsandkings.knk.core.roads.build.PassabilityRules;
 import net.knightsandkings.knk.core.roads.route.RouterParameters;
 import net.knightsandkings.knk.core.roads.walk.MovementProfile;
 import net.knightsandkings.knk.core.roads.walk.WalkBudget;
+import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
 
 /**
  * The {@code navigation:} block of config.yml (road navigation, docs/specs/navigation/DESIGN.md §4,
@@ -49,6 +51,15 @@ import net.knightsandkings.knk.core.roads.walk.WalkBudget;
  * @param survey             survey-walk sampling
  * @param builder            tile builder parameters
  * @param walk               last-mile walkable paths (KNG-51, {@code navigation.walk.*})
+ * @param guidanceV2         {@code navigation.guidance-v2} (off-road navigation phase 6, PandiO/knk-workspace#710): the
+ *                           trail-quality pass - walk paths with the clearance cost, shaped and drawn as checked curves.
+ *                           Default false: walk paths, trails and the search exactly as before (DESIGN § 7.6, A16)
+ * @param cursorJump         {@code navigation.cursor-jump} (phase 6.2, PandiO/knk-workspace#711; with {@code guidance-v2}
+ *                           only): how far along the route the cursor may move in one tick before only a player who left
+ *                           the previous stretch makes it jump (loops and switchbacks, DESIGN § 7.5.6). Default 12
+ * @param plazaLines         {@code navigation.plaza-lines}, {@code plaza-pull} and {@code plaza-guide-cost} (off-road
+ *                           navigation phase 7, PandiO/knk-workspace#712): plaza lines for the players' trail. Default
+ *                           off: routes and trails exactly as before (A24)
  */
 public record NavigationConfig(
     boolean enabled,
@@ -69,7 +80,10 @@ public record NavigationConfig(
     double sprintSpeed,
     SurveyConfig survey,
     BuilderConfig builder,
-    WalkConfig walk
+    WalkConfig walk,
+    boolean guidanceV2,
+    double cursorJump,
+    PlazaLinesConfig plazaLines
 ) {
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
@@ -92,8 +106,18 @@ public record NavigationConfig(
      * @param periodTicks ticks between two trail redraws
      * @param particle    a Bukkit {@code Particle} name (DUST takes the colour)
      * @param color       {@code #RRGGBB}
+     * @param legSpacing  {@code navigation.trail-leg-spacing} (phase 6.2, #711; with {@code guidance-v2} only): blocks
+     *                    between the fixed anchors of a walk trail. Default 3.0, today's spacing (O20, DESIGN § 7.2.2)
      */
-    public record TrailConfig(int length, int periodTicks, String particle, String color) {
+    public record TrailConfig(int length, int periodTicks, String particle, String color, double legSpacing) {
+        /** Default of {@code navigation.trail-leg-spacing}: today's walk-trail spacing (O20). */
+        public static final double DEFAULT_LEG_SPACING = 3.0;
+
+        /** Without {@code trail-leg-spacing} (callers from before #711): the default. */
+        public TrailConfig(int length, int periodTicks, String particle, String color) {
+            this(length, periodTicks, particle, color, DEFAULT_LEG_SPACING);
+        }
+
         public static TrailConfig defaults() {
             return new TrailConfig(30, 10, "DUST", "#E8C66A");
         }
@@ -110,6 +134,9 @@ public record NavigationConfig(
             }
             if (color == null || !color.matches("#[0-9A-Fa-f]{6}")) {
                 throw new IllegalArgumentException("navigation.trail-color must be #RRGGBB (got: " + color + ")");
+            }
+            if (!(legSpacing >= 0.5 && legSpacing <= 16)) {
+                throw new IllegalArgumentException("navigation.trail-leg-spacing must be between 0.5 and 16 (got: " + legSpacing + ")");
             }
         }
 
@@ -244,15 +271,55 @@ public record NavigationConfig(
      * @param maxConcurrentSearches walk searches running at once, server-wide
      * @param climbables            material names climbed like a ladder
      * @param wallCost              extra cost of a cell beside a wall: paths keep a block from walls (0 = hug them)
+     * @param maxChunksPerRequest   a capture box larger than this many chunks is refused (64; raised on the dev server
+     *                              only to measure long legs, off-road phase 0, PandiO/knk-workspace#703)
+     * @param clearanceCost         with {@code guidance-v2}: extra cost per block of clearance a cell lacks to
+     *                              {@code wallClearance}, in place of {@code wallCost}; 0 keeps {@code wallCost} (phase 6.1)
+     * @param wallClearance         with {@code guidance-v2}: the clearance walk paths keep from walls where there is room
+     *                              (0.35..2; the shaper's hard minimum is 0.35)
+     * @param curve                 with {@code guidance-v2}: corners of a shaped walk trail drawn as checked curves
      */
     public record WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
                              double detourAllowance, double climbAllowance, int maxDrop, double dropPenalty,
                              int captureMargin, int chunkTtlSeconds, double recomputeDistance, int maxConcurrentSearches,
-                             List<String> climbables, double wallCost) {
+                             List<String> climbables, double wallCost, int maxChunksPerRequest, double clearanceCost,
+                             double wallClearance, boolean curve) {
+
+        /** Default of {@code clearance-cost} (DESIGN § 7.1.4: 5 per block, as the NPC local-leg search). */
+        public static final double DEFAULT_CLEARANCE_COST = 5.0;
+        /** Default of {@code wall-clearance} (DESIGN § 7.1.2). */
+        public static final double DEFAULT_WALL_CLEARANCE = MovementProfile.DEFAULT_WALL_CLEARANCE;
+
+        /** Default of {@code max-chunks-per-request}: the capture's limit before #703 (KNG-75 step 2a). */
+        public static final int DEFAULT_MAX_CHUNKS_PER_REQUEST = 64;
+
+        /** Upper bound of {@code max-chunks-per-request}: 1024 chunks, about 12 MB of captured terrain (DESIGN § 9.3). */
+        public static final int MAX_CHUNKS_PER_REQUEST_LIMIT = 1024;
+
         public WalkConfig {
             climbables = climbables == null ? List.of("LADDER") : climbables.stream()
                 .map(name -> name == null ? "" : name.trim().toUpperCase(Locale.ROOT))
                 .toList();
+        }
+
+        /** Without the phase 6.1 keys (callers from before #710): their defaults. */
+        public WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
+                          double detourAllowance, double climbAllowance, int maxDrop, double dropPenalty,
+                          int captureMargin, int chunkTtlSeconds, double recomputeDistance, int maxConcurrentSearches,
+                          List<String> climbables, double wallCost, int maxChunksPerRequest) {
+            this(enabled, maxExpansions, maxLengthFactor, maxLength, detourAllowance, climbAllowance, maxDrop, dropPenalty,
+                captureMargin, chunkTtlSeconds, recomputeDistance, maxConcurrentSearches, climbables, wallCost,
+                maxChunksPerRequest, DEFAULT_CLEARANCE_COST, DEFAULT_WALL_CLEARANCE, true);
+        }
+
+        /** Without {@code max-chunks-per-request} (callers from before #703): the default 64. */
+        public WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
+                          double detourAllowance, double climbAllowance, int maxDrop, double dropPenalty,
+                          int captureMargin, int chunkTtlSeconds, double recomputeDistance, int maxConcurrentSearches,
+                          List<String> climbables, double wallCost) {
+            this(enabled, maxExpansions, maxLengthFactor, maxLength, detourAllowance, climbAllowance, maxDrop, dropPenalty,
+                captureMargin, chunkTtlSeconds, recomputeDistance, maxConcurrentSearches, climbables, wallCost,
+                DEFAULT_MAX_CHUNKS_PER_REQUEST);
         }
 
         public static WalkConfig defaults() {
@@ -299,6 +366,17 @@ public record NavigationConfig(
             if (maxConcurrentSearches < 1) {
                 throw new IllegalArgumentException("navigation.walk.max-concurrent-searches must be at least 1 (got: " + maxConcurrentSearches + ")");
             }
+            if (maxChunksPerRequest < 1 || maxChunksPerRequest > MAX_CHUNKS_PER_REQUEST_LIMIT) {
+                throw new IllegalArgumentException("navigation.walk.max-chunks-per-request must be 1.."
+                    + MAX_CHUNKS_PER_REQUEST_LIMIT + " (got: " + maxChunksPerRequest + ")");
+            }
+            if (!(clearanceCost >= 0) || Double.isInfinite(clearanceCost)) {
+                throw new IllegalArgumentException("navigation.walk.clearance-cost must be a number >= 0 (got: " + clearanceCost + ")");
+            }
+            if (!(wallClearance >= MovementProfile.MIN_WALL_CLEARANCE && wallClearance <= MovementProfile.MAX_WALL_CLEARANCE)) {
+                throw new IllegalArgumentException("navigation.walk.wall-clearance must be " + MovementProfile.MIN_WALL_CLEARANCE
+                    + ".." + MovementProfile.MAX_WALL_CLEARANCE + " (got: " + wallClearance + ")");
+            }
             for (String name : climbables) {
                 if (name.isEmpty()) {
                     throw new IllegalArgumentException("navigation.walk.climbables must not contain blank entries");
@@ -306,10 +384,23 @@ public record NavigationConfig(
             }
         }
 
-        /** The player's {@link MovementProfile} with this config's drops and climbables. */
+        /** The player's {@link MovementProfile} with this config's drops and climbables (today's wall cost). */
         public MovementProfile profile() {
             return MovementProfile.PLAYER.withDrops(maxDrop, dropPenalty).withClimbables(Set.copyOf(climbables))
                 .withWallCost(wallCost);
+        }
+
+        /**
+         * The profile for {@code navigation.guidance-v2}: on, with the clearance cost ({@code clearance-cost} 0 keeps the
+         * wall cost); off, {@link #profile()} exactly (phase 6.1, A16).
+         */
+        public MovementProfile profile(boolean guidanceV2) {
+            return guidanceV2 ? profile().withClearance(clearanceCost, wallClearance) : profile();
+        }
+
+        /** How walk paths are shaped with {@code navigation.guidance-v2} (phase 6.1). */
+        public WalkPathShaper.Options shaping() {
+            return WalkPathShaper.Options.of(wallClearance, curve);
         }
 
         /** The search budget (snap radii keep the core defaults: start 2, goal 3). */
@@ -326,6 +417,73 @@ public record NavigationConfig(
         survey = survey == null ? SurveyConfig.defaults() : survey;
         builder = builder == null ? BuilderConfig.defaults() : builder;
         walk = walk == null ? WalkConfig.defaults() : walk;
+        plazaLines = plazaLines == null ? PlazaLinesConfig.defaults() : plazaLines;
+    }
+
+    /**
+     * Plaza lines for the players' trail (off-road navigation phase 7, DESIGN § 8.7, PandiO/knk-workspace#712).
+     * Phase 7's first step only previews them ({@code /knk road plazaline}, which works with the flag off); the trail
+     * does not use them yet.
+     *
+     * @param enabled   {@code navigation.plaza-lines}: the trail takes the plaza line where a route crosses a plaza.
+     *                  Default false: today's route polyline (A24)
+     * @param pull      {@code navigation.plaza-pull}: how far the curve's middle is pulled from the chord towards the
+     *                  plaza node, 0 to 1. Default 0.35 (O30), tuned live on Cinix and Brink
+     * @param guideCost {@code navigation.plaza-guide-cost}: the A* fallback's cost per block of distance from the
+     *                  curve, at least 0. Default 2
+     */
+    public record PlazaLinesConfig(boolean enabled, double pull, double guideCost) {
+        public static PlazaLinesConfig defaults() {
+            return new PlazaLinesConfig(false, net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_PULL,
+                net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_GUIDE_COST);
+        }
+
+        public void validate() {
+            if (!(pull >= 0 && pull <= 1)) {
+                throw new IllegalArgumentException("navigation.plaza-pull must be 0..1 (got: " + pull + ")");
+            }
+            if (!(guideCost >= 0)) {
+                throw new IllegalArgumentException("navigation.plaza-guide-cost must not be negative (got: " + guideCost + ")");
+            }
+        }
+    }
+
+    /** Without the plaza-line keys (callers from before #712): the defaults, plaza lines off. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
+                            double destinationSnapVerticalWeight, double maxStartDistance, double maxDestinationDistance,
+                            double destinationWalkRange, TrailConfig trail, double rerouteDistance, int rerouteAfterTicks,
+                            double arriveDistance, int maxSessionMinutes, double sprintSpeed, SurveyConfig survey,
+                            BuilderConfig builder, WalkConfig walk, boolean guidanceV2, double cursorJump) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, walk,
+            guidanceV2, cursorJump, null);
+    }
+
+    /** Without {@code cursor-jump} (callers from before #711): the default. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
+                            double destinationSnapVerticalWeight, double maxStartDistance, double maxDestinationDistance,
+                            double destinationWalkRange, TrailConfig trail, double rerouteDistance, int rerouteAfterTicks,
+                            double arriveDistance, int maxSessionMinutes, double sprintSpeed, SurveyConfig survey,
+                            BuilderConfig builder, WalkConfig walk, boolean guidanceV2) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, walk,
+            guidanceV2, CursorParameters.DEFAULT_CURSOR_JUMP);
+    }
+
+    /** Without {@code guidance-v2} (callers from before #710): off. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
+                            double destinationSnapVerticalWeight, double maxStartDistance, double maxDestinationDistance,
+                            double destinationWalkRange, TrailConfig trail, double rerouteDistance, int rerouteAfterTicks,
+                            double arriveDistance, int maxSessionMinutes, double sprintSpeed, SurveyConfig survey,
+                            BuilderConfig builder, WalkConfig walk) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, walk, false);
     }
 
     /**
@@ -352,7 +510,44 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+    }
+
+    /** This config with {@code guidance-v2} on or off. */
+    public NavigationConfig withGuidanceV2(boolean guidanceV2) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+    }
+
+    /** This config with another trail block ({@code trail-*} keys). */
+    public NavigationConfig withTrail(TrailConfig trail) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+    }
+
+    /** This config with another {@code cursor-jump}. */
+    public NavigationConfig withCursorJump(double cursorJump) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+    }
+
+    /** This config with other plaza-line keys. */
+    public NavigationConfig withPlazaLines(PlazaLinesConfig plazaLines) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+    }
+
+    /** {@code guidance-v2}'s route cursor ({@code cursor-jump}); null with the flag off: the session as before. */
+    public CursorParameters cursorParameters() {
+        return guidanceV2 ? new CursorParameters(cursorJump) : null;
     }
 
     /** {@code class-cost} keys as the API spells them ({@code Main}, {@code Road}, {@code Path}), any case. */
@@ -421,10 +616,14 @@ public record NavigationConfig(
         if (!(sprintSpeed > 0)) {
             throw new IllegalArgumentException("navigation.sprint-speed must be positive (got: " + sprintSpeed + ")");
         }
+        if (!(cursorJump > 0)) {
+            throw new IllegalArgumentException("navigation.cursor-jump must be positive (got: " + cursorJump + ")");
+        }
         trail.validate();
         survey.validate();
         builder.validate();
         walk.validate();
+        plazaLines.validate();
     }
 
     /** Snapping and class costs for the router (Phases 2d/4); the snap weight is the player's start's. */

@@ -56,7 +56,8 @@ public class KnkTaskListCommand implements CommandExecutor {
     private String formatTask(WorldTaskDto task) {
         ChatColor color = switch (task.status()) {
             case "Pending" -> ChatColor.YELLOW;
-            case "Claimed" -> ChatColor.AQUA;
+            case "InProgress" -> ChatColor.AQUA;
+            case "Cancelled", "Expired" -> ChatColor.GRAY;
             case "Completed" -> ChatColor.GREEN;
             case "Failed" -> ChatColor.RED;
             default -> ChatColor.GRAY;

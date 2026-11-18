@@ -9,6 +9,8 @@ import net.knightsandkings.knk.core.menu.MenuRefreshSchedule;
 import net.knightsandkings.knk.core.menu.MenuSession;
 import net.knightsandkings.knk.core.menu.MenuSessionRegistry;
 import net.knightsandkings.knk.core.menu.MenuTemplateAssembler;
+import net.knightsandkings.knk.core.menu.MenuTextPrompt;
+import net.knightsandkings.knk.core.menu.MenuTransitionTracker;
 import net.knightsandkings.knk.core.menu.RuntimeMenu;
 import net.knightsandkings.knk.core.menu.RuntimeMenuSection;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
@@ -16,6 +18,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -75,6 +78,10 @@ public final class MenuService {
     private final Map<String, String> blockedMenus = new ConcurrentHashMap<>();
     /** Keys that passed {@link MenuDefinitionValidationRunner} at startup (content port CP1, {@code menu-available}). */
     private final Set<String> validatedMenus = ConcurrentHashMap.newKeySet();
+    /** Menus a late validation is running for right now (see {@link #requestValidation}). */
+    private final Set<String> validatingMenus = ConcurrentHashMap.newKeySet();
+    /** Set by {@code MenuDefinitionValidationRunner}: validates one menu key the way the startup pass does (blocking). */
+    private volatile java.util.function.Consumer<String> lateValidator;
     /** Diagnostic telemetry / funnel hooks (KNG-34 link 6); empty unless a feature registers one. */
     private final MenuObservers observers = new MenuObservers();
     /** KNG-125: toggles BLINK items each tick ({@link #processBlinks}). */
@@ -83,6 +90,13 @@ public final class MenuService {
     private final MenuPageLoads pageLoads = new MenuPageLoads();
     /** KNG-231: a page load still running after this many ticks also says so in the action bar. */
     static final long LOADING_ACTION_BAR_DELAY_TICKS = 10L;
+    /**
+     * Alpha cross-play finding 2026-10-24: Bedrock (Floodgate) players switch menus with a delay -
+     * see {@link #configureBedrockTransitions}. Off (no player is Bedrock, 0 ticks) until configured.
+     */
+    private final MenuTransitionTracker transitions = new MenuTransitionTracker();
+    private volatile Predicate<UUID> bedrockPlayers = uuid -> false;
+    private volatile int bedrockTransitionDelayTicks;
 
     public MenuService(
             Plugin plugin,
@@ -121,6 +135,20 @@ public final class MenuService {
 
     public void openMenu(Player player, String templateKey) {
         openMenu(player, templateKey, MenuContextParams.EMPTY);
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24 ({@code menus.bedrock-transition-delay-ticks}): when a
+     * player {@code isBedrock} says is a Bedrock client moves from one inventory to a KnK menu,
+     * the current inventory is closed first and the menu opens {@code delayTicks} later, so
+     * Geyser's close of the previous container form cannot close the new menu. A client close
+     * in that window, or up to {@code delayTicks} after the open, is the stale close of the
+     * previous form ({@link MenuTransitionTracker}). {@code delayTicks <= 0} turns it off; Java
+     * players are never delayed.
+     */
+    public void configureBedrockTransitions(Predicate<UUID> isBedrock, int delayTicks) {
+        this.bedrockPlayers = isBedrock != null ? isBedrock : uuid -> false;
+        this.bedrockTransitionDelayTicks = Math.max(0, delayTicks);
     }
 
     /** Registers a {@link MenuObserver} (main thread, at enable). */
@@ -500,27 +528,72 @@ public final class MenuService {
      * IMPLEMENTATION_PLAN.md Phase 7 / DESIGN_REVIEW.md §2.1 §2.5: prompts via
      * the in-house {@link AnvilCaptureManager}. Opening the anvil closes the
      * menu Inventory, so - like {@link #nextPage} - this re-fetches and reopens
-     * the menu once the query is captured.
+     * the menu once the query is captured. PandiO/knk-workspace#128: the rename
+     * field starts with the current search, and Cancel or Escape reopens the menu
+     * the prompt came from, with its search and page as they were.
      */
     public void promptSearch(Player player, String sectionName) {
+        Optional<OpenMenuContext> from = openMenuContextRegistry.get(player.getUniqueId());
+        String current = currentContentQuery(player, from, sectionName).map(MenuContentQuery::searchText).orElse(null);
         anvilCaptureManager.startTextCapture(
                 player,
-                ChatColor.YELLOW + "Type a search query for '" + sectionName
-                        + "', then click the left paper to cancel or the right paper to confirm:",
+                MenuTextPrompt.search(sectionName, current),
                 query -> search(player, sectionName, query),
-                () -> player.sendMessage(ChatColor.YELLOW + "Search cancelled.")
+                () -> reopenAfterPrompt(player, from.orElse(null))
         );
     }
 
     /** IMPLEMENTATION_PLAN.md Phase 7: same as {@link #promptSearch}, for one FilterBar facet. */
     public void promptFilter(Player player, String sectionName, String facetKey) {
+        Optional<OpenMenuContext> from = openMenuContextRegistry.get(player.getUniqueId());
+        String current = currentContentQuery(player, from, sectionName)
+                .map(query -> query.filterValues().get(facetKey)).orElse(null);
         anvilCaptureManager.startTextCapture(
                 player,
-                ChatColor.YELLOW + "Type a value for filter '" + facetKey + "' on '" + sectionName
-                        + "', then click the left paper to cancel or the right paper to confirm:",
+                MenuTextPrompt.filter(sectionName, facetKey, current),
                 value -> filter(player, sectionName, facetKey, value),
-                () -> player.sendMessage(ChatColor.YELLOW + "Filter cancelled.")
+                () -> reopenAfterPrompt(player, from.orElse(null))
         );
+    }
+
+    /** The search/filter state of {@code sectionName} in the menu the player is looking at. */
+    private Optional<MenuContentQuery> currentContentQuery(Player player, Optional<OpenMenuContext> from, String sectionName) {
+        Optional<MenuSession> session = sessionRegistry.get(player.getUniqueId());
+        if (session.isEmpty()) {
+            return Optional.empty();
+        }
+        return from.flatMap(context -> context.menu().findSection(sectionName))
+                .map(section -> session.get().getContentQuery(section.id()));
+    }
+
+    /**
+     * PandiO/knk-workspace#128: a cancelled prompt shows the player's current menu again,
+     * unchanged (the session kept its page and search while the anvil was open). It re-renders
+     * the menu the prompt was opened from when that is still the current one, else loads it.
+     */
+    void reopenAfterPrompt(Player player, OpenMenuContext from) {
+        if (!player.isOnline()) {
+            return;
+        }
+        Optional<MenuSession> sessionOpt = sessionRegistry.get(player.getUniqueId());
+        Optional<String> currentKey = sessionOpt.flatMap(MenuSession::currentMenuKey);
+        if (sessionOpt.isEmpty() || currentKey.isEmpty()) {
+            return;
+        }
+        MenuSession session = sessionOpt.get();
+        if (from != null && from.menuKey().equals(currentKey.get())) {
+            renderAndShow(player, from.menu(), session, from.materialNamespaceKeys());
+            return;
+        }
+        String key = currentKey.get();
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            RuntimeMenu menu = loadAndAssemble(player, key);
+            if (menu == null) {
+                return;
+            }
+            Map<Integer, String> materialKeys = renderer.resolveTemplateMaterialKeys(menu).join();
+            mainThread.execute(() -> renderAndShow(player, menu, session, materialKeys));
+        });
     }
 
     public void search(Player player, String sectionName, String queryText) {
@@ -603,11 +676,62 @@ public final class MenuService {
             return;
         }
 
+        int delayTicks = bedrockTransitionDelayTicks;
+        if (delayTicks > 0 && hasContainerOpen(player) && bedrockPlayers.test(player.getUniqueId())) {
+            // Alpha cross-play finding 2026-10-24: close now (the close handler treats it like any
+            // other close of the previous menu), open the next menu a few ticks later.
+            UUID playerId = player.getUniqueId();
+            player.closeInventory();
+            long token = transitions.begin(playerId);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline() && transitions.opened(playerId, token, MenuRenderer.currentTick(), delayTicks)) {
+                    openNewInventory(player, menu, result);
+                }
+            }, delayTicks);
+            return;
+        }
+        openNewInventory(player, menu, result);
+    }
+
+    /** Main thread. Opens {@code result} in a fresh Inventory and makes it the player's open menu. */
+    private void openNewInventory(Player player, RuntimeMenu menu, MenuRenderResult result) {
         Inventory inventory = Bukkit.createInventory(null, result.totalSlots(), DisplayTextFormatter.toComponent(menu.title()));
-        renderer.applyToInventory(inventory, result, revealControls);
+        renderer.applyToInventory(inventory, result, player.isSneaking());
         player.openInventory(inventory);
         openMenuContextRegistry.register(player.getUniqueId(), new OpenMenuContext(player, inventory, menu, result));
         refreshSchedule.track(player.getUniqueId(), menu.autoRefreshTicks(), MenuRenderer.currentTick());
+    }
+
+    /** Whether the player has a container screen open (a menu, an anvil prompt...), not just their own inventory. */
+    private static boolean hasContainerOpen(Player player) {
+        InventoryType type = player.getOpenInventory().getType();
+        return type != InventoryType.CRAFTING && type != InventoryType.CREATIVE;
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24: a close the client sent ({@code Reason.PLAYER}) for
+     * {@code playerId}; {@link MenuLifecycleListener} ignores it or reopens the menu when it is
+     * the stale close of a Bedrock menu switch. Always {@code NORMAL} for Java players.
+     */
+    public MenuTransitionTracker.CloseVerdict onClientClose(UUID playerId) {
+        return transitions.onClientClose(playerId, MenuRenderer.currentTick());
+    }
+
+    /**
+     * Alpha cross-play finding 2026-10-24: the stale close of the previous Bedrock form closed
+     * {@code context}'s menu right after it opened - show the same Inventory again next tick,
+     * unless the player has moved on to something else by then.
+     */
+    public void reopenAfterStaleClose(Player player, OpenMenuContext context) {
+        UUID playerId = player.getUniqueId();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Optional<OpenMenuContext> current = openMenuContextRegistry.get(playerId);
+            if (!player.isOnline() || current.isEmpty() || current.get() != context || hasContainerOpen(player)) {
+                return;
+            }
+            player.openInventory(context.inventory());
+            refreshSchedule.track(playerId, context.menu().autoRefreshTicks(), MenuRenderer.currentTick());
+        });
     }
 
     /** Whether the player is looking at a KnK menu right now (main thread: checks the actual top inventory). */
@@ -653,6 +777,7 @@ public final class MenuService {
     /** Called from {@code PlayerQuitEvent} - closes gap #4 (v1's static per-player maps never cleared). */
     public void closeSession(UUID playerId) {
         pageLoads.cancel(playerId);
+        transitions.cancel(playerId);
         openMenuContextRegistry.close(playerId);
         sessionRegistry.close(playerId);
         refreshSchedule.untrack(playerId);
@@ -695,6 +820,99 @@ public final class MenuService {
      */
     public boolean isMenuAvailable(String templateKey) {
         return templateKey != null && validatedMenus.contains(templateKey) && !blockedMenus.containsKey(templateKey);
+    }
+
+    /**
+     * Why {@link #isMenuAvailable} says no, for a caller's log line: the startup validation's reason when the
+     * menu is blocked, else that the menu was never validated (the API was unreachable when the plugin
+     * started, that template was created since, or its fetch failed at startup). Empty when it is available.
+     */
+    public Optional<String> unavailableReason(String templateKey) {
+        if (isMenuAvailable(templateKey)) return Optional.empty();
+        String blocked = templateKey == null ? null : blockedMenus.get(templateKey);
+        if (blocked != null) return Optional.of("blocked at startup validation: " + blocked);
+        return Optional.of("not validated at startup (the API was unreachable then, or the template didn't exist yet)");
+    }
+
+    /** True while a validation pass runs (or has a retry pending), so recovery and timer never run two at once. */
+    private final AtomicBoolean validationPassActive = new AtomicBoolean(false);
+    /** Set by {@code MenuDefinitionValidationRunner}: the whole validation pass, for {@link #revalidateAfterRecovery}. */
+    private volatile Runnable revalidation;
+
+    /** The runner hands over its full pass so the API-recovery event can start it. */
+    public void setRevalidation(Runnable revalidation) {
+        this.revalidation = revalidation;
+    }
+
+    /** Claims the single validation slot; false when a pass is running or a retry of one is pending. */
+    public boolean beginValidationPass() {
+        return validationPassActive.compareAndSet(false, true);
+    }
+
+    /** @param retryPending the pass scheduled a retry, which keeps the slot until it runs */
+    public void endValidationPass(boolean retryPending) {
+        if (!retryPending) {
+            validationPassActive.set(false);
+        }
+    }
+
+    /** A scheduled retry is about to run: it takes the slot over from the pass that scheduled it. */
+    public void retryDue() {
+        validationPassActive.set(false);
+    }
+
+    /**
+     * Playtest 2026-10-24: the API came back ({@code ApiConnectivityChangedEvent} recovery). Runs the validation pass
+     * off the main thread for every menu still unvalidated, unless a pass or its retry is already pending (that one
+     * will see the API up).
+     */
+    public void revalidateAfterRecovery() {
+        Runnable pass = revalidation;
+        if (pass == null || validationPassActive.get()) {
+            return;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, pass);
+    }
+
+    /** Runs {@code task} off the main thread after {@code delayTicks} (the startup validation's retries while the API is down). */
+    public void runLaterAsync(long delayTicks, Runnable task) {
+        Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, task, Math.max(1L, delayTicks));
+    }
+
+    /** {@code MenuDefinitionValidationRunner} hands over its per-key validation so menus it never saw can be validated later. */
+    public void setLateValidator(java.util.function.Consumer<String> lateValidator) {
+        this.lateValidator = lateValidator;
+    }
+
+    /**
+     * Siege playtest 2026-10-24: a menu the startup validation never saw stays unavailable for the whole
+     * uptime, and the only trace is a chat fallback. This runs the same validation for that one key off the
+     * main thread; the menu becomes available (or blocked, with its reason) once it finishes, so the next
+     * open works without a restart. Blocked menus are not retried.
+     *
+     * @return true when a validation was started by this call
+     */
+    public boolean requestValidation(String templateKey) {
+        java.util.function.Consumer<String> validator = lateValidator;
+        if (templateKey == null || validator == null || isMenuAvailable(templateKey) || blockedMenus.containsKey(templateKey)) {
+            return false;
+        }
+        if (!validatingMenus.add(templateKey)) {
+            return false;
+        }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                validator.accept(templateKey);
+                if (isMenuAvailable(templateKey)) {
+                    logger.info("Menu '" + templateKey + "' validated late and is available now.");
+                }
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "Late validation of menu '" + templateKey + "' failed", e);
+            } finally {
+                validatingMenus.remove(templateKey);
+            }
+        });
+        return true;
     }
 
     /** Currently-blocked menu keys and why, for admin visibility (e.g. {@code /knk menu broken}). */

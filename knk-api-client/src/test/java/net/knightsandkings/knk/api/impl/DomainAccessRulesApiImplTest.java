@@ -56,6 +56,19 @@ class DomainAccessRulesApiImplTest {
     }
 
     @Test
+    void readsADomainsSubRegions() {
+        // KNG-255: the API lists them since KNG-254; an older API sends none.
+        responseJson = """
+                [{"id":11,"name":"Garrison","wgRegionId":"domain_11","allowEntry":true,"allowExit":false,
+                  "domainType":"GateStructure","worldName":"world","subRegionIds":["domain_11_sub_4"," domain_11_sub_5 "]}]
+                """;
+
+        DomainAccessRule rule = api.listAccessRules().join().get(0);
+
+        assertEquals(List.of("domain_11_sub_4", "domain_11_sub_5"), rule.subRegionIds());
+    }
+
+    @Test
     void anEmptyListIsEmpty() {
         assertTrue(api.listAccessRules().join().isEmpty());
     }

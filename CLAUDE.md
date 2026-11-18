@@ -26,8 +26,18 @@ installed (a JDK 25 Gradle doesn't detect can be passed with
 - Build all modules without copying the jar to the configured dev server:
   `./gradlew build -x deployToDevServer`. The normal `./gradlew build`
   depends on `deployToDevServer` in `knk-paper/build.gradle.kts`.
-- Test all modules: `./gradlew test` (integration tests tagged
-  `integration`/`requires-bukkit` are excluded by default in `knk-paper`)
+- Test all modules: `./gradlew test` (every test runs; the old `integration`/`requires-bukkit`
+  tags are no longer excluded since PandiO/knk-workspace#499). knk-paper tests that need Bukkit statics (`Registry`,
+  `Material.isSolid()`, `Bukkit.getScheduler()`) start a MockBukkit server
+  (`MockBukkit.mock()`/`unmock()`, test-only; use a `WorldMock`, not a mocked `World`)
+- World behaviour over ticks: an in-plugin scenario (`knk-core/.../core/scenario/`,
+  `knk-paper/.../paper/scenario/`, PandiO/knk-workspace#421), run by CI's `paper-boot` job;
+  locally `tools/paper-boot/boot-test.sh ... --scenarios`. Guide:
+  `docs/guides/developer/plugin-scenarios.md` in knk-workspace
+- Version stamp (PandiO/knk-workspace#136): `processResources` expands plugin.yml's
+  version to `0.1.0+<git short sha>` (`dev` without git), and the plugin logs it
+  with the commit as its first startup line. CI passes the commit with
+  `-PgitCommit=<short sha>`.
 - Build + deploy the plugin jar to the local dev server:
   `./gradlew :knk-paper:dev` — runs `shadowJar` then copies the jar into the
   `plugins/` folder of the dev server at the path set by the

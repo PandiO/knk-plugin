@@ -36,6 +36,15 @@ public interface StatisticsApi {
     CompletableFuture<PlayerStatistics> getUserStatistics(int userId, Integer actingUserId, String period, LocalDate date);
 
     /**
+     * {@code GET api/statistics/users/{userId}?period=lifetime&audience=public}: what any other signed-in player sees
+     * (what {@code /stats <player>} shows them), also when {@code actingUserId} is the player or staff - the chat
+     * tokens show this view to the whole chat (PandiO/knk-workspace#233). A null acting user reads as anonymous.
+     */
+    default CompletableFuture<PlayerStatistics> getPublicStatistics(int userId, Integer actingUserId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("getPublicStatistics"));
+    }
+
+    /**
      * {@code GET api/statistics/users/{userId}/title-history} (newest first). A 403 (the player keeps
      * it private) completes exceptionally with the {@code ApiException} status 403 in the cause chain.
      */

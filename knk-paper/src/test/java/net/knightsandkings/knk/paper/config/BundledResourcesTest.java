@@ -29,9 +29,19 @@ class BundledResourcesTest {
         return new InputStreamReader(in, StandardCharsets.UTF_8);
     }
 
+    /**
+     * The plugin.yml that goes into the jar, after processResources expanded it. The classpath's plugin.yml is
+     * src/test/resources' test copy (version 1.0.0-TEST), which shadows the main one.
+     */
+    private static Reader builtPluginYml() throws java.io.IOException {
+        java.nio.file.Path built = java.nio.file.Path.of("build/resources/main/plugin.yml");
+        assertTrue(java.nio.file.Files.isRegularFile(built), built + " exists (processResources ran)");
+        return java.nio.file.Files.newBufferedReader(built, StandardCharsets.UTF_8);
+    }
+
     @Test
     void pluginYmlIsAValidPluginDescription() throws Exception {
-        try (Reader reader = resource("plugin.yml")) {
+        try (Reader reader = builtPluginYml()) {
             PluginDescriptionFile description = assertDoesNotThrow(() -> new PluginDescriptionFile(reader));
 
             Set<String> declared = description.getPermissions().stream()
@@ -45,6 +55,16 @@ class BundledResourcesTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    void pluginYmlVersionIsStampedAtBuildTime() throws Exception {
+        // PandiO/knk-workspace#136: processResources expands ${pluginVersion} to "<base>+<commit>", or "dev".
+        try (Reader reader = builtPluginYml()) {
+            String version = new PluginDescriptionFile(reader).getVersion();
+            assertTrue(version.equals("dev") || version.matches("\\d+\\.\\d+\\.\\d+\\+[0-9A-Za-z.-]+"),
+                "plugin.yml version is '" + version + "'");
         }
     }
 

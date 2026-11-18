@@ -1,0 +1,261 @@
+"""Tests for check_log.py (run: python3 -m unittest discover -s tools/paper-boot -p 'test_*.py')."""
+import unittest
+
+from check_log import check, parse_entries
+
+API = "localhost:5294"
+
+GOOD_BOOT = """\
+[16:30:39] [ServerMain/INFO]: [PluginInitializerManager] Bukkit plugins (3):
+ - KnightsAndKings (0.1.0+bd7b78a8), WorldEdit (7.4.6+7648-00664b0), WorldGuard (7.0.20+2410-0b6c3f1)
+[16:30:41] [Worker-Main-1/ERROR]: No key layers in MapLike[{}]
+[16:30:44] [Server thread/INFO]: [WorldEdit] Enabling WorldEdit v7.4.6+7648-00664b0
+[16:30:44] [Server thread/INFO]: Got request to register class com.sk89q.worldedit.bukkit.BukkitServerInterface with WorldEdit
+[16:30:46] [Server thread/INFO]: [WorldGuard] Enabling WorldGuard v7.0.20+2410-0b6c3f1
+[16:30:47] [Server thread/INFO]: [KnightsAndKings] Enabling KnightsAndKings v0.1.0+bd7b78a8
+[16:30:47] [Server thread/INFO]: [KnightsAndKings] KnightsAndKings 0.1.0+bd7b78a8 (commit bd7b78a8)
+[16:30:47] [knk-api-client/WARN]: [KnightsAndKings] Failed to load gates from API: ApiException: API error [0]: IO error
+[16:30:48] [Server thread/ERROR]: [KnightsAndKings] InventoryMenu startup validation: failed to list menu templates (API down?)
+java.util.concurrent.CompletionException: net.knightsandkings.knk.core.exception.ApiException: API error [0]: IO error
+\tat java.base/java.util.concurrent.CompletableFuture.wrapInCompletionException(CompletableFuture.java:323) ~[?:?]
+Caused by: java.net.ConnectException: Failed to connect to localhost/127.0.0.1:5294
+\tat KnightsAndKings.jar//net.knightsandkings.knk.libs.okhttp3.internal.connection.RealConnection.connectSocket(RealConnection.kt:297) ~[?:?]
+\t... 21 more
+[16:30:48] [Server thread/INFO]: [KnightsAndKings] KnightsAndKings Plugin Enabled!
+[16:30:49] [Server thread/INFO]: Done (13.942s)! For help, type "help"
+[16:30:54] [knk-api-client/ERROR]: [net.knightsandkings.knk.api.impl.WorldTasksApiImpl] Failed to list tasks by status: Failed to connect to localhost/127.0.0.1:5294
+[16:31:15] [Server thread/INFO]: [KnightsAndKings] Disabling KnightsAndKings v0.1.0+bd7b78a8
+[16:31:15] [Server thread/INFO]: [KnightsAndKings] KnightsAndKings Plugin Disabled!
+"""
+
+# The shaded jar was not the one copied (knk-core missing): Paper refuses to load the plugin.
+PLUGIN_NOT_LOADED = """\
+[16:29:39] [Server thread/ERROR]: [ModernPluginLoadingStrategy] Could not load plugin 'KnightsAndKings.jar' in folder 'plugins'
+org.bukkit.plugin.InvalidPluginException: java.lang.NoClassDefFoundError: net/knightsandkings/knk/core/dataaccess/UsersDataAccess$UserAnswerListener
+\tat io.papermc.paper.plugin.provider.type.spigot.SpigotPluginProvider.createInstance(SpigotPluginProvider.java:129) ~[paper-26.3.jar:26.3-205-a90108f]
+[16:29:39] [Server thread/INFO]: [WorldEdit] Enabling WorldEdit v7.4.6+7648-00664b0
+[16:29:42] [Server thread/INFO]: [WorldGuard] Enabling WorldGuard v7.0.20+2410-0b6c3f1
+[16:29:43] [Server thread/INFO]: Done (13.942s)! For help, type "help"
+"""
+
+
+# PandiO/knk-workspace#543: the same boot with Citizens and npc.navigation.enabled on (lines from a Paper 26.3 run).
+CITIZENS_BOOT = GOOD_BOOT.replace(
+    "[16:30:47] [Server thread/INFO]: [KnightsAndKings] Enabling KnightsAndKings v0.1.0+bd7b78a8\n",
+    "[16:30:46] [Server thread/INFO]: [Citizens] Enabling Citizens v2.0.44-SNAPSHOT (build 4269)\n"
+    "[16:30:46] [Server thread/INFO]: [Citizens] Downloaded library https://repo1.maven.org/maven2/org/ow2/asm/asm/9.2/asm-9.2.jar\n"
+    "[16:30:46] [Server thread/INFO]: [Citizens] Loaded 2 templates.\n"
+    "[16:30:47] [Server thread/INFO]: [KnightsAndKings] Enabling KnightsAndKings v0.1.0+bd7b78a8\n",
+).replace(
+    "[16:30:48] [Server thread/INFO]: [KnightsAndKings] KnightsAndKings Plugin Enabled!\n",
+    "[16:30:48] [Server thread/INFO]: [KnightsAndKings] [NPC] navigation: Citizens 2.0.44-SNAPSHOT (build 4269), "
+    "override scopes {GLOBAL=1, WORLD=0, REGION=0, TEMPLATE=0}\n"
+    "[16:30:48] [Server thread/INFO]: [KnightsAndKings] KnightsAndKings Plugin Enabled!\n",
+)
+
+
+def lines(text):
+    return text.splitlines(keepends=True)
+
+
+class CheckLogTest(unittest.TestCase):
+    def test_good_boot_passes_when_api_errors_are_excused(self):
+        errors, notes = check(lines(GOOD_BOOT), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual([], errors)
+        self.assertIn("2 error/stack-trace entries excused", notes[-1])
+
+    def test_api_errors_fail_without_the_unreachable_api_excuse(self):
+        errors, _ = check(lines(GOOD_BOOT))
+        self.assertEqual(2, len(errors))
+        self.assertTrue(all("ERROR" in e for e in errors))
+
+    def test_api_errors_excused_whatever_address_localhost_resolved_to(self):
+        log = GOOD_BOOT.replace("localhost/127.0.0.1:5294", "localhost/[0:0:0:0:0:0:0:1]:5294")
+        self.assertEqual([], check(lines(log), unreachable_api=API)[0])
+
+    def test_connection_failure_to_another_port_is_not_excused(self):
+        log = GOOD_BOOT + (
+            "[16:30:55] [knk-api-client/ERROR]: [KnightsAndKings] Failed to connect to localhost/127.0.0.1:8081\n"
+        )
+        errors, _ = check(lines(log), unreachable_api=API)
+        self.assertEqual(1, len(errors))
+
+    def test_unrelated_server_error_is_ignored(self):
+        errors, _ = check(lines(GOOD_BOOT), unreachable_api=API)
+        self.assertFalse(any("No key layers" in e for e in errors))
+
+    def test_plugin_that_does_not_load_fails(self):
+        errors, _ = check(lines(PLUGIN_NOT_LOADED), unreachable_api=API)
+        joined = "\n".join(errors)
+        self.assertIn("version-stamp startup line not found", joined)
+        self.assertIn("Plugin Enabled!", joined)
+        self.assertIn("Could not load plugin 'KnightsAndKings.jar'", joined)
+
+    def test_wrong_commit_fails(self):
+        errors, _ = check(lines(GOOD_BOOT), expect_commit="deadbeef", unreachable_api=API)
+        self.assertEqual(["KnK reports commit bd7b78a8, expected deadbeef"], errors)
+
+    def test_knk_error_not_caused_by_the_api_fails(self):
+        log = GOOD_BOOT + (
+            "[16:30:50] [Server thread/ERROR]: [KnightsAndKings] Failed to initialize plugin: boom\n"
+        )
+        errors, _ = check(lines(log), unreachable_api=API)
+        self.assertEqual(1, len(errors))
+        self.assertIn("Failed to initialize plugin", errors[0])
+
+    def test_worldguard_warning_with_stack_trace_fails(self):
+        log = GOOD_BOOT + (
+            "[16:30:50] [Server thread/WARN]: [WorldGuard] Failed to load regions\n"
+            "java.lang.IllegalStateException: bad region file\n"
+            "\tat com.sk89q.worldguard.protection.managers.storage.file.YamlRegionFile.loadAll(YamlRegionFile.java:1)\n"
+        )
+        errors, _ = check(lines(log), unreachable_api=API)
+        self.assertEqual(1, len(errors))
+        self.assertIn("WARN with a stack trace", errors[0])
+
+    def test_single_line_knk_warning_passes(self):
+        errors, _ = check(lines(GOOD_BOOT), unreachable_api=API)
+        self.assertFalse(any("Failed to load gates" in e for e in errors))
+
+    def test_missing_shutdown_line_fails_only_when_expected(self):
+        log = GOOD_BOOT.replace("[16:31:15] [Server thread/INFO]: [KnightsAndKings] KnightsAndKings Plugin Disabled!\n", "")
+        self.assertEqual([], check(lines(log), unreachable_api=API)[0])
+        errors, _ = check(lines(log), unreachable_api=API, expect_shutdown=True)
+        self.assertEqual(1, len(errors))
+        self.assertIn("Plugin Disabled!", errors[0])
+
+    def test_server_that_never_finished_starting_fails(self):
+        log = GOOD_BOOT.replace('Done (13.942s)! For help, type "help"', "Stopping server")
+        errors, _ = check(lines(log), unreachable_api=API)
+        self.assertEqual(1, len(errors))
+        self.assertIn("did not finish starting", errors[0])
+
+    def test_citizens_boot_passes_with_npc_navigation_expected(self):
+        errors, notes = check(lines(CITIZENS_BOOT), unreachable_api=API, expect_shutdown=True,
+                              expect_npc_navigation=True)
+        self.assertEqual([], errors)
+        self.assertIn("NPC navigation running on Citizens", notes)
+
+    def test_npc_navigation_unavailable_fails_with_its_reason(self):
+        log = CITIZENS_BOOT.replace(
+            "[NPC] navigation: Citizens 2.0.44-SNAPSHOT (build 4269), override scopes {GLOBAL=1, WORLD=0, REGION=0, "
+            "TEMPLATE=0}", "[NPC] navigation unavailable: npc.navigation.enabled is false")
+        errors, _ = check(lines(log), unreachable_api=API, expect_npc_navigation=True)
+        self.assertEqual(["KnK's NPC navigation did not start on Citizens: npc.navigation.enabled is false"], errors)
+
+    def test_missing_citizens_fails_only_when_npc_navigation_is_expected(self):
+        self.assertEqual([], check(lines(GOOD_BOOT), unreachable_api=API)[0])
+        errors, _ = check(lines(GOOD_BOOT), unreachable_api=API, expect_npc_navigation=True)
+        self.assertIn("Citizens was not enabled", errors)
+        self.assertEqual(2, len(errors))
+
+    def test_citizens_error_fails(self):
+        log = CITIZENS_BOOT + (
+            "[16:30:50] [Server thread/ERROR]: [Citizens] Could not load NPC 3\n"
+            "java.lang.IllegalStateException: bad save\n"
+            "\tat net.citizensnpcs.npc.CitizensNPCRegistry.load(CitizensNPCRegistry.java:1)\n"
+        )
+        errors, _ = check(lines(log), unreachable_api=API, expect_npc_navigation=True)
+        self.assertEqual(1, len(errors))
+        self.assertIn("Could not load NPC", errors[0])
+
+    def test_stack_trace_lines_belong_to_the_entry_above(self):
+        entries = parse_entries(lines(GOOD_BOOT))
+        menu = next(e for e in entries if "InventoryMenu" in e.lines[0])
+        self.assertTrue(menu.has_stack_trace)
+        self.assertEqual(6, len(menu.lines))
+
+    def test_print_stack_trace_lines_join_the_error_above(self):
+        # PandiO/knk-workspace#540: UserManager logs the join's failed account sync and then printStackTrace()s it, one
+        # timestamped WARN line per frame; the cause (the unreachable API) is only in those lines.
+        log = GOOD_BOOT + (
+            "[10:51:28] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnFeeder (bc73): "
+            "java.lang.RuntimeException: Failed to check duplicate\n"
+            "[10:51:28] [knk-api-client/WARN]: java.util.concurrent.CompletionException: java.lang.RuntimeException: "
+            "Failed to check duplicate\n"
+            "[10:51:28] [knk-api-client/WARN]: \tat java.base/java.util.concurrent.CompletableFuture.encodeThrowable("
+            "CompletableFuture.java:359)\n"
+            "[10:51:28] [knk-api-client/WARN]: Caused by: java.lang.RuntimeException: Failed to check duplicate\n"
+            "[10:51:28] [knk-api-client/WARN]: \tat KnightsAndKings.jar//net.knightsandkings.knk.api.impl."
+            "UserAccountApiImpl.lambda$checkDuplicate$0(UserAccountApiImpl.java:67)\n"
+            "[10:51:28] [Server thread/INFO]: ScnNoFeed logged in with entity id 1\n"
+            "[10:51:28] [knk-api-client/WARN]: \t... 3 more\n"
+            "[10:51:28] [knk-api-client/WARN]: Caused by: java.net.ConnectException: Failed to connect to "
+            "localhost/127.0.0.1:5294\n"
+            "[10:51:28] [Server thread/INFO]: ScnFeeder joined the game\n"
+        )
+        errors, notes = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual([], errors)
+        self.assertIn("3 error/stack-trace entries excused", notes[-1])
+        # the "... 3 more" frame came after another thread's line: it still joins the error
+        entry = next(e for e in parse_entries(lines(log)) if "Failed to sync user data" in e.lines[0])
+        self.assertEqual(7, len(entry.lines))
+
+    def test_print_stack_trace_skips_a_logged_exception_of_a_pool_thread_with_the_same_name(self):
+        # The API client's pool threads are all called knk-api-client: another one's logged exception (with its own
+        # untimestamped trace) can come between the error and its printStackTrace() frames.
+        log = GOOD_BOOT + (
+            "[11:18:22] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnTeleporter (575d): "
+            "java.lang.RuntimeException: Failed to check duplicate\n"
+            "[11:18:22] [knk-api-client/WARN]: [net.knightsandkings.knk.paper.user.IgnoreService] Failed to load the "
+            "ignore list of user -421004002\n"
+            "java.util.concurrent.CompletionException: java.lang.RuntimeException: Failed to list ignores\n"
+            "\tat java.base/java.lang.Thread.run(Thread.java:1474) ~[?:?]\n"
+            "Caused by: java.net.ConnectException: Failed to connect to localhost/127.0.0.1:5294\n"
+            "[11:18:22] [knk-api-client/WARN]: java.util.concurrent.CompletionException: java.lang.RuntimeException: "
+            "Failed to check duplicate\n"
+            "[11:18:22] [knk-api-client/WARN]: \tat java.base/java.lang.Thread.run(Thread.java:1474)\n"
+            "[11:18:22] [knk-api-client/WARN]: Caused by: java.net.ConnectException: Failed to connect to "
+            "localhost/127.0.0.1:5294\n"
+        )
+        errors, notes = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual([], errors)
+        self.assertIn("4 error/stack-trace entries excused", notes[-1])
+
+    # PandiO/knk-workspace#586 (CI run 43834635237): another knk-api-client thread logs a plain WARN (no exception)
+    # between UserManager's ERROR and its printStackTrace() frames.
+    PLAIN_WARN_IN_BETWEEN = (
+        "[08:59:07] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnOwner (a7f0): "
+        "java.lang.RuntimeException: Failed to check duplicate\n"
+        "[08:59:07] [Server thread/INFO]: ScnOwner[localhost/127.0.0.1:25565] logged in with entity id 285\n"
+        "[08:59:07] [knk-api-client/WARN]: [net.knightsandkings.knk.paper.user.AdminFreezeManager] Failed to check "
+        "frozen state for ScnOwner on join; using the last known state\n"
+        "[08:59:07] [knk-api-client/WARN]: java.util.concurrent.CompletionException: java.lang.RuntimeException: "
+        "Failed to check duplicate\n"
+        "[08:59:07] [knk-api-client/WARN]: \tat java.base/java.lang.Thread.run(Thread.java:1474)\n"
+        "[08:59:07] [knk-api-client/WARN]: Caused by: java.lang.RuntimeException: Failed to check duplicate\n"
+        "[08:59:07] [knk-api-client/WARN]: Caused by: java.net.ConnectException: Failed to connect to "
+        "localhost/[0:0:0:0:0:0:0:1]:5294\n"
+    )
+
+    def test_print_stack_trace_joins_the_entry_that_quotes_its_exception_not_a_later_plain_warn(self):
+        log = GOOD_BOOT + self.PLAIN_WARN_IN_BETWEEN
+        errors, notes = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual([], errors)
+        self.assertIn("3 error/stack-trace entries excused", notes[-1])
+        entries = parse_entries(lines(log))
+        sync = next(e for e in entries if "Failed to sync user data" in e.lines[0])
+        freeze = next(e for e in entries if "AdminFreezeManager" in e.lines[0])
+        self.assertTrue(sync.printed_trace)
+        self.assertFalse(freeze.has_stack_trace)
+
+    def test_quoted_exception_does_not_excuse_an_error_whose_trace_is_not_the_api(self):
+        log = GOOD_BOOT + self.PLAIN_WARN_IN_BETWEEN.replace(
+            "java.net.ConnectException: Failed to connect to localhost/[0:0:0:0:0:0:0:1]:5294",
+            "java.lang.IllegalStateException: duplicate check broke")
+        errors, _ = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual(1, len(errors))
+        self.assertIn("Failed to sync user data", errors[0])
+
+    def test_trace_lines_of_another_thread_start_their_own_entry(self):
+        log = GOOD_BOOT + (
+            "[10:51:28] [knk-api-client/ERROR]: [KnightsAndKings] Failed to sync user data for ScnFeeder\n"
+            "[10:51:28] [Server thread/WARN]: java.lang.IllegalStateException: something else in KnightsAndKings\n"
+        )
+        errors, _ = check(lines(log), expect_commit="bd7b78a8", unreachable_api=API, expect_shutdown=True)
+        self.assertEqual(1, len(errors))
+        self.assertIn("Failed to sync user data", errors[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

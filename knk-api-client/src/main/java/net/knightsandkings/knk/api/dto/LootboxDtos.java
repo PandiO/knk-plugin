@@ -160,7 +160,12 @@ public final class LootboxDtos {
             @JsonProperty("enchantments") List<ClaimEnchantmentDto> enchantments,
             @JsonProperty("announce") boolean announce,
             @JsonProperty("claimedAt") OffsetDateTime claimedAt,
-            @JsonProperty("deliveredAt") OffsetDateTime deliveredAt
+            @JsonProperty("deliveredAt") OffsetDateTime deliveredAt,
+            // PandiO/knk-workspace#232: the item's look (the instance's frozen copy, else the blueprint's).
+            @JsonProperty("shieldBannerBaseColor") String shieldBannerBaseColor,
+            @JsonProperty("shieldBannerLayers") List<ItemBannerLayerDto> shieldBannerLayers,
+            @JsonProperty("armorTrimPattern") String armorTrimPattern,
+            @JsonProperty("armorTrimMaterial") String armorTrimMaterial
     ) {
     }
 

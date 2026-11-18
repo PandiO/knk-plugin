@@ -219,6 +219,12 @@ public final class StatisticsSessions {
         return session != null && session.afk.isAfk();
     }
 
+    /** When the player's current AFK state began (retroactive for automatic AFK); null while active or without a session. */
+    public Instant afkSince(UUID playerId) {
+        Session session = active.get(playerId);
+        return session == null ? null : session.afk.afkSince();
+    }
+
     public boolean hasSession(UUID playerId) {
         return active.containsKey(playerId);
     }

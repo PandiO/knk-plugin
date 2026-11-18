@@ -17,5 +17,10 @@ public record ItemBlueprintReadDto(
         @JsonProperty("defaultEnchantments") List<ItemBlueprintDefaultEnchantmentDto> defaultEnchantments,
         @JsonProperty("grade") GradeDto grade,
         @JsonProperty("tags") List<ItemBlueprintTagDto> tags,
-        @JsonProperty("origins") List<ItemBlueprintOriginDto> origins
+        @JsonProperty("origins") List<ItemBlueprintOriginDto> origins,
+        // PandiO/knk-workspace#232: shield banner (base colour + layers bottom to top) and armour trim keys.
+        @JsonProperty("shieldBannerBaseColor") String shieldBannerBaseColor,
+        @JsonProperty("shieldBannerLayers") List<ItemBannerLayerDto> shieldBannerLayers,
+        @JsonProperty("armorTrimPattern") String armorTrimPattern,
+        @JsonProperty("armorTrimMaterial") String armorTrimMaterial
 ) {}

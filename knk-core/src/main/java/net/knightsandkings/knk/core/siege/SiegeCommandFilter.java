@@ -25,8 +25,12 @@ public final class SiegeCommandFilter {
 
     public static final String ALWAYS_ALLOWED = "siege";
 
-    /** {@link #ALWAYS_ALLOWED} plus the {@code /siege menu} shortcuts (playtest 2026-09-26). */
-    public static final java.util.Set<String> ALWAYS_ALLOWED_LABELS = java.util.Set.of(ALWAYS_ALLOWED, "siegemenu", "sgm");
+    /**
+     * {@link #ALWAYS_ALLOWED} plus the {@code /siege menu} shortcuts (playtest 2026-09-26) and {@code /navigate} with
+     * its {@code /nav} alias (KNG-234: in a match it only accepts and offers the match's own destinations, and it
+     * refuses everything before the match runs).
+     */
+    public static final java.util.Set<String> ALWAYS_ALLOWED_LABELS = java.util.Set.of(ALWAYS_ALLOWED, "siegemenu", "sgm", "navigate", "nav");
 
     /** Without alias resolution: only the exact labels on the list (namespace still ignored). */
     public static boolean isAllowed(String message, List<String> allowedCommands) {

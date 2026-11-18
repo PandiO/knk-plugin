@@ -58,6 +58,8 @@ public final class DomainAccessHandler extends Handler {
         return service.onCrossing(bukkit, BukkitAdapter.adapt(to),
                 WorldGuardRegionAccessLookup.views(entered, player),
                 WorldGuardRegionAccessLookup.views(exited, player),
+                // KNG-255: moving between regions of one domain is no border of it
+                WorldGuardRegionAccessLookup.views(toSet.getRegions(), player),
                 moveType.isCancellable())
             .isEmpty();
     }

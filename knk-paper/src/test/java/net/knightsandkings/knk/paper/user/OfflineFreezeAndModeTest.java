@@ -101,6 +101,26 @@ class OfflineFreezeAndModeTest {
         assertTrue(afterRestart.isFrozen(uuid));
     }
 
+    /** #170: the freezer named on the boss bar survives a relog on the same server run, not a different freeze. */
+    @Test
+    void theFreezerIsKeptForARelogWithTheSameFreeze_NotForAnotherOne() {
+        store.recordUser(user(uuid, ActiveMode.NONE, false));
+        AdminFreezeManager freezes = new AdminFreezeManager();
+        freezes.setOfflineStore(store);
+        freezes.freeze(uuid, "spam", "Admin");
+        freezes.forget(uuid); // quit
+
+        freezes.restoreOnJoin(plugin, player, apiDown());
+        assertTrue(freezes.isFrozen(uuid));
+        assertEquals("Admin", freezes.frozenBy(uuid));
+
+        freezes.forget(uuid);
+        store.setFrozen(uuid, true, "something else"); // re-frozen elsewhere (web app) meanwhile
+        freezes.restoreOnJoin(plugin, player, apiDown());
+        assertEquals("something else", freezes.reasonFor(uuid));
+        org.junit.jupiter.api.Assertions.assertNull(freezes.frozenBy(uuid));
+    }
+
     @Test
     void anUnfrozenPlayerStaysFreeDuringAnOutage() {
         store.recordUser(user(uuid, ActiveMode.NONE, false));

@@ -95,6 +95,42 @@ class GateAnimationTaskTest {
     }
 
     @Test
+    void resolveReplacedCells_FenceRisingIntoTheChainsCell_ClearsTheChainFirst() {
+        // KNG-272: a fence below a chain, both rising one block. The chain's old cell is not
+        // vacated (the fence moves in), so unless the chain is cleared as a replaced cell,
+        // placeBlockIfVacant finds a chain where the fence should go and the door jams on itself.
+        String fence = "minecraft:spruce_fence[east=true,north=false,south=false,waterlogged=false,west=true]";
+        String chain = "minecraft:iron_chain[axis=y,waterlogged=false]";
+        List<GateRestingFramePlacer.RestingCell> previous = List.of(
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 83, 0), fence),
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 84, 0), chain));
+        List<GateRestingFramePlacer.RestingCell> target = List.of(
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 84, 0), fence),
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 85, 0), chain));
+
+        List<GateRestingFramePlacer.RestingCell> replaced = GateAnimationTask.resolveReplacedCells(previous, List.of(), target);
+        List<GateRestingFramePlacer.RestingCell> toVacate = GateAnimationTask.resolveVacateCells(previous, List.of(), target);
+
+        assertEquals(List.of(new GateRestingFramePlacer.RestingCell(new Vector(0, 84, 0), chain)), replaced);
+        assertEquals(List.of(new GateRestingFramePlacer.RestingCell(new Vector(0, 83, 0), fence)), toVacate);
+    }
+
+    @Test
+    void resolveReplacedCells_SameBlockMovingThroughItsOwnColumn_ReplacesNothing() {
+        // A one-material door (the common case) never has a cell whose blockdata changes, so the
+        // KNG-272 step leaves it exactly as before. No remembered state: the fallback is used.
+        String planks = "minecraft:spruce_planks";
+        List<GateRestingFramePlacer.RestingCell> fallback = List.of(
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 0, 0), planks),
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 1, 0), planks));
+        List<GateRestingFramePlacer.RestingCell> target = List.of(
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 1, 0), planks),
+            new GateRestingFramePlacer.RestingCell(new Vector(0, 2, 0), planks));
+
+        assertTrue(GateAnimationTask.resolveReplacedCells(null, fallback, target).isEmpty());
+    }
+
+    @Test
     void resolveVacateCells_CellReoccupiedThisFrame_IsNotVacated() {
         // A cell in the previous set that's also part of this frame's target must not be cleared
         // - otherwise a later block's placement would be erased by an earlier one's vacancy, the

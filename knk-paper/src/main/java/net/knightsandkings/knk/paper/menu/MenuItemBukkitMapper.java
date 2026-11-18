@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.menu.BannerPatternSpec;
 import net.knightsandkings.knk.core.menu.MenuDisplayMode;
 import net.knightsandkings.knk.core.menu.MenuItemPresentation;
 import net.knightsandkings.knk.core.menu.RuntimeMenuItem;
+import net.knightsandkings.knk.core.util.LoreWrap;
 import net.knightsandkings.knk.paper.mapper.MaterialNamespaceResolver;
 import net.knightsandkings.knk.paper.utils.DisplayTextFormatter;
 import org.bukkit.Bukkit;
@@ -162,7 +163,8 @@ public final class MenuItemBukkitMapper {
                                   boolean actionDenied) {
         List<String> lore = new ArrayList<>(presentation.lore().size() + 1);
         for (String line : presentation.lore()) {
-            lore.add(DisplayTextFormatter.translateToLegacy(line));
+            // PandiO/knk-workspace#212: every menu's lore within lore.max-width, colours kept on continuation lines.
+            lore.addAll(LoreWrap.wrap(DisplayTextFormatter.translateToLegacy(line)));
         }
 
         // actionPermission reuses the same "(Unavailable)" DISABLED styling as an

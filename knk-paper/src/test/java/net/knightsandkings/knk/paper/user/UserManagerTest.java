@@ -12,7 +12,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 
 import net.knightsandkings.knk.api.dto.CreateUserRequestDto;
 import net.knightsandkings.knk.api.dto.DuplicateCheckResponseDto;
@@ -23,6 +22,7 @@ import net.knightsandkings.knk.core.ports.api.UsersQueryApi;
 import net.knightsandkings.knk.paper.KnKPlugin;
 import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.core.cache.UserCache;
+import net.knightsandkings.knk.core.domain.users.UserSummary;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -31,7 +31,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * Tests user account lifecycle management, caching, and duplicate detection.
  */
 @ExtendWith(MockitoExtension.class)
-@Tag("requires-bukkit")
 class UserManagerTest {
 
     private UserManager userManager;
@@ -55,8 +54,9 @@ class UserManagerTest {
         mockPlayer = mock(Player.class);
         
         testUUID = UUID.randomUUID();
-        when(mockPlayer.getUniqueId()).thenReturn(testUUID);
-        when(mockPlayer.getName()).thenReturn("TestPlayer");
+        // Shared fixture: not every test reaches every stub, so they are lenient (PandiO/knk-workspace#499).
+        lenient().when(mockPlayer.getUniqueId()).thenReturn(testUUID);
+        lenient().when(mockPlayer.getName()).thenReturn("TestPlayer");
         
         UserCache mockUserCache = mock(UserCache.class);
         userManager = new UserManager(
@@ -118,6 +118,22 @@ class UserManagerTest {
             assertEquals(result, userManager.getCachedUser(testUUID));
         }
 
+        /** PandiO/knk-workspace#486: the join's sync tells the first-join decision it created the account. */
+        @Test
+        @DisplayName("A created account is reported to the account-created listener; a found one is not")
+        void aCreatedAccount_IsReportedForTheFirstJoinDecision() {
+            java.util.List<UUID> created = new java.util.ArrayList<>();
+            userManager.setAccountCreatedListener(created::add);
+            when(mockApi.checkDuplicate(testUUID.toString(), "TestPlayer"))
+                .thenReturn(CompletableFuture.completedFuture(new DuplicateCheckResponseDto(false, null, null, null)));
+            when(mockApi.createUser(any(CreateUserRequestDto.class))).thenReturn(CompletableFuture.completedFuture(
+                new UserResponseDto(11, "TestPlayer", testUUID.toString(), null, 0, 0, 0, false, "MINECRAFT")));
+
+            userManager.onPlayerJoin(mockPlayer);
+
+            assertEquals(java.util.List.of(testUUID), created);
+        }
+
         @Test
         @DisplayName("Should handle duplicate account detection")
         void shouldHandleDuplicateAccount() {
@@ -155,18 +171,21 @@ class UserManagerTest {
         @Test
         @DisplayName("Should handle existing user (no duplicate, user exists)")
         void shouldHandleExistingUser() {
-            // Arrange
-            UserResponseDto existingUser = new UserResponseDto(
-                1, "TestPlayer", testUUID.toString(), "test@example.com",
-                500, 250, 5000, true, "WEB_APP"
-            );
-            
+            // Arrange: no duplicate, and the API already knows this UUID. UserManager looks the user up by UUID
+            // (UsersQueryApi) and uses it without creating one; the duplicate check's primaryUser is not read
+            // (PandiO/knk-workspace#499 updated this test from that older flow).
             DuplicateCheckResponseDto noDuplicate = new DuplicateCheckResponseDto(
-                false, null, existingUser, null
+                false, null, null, null
             );
-            
+            UserSummary existingUser = new UserSummary(
+                1, "TestPlayer", testUUID, "test@example.com",
+                500, 250, 5000, true, false, GatePassThroughMethod.DEFAULT
+            );
+
             when(mockApi.checkDuplicate(testUUID.toString(), "TestPlayer"))
                 .thenReturn(CompletableFuture.completedFuture(noDuplicate));
+            when(mockUsersQueryApi.getByUuid(testUUID))
+                .thenReturn(CompletableFuture.completedFuture(existingUser));
 
             // Act
             PlayerUserData result = userManager.onPlayerJoin(mockPlayer);
@@ -181,6 +200,7 @@ class UserManagerTest {
             assertEquals(5000, result.experiencePoints());
             assertTrue(result.hasEmailLinked());
             assertFalse(result.hasDuplicateAccount());
+            verify(mockApi, never()).createUser(any(CreateUserRequestDto.class));
         }
 
         @Test
@@ -200,8 +220,11 @@ class UserManagerTest {
             assertEquals("TestPlayer", result.username());
             assertEquals(testUUID, result.uuid());
             
-            // Verify error was logged
-            verify(mockLogger, atLeastOnce()).severe(anyString());
+            // Verify the error was logged with its exception attached, so the cause chain is part of the
+            // log entry and not printed to System.err on its own (PandiO/knk-workspace#586)
+            verify(mockLogger).log(eq(java.util.logging.Level.SEVERE),
+                argThat((String message) -> message.startsWith("Failed to sync user data for TestPlayer")),
+                argThat((Throwable thrown) -> thrown != null && thrown.getMessage().contains("Network error")));
         }
 
         @Test
@@ -476,7 +499,8 @@ class UserManagerTest {
         
         when(mockApi.checkDuplicate(uuid.toString(), username))
             .thenReturn(CompletableFuture.completedFuture(noDuplicate));
-        when(mockApi.createUser(any(CreateUserRequestDto.class)))
+        // Answer per request: a second player's stub must not replace the first one's (PandiO/knk-workspace#499).
+        lenient().when(mockApi.createUser(argThat((Object request) -> request instanceof CreateUserRequestDto dto && username.equals(dto.username()))))
             .thenReturn(CompletableFuture.completedFuture(newUser));
     }
 }

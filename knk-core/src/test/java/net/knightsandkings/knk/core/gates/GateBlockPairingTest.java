@@ -107,4 +107,67 @@ class GateBlockPairingTest {
         assertTrue(GateBlockPairing.pairNearestNeighbor(null, List.of(new Vector(0, 0, 0))).isEmpty());
         assertTrue(GateBlockPairing.pairNearestNeighbor(List.of(new Vector(0, 0, 0)), null).isEmpty());
     }
+
+    @Test
+    void pairAlongTranslation_RisingDoorThatLosesItsChains_KeepsEveryColumnInItsOwnColumn() {
+        // KNG-271, the "Main gate" case: 3 wide, fences at y0-4 in every column, chains at y5-7 in
+        // the outer columns (air in the middle). Open: air at y0-2, fences at y3-7. It rises 3.
+        // List-position pairing sent the left chains into the middle column; along the slide each
+        // fence meets the fence 3 above it, and the chains stay unpaired (they leave the box).
+        List<Vector> closed = new java.util.ArrayList<>();
+        List<Vector> open = new java.util.ArrayList<>();
+        for (int x = 0; x < 3; x++) {
+            for (int y = 0; y < 8; y++) {
+                if (y < 5 || x != 1) {
+                    closed.add(new Vector(x, y, 0));
+                }
+                if (y >= 3) {
+                    open.add(new Vector(x, y, 0));
+                }
+            }
+        }
+
+        Map<Integer, Integer> pairing = GateBlockPairing.pairAlongTranslation(closed, open, new Vector(0, 3, 0));
+
+        assertEquals(15, pairing.size());
+        for (Map.Entry<Integer, Integer> entry : pairing.entrySet()) {
+            Vector from = closed.get(entry.getKey());
+            Vector to = open.get(entry.getValue());
+            assertEquals(from.getX(), to.getX(), "a block left its column: " + from + " -> " + to);
+            assertEquals(from.getY() + 3, to.getY(), 1e-9);
+        }
+        for (int i = 0; i < closed.size(); i++) {
+            if (closed.get(i).getY() >= 5) {
+                assertFalse(pairing.containsKey(i), "a chain was paired: " + closed.get(i));
+            }
+        }
+    }
+
+    @Test
+    void pairAlongTranslation_LeftoversOnBothSides_ArePairedByNearestDistance() {
+        // No open block where the slide puts closed[1], and open[1] is where nothing slides to:
+        // those two leftovers fall back to nearest-neighbour pairing.
+        List<Vector> closed = List.of(new Vector(0, 0, 0), new Vector(5, 0, 0));
+        List<Vector> open = List.of(new Vector(0, 2, 0), new Vector(6, 1, 0));
+
+        Map<Integer, Integer> pairing = GateBlockPairing.pairAlongTranslation(closed, open, new Vector(0, 2, 0));
+
+        assertEquals(Map.of(0, 0, 1, 1), pairing);
+    }
+
+    @Test
+    void pairAlongTranslation_NoMotionVector_PairsBlocksThatStayPut() {
+        List<Vector> closed = List.of(new Vector(0, 0, 0), new Vector(0, 1, 0));
+        List<Vector> open = List.of(new Vector(0, 1, 0));
+
+        Map<Integer, Integer> pairing = GateBlockPairing.pairAlongTranslation(closed, open, null);
+
+        assertEquals(Map.of(1, 0), pairing);
+    }
+
+    @Test
+    void pairAlongTranslation_NullInputs_ReturnsEmptyPairing() {
+        assertTrue(GateBlockPairing.pairAlongTranslation(null, List.of(new Vector(0, 0, 0)), new Vector()).isEmpty());
+        assertTrue(GateBlockPairing.pairAlongTranslation(List.of(new Vector(0, 0, 0)), null, new Vector()).isEmpty());
+    }
 }

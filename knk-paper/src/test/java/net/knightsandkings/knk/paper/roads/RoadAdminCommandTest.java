@@ -25,8 +25,11 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -105,6 +108,141 @@ class RoadAdminCommandTest {
     }
 
     @Test
+    void plazaLineNeedsAPlayerAndTheNode() {
+        // off-road navigation phase 7 step 1 (#712): the preview is under knk.admin.road like every road tool
+        ConsoleCommandSender console = mock(ConsoleCommandSender.class);
+        command.execute(console, new String[] {"plazaline", "Brink"});
+        assertTrue(lastMessage(console).contains("needs a player"), lastMessage(console));
+
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(false);
+        command.execute(player, new String[] {"plazaline", "Brink"});
+        assertTrue(lastMessage(player).contains("permission"));
+    }
+
+    @Test
+    void plazaLineRunsThePreviewWithTheWordsAfterIt() {
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        command.execute(player, new String[] {"plazaline"});
+        assertTrue(lastMessage(player).contains("not available"), "not wired: " + lastMessage(player));
+
+        net.knightsandkings.knk.paper.navigation.PlazaLinePreview preview =
+            mock(net.knightsandkings.knk.paper.navigation.PlazaLinePreview.class);
+        command.setPlazaLines(preview);
+        command.execute(player, new String[] {"plazaline", "\"Merchant's", "Square\""});
+        verify(preview).run(player, new String[] {"\"Merchant's", "Square\""});
+        command.execute(player, new String[] {"PlazaLine"});
+        verify(preview).run(player, new String[0]);
+    }
+
+    @Test
+    void plazaLineIsInTheUsageAndCompletesWithPlazaNames() {
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        assertTrue(RoadAdminCommand.USAGE.contains("plazaline"));
+        assertEquals(List.of("plazaline"), command.complete(player, new String[] {"pla"}));
+
+        org.bukkit.World world = mock(org.bukkit.World.class);
+        when(world.getName()).thenReturn("world");
+        when(player.getWorld()).thenReturn(world);
+        when(cache.snapshot("world")).thenReturn(RoadNetworkSnapshot.builder("world")
+            .addNode(new RoadNode(1, 0, 64, 0, RoadNodeKind.JUNCTION, "Brink", 0))
+            .addNode(new RoadNode(2, 9, 64, 9, RoadNodeKind.ANCHOR, "Merchant's Square", 0, false, 12))
+            .addNode(new RoadNode(3, 20, 64, 9, RoadNodeKind.ANCHOR, "Keep Upper Stairhouse", 0))
+            .build());
+        assertEquals(List.of("\"Merchant's Square\"", "Brink"), command.complete(player, new String[] {"plazaline", ""}));
+        assertEquals(List.of("Brink"), command.complete(player, new String[] {"plazaline", "b"}));
+    }
+
+    /**
+     * {@code /knk road status} with the walk-search measurements of off-road phase 0 (PandiO/knk-workspace#703).
+     * {@code status} lists the server's worlds, so these run on a MockBukkit server.
+     */
+    @Nested
+    class Status {
+        private final net.knightsandkings.knk.paper.navigation.NavigationService navigation =
+            mock(net.knightsandkings.knk.paper.navigation.NavigationService.class);
+        private final ConsoleCommandSender console = mock(ConsoleCommandSender.class);
+
+        @BeforeEach
+        void startServer() {
+            MockBukkit.mock();
+            command.setNavigation(() -> navigation, () -> null);
+            when(navigation.walkStatus()).thenReturn("on; 0 walking, 0 computing; requested 3, found 2");
+        }
+
+        @AfterEach
+        void stopServer() {
+            MockBukkit.unmock();
+        }
+
+        private List<String> messages() {
+            ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
+            verify(console, org.mockito.Mockito.atLeastOnce()).sendMessage(captor.capture());
+            return captor.getAllValues().stream().map(RoadAdminCommandTest::plain).toList();
+        }
+
+        @Test
+        void showsTheWalkSearchMeasurementsUnderTheWalkPaths() {
+            when(navigation.walkMeasurementLines(RoadAdminCommand.WALK_RECENT)).thenReturn(List.of(
+                "3 searches since the last reset; last 3: found 2, no path 0, budget 1 (max-expansions 1, max-length 0); "
+                    + "length-pruned 0",
+                "search µs: max 120000, p95 120000, p50 4100; queue µs: max 15, p95 15, p50 0",
+                "expansions: max 20000, p95 20000, p50 1200; cells: max 31000, p95 31000, p50 2400",
+                "capture µs: max 3200, p95 3200, p50 900; chunks: max 36, p95 36, p50 9; wait ms: max 150, p95 150, p50 50",
+                "#3 FALLBACK (max-expansions), 140 blocks straight, 20000 expansions, 31000 cells, search 120000 µs"));
+
+            command.execute(console, new String[] {"status"});
+
+            List<String> lines = messages();
+            int walk = lines.indexOf("walk paths: on; 0 walking, 0 computing; requested 3, found 2");
+            assertTrue(walk > 0, lines.toString());
+            assertTrue(lines.get(walk + 1).startsWith("walk search: 3 searches since the last reset"), lines.toString());
+            assertTrue(lines.get(walk + 2).startsWith("walk cost: search µs: max 120000"), lines.toString());
+            assertTrue(lines.get(walk + 3).startsWith("walk cost: expansions: max 20000"), lines.toString());
+            assertTrue(lines.get(walk + 4).startsWith("walk cost: capture µs: max 3200"), lines.toString());
+            assertEquals("walk recent: #3 FALLBACK (max-expansions), 140 blocks straight, 20000 expansions, 31000 cells, "
+                + "search 120000 µs", lines.get(walk + 5));
+            verify(navigation, never()).resetWalkMeasurements();
+        }
+
+        @Test
+        void sayWhenNothingWasMeasuredYet() {
+            when(navigation.walkMeasurementLines(RoadAdminCommand.WALK_RECENT))
+                .thenReturn(List.of("no searches since the last reset"));
+
+            command.execute(console, new String[] {"status"});
+
+            assertTrue(messages().contains("walk search: no searches since the last reset"), messages().toString());
+        }
+
+        @Test
+        void resetClearsTheMeasurementsOnly() {
+            command.execute(console, new String[] {"status", "reset"});
+
+            verify(navigation).resetWalkMeasurements();
+            assertEquals(List.of("[Road] Walk-search measurements cleared; /knk road status shows the next searches."),
+                messages());
+            verify(navigation, never()).walkStatus();
+        }
+
+        @Test
+        void anUnknownArgumentGetsTheUsage() {
+            command.execute(console, new String[] {"status", "clear"});
+
+            verify(navigation, never()).resetWalkMeasurements();
+            assertTrue(messages().get(0).contains("/knk road status [reset]"), messages().toString());
+        }
+
+        @Test
+        void resetWithoutNavigationSaysSo() {
+            command.setNavigation(() -> null, () -> null);
+
+            command.execute(console, new String[] {"status", "reset"});
+
+            assertTrue(messages().get(0).contains("/navigate is not running"), messages().toString());
+        }
+    }
+
+    @Test
     void tabCompletionFollowsTheSubcommandTree() {
         when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
 
@@ -120,6 +258,7 @@ class RoadAdminCommandTest {
         assertEquals(List.of("reject", "rejected"), command.complete(player, new String[] {"proposal", "rej"}));
         assertEquals(List.of("added", "all"), command.complete(player, new String[] {"proposal", "accept", "a"}));
         assertEquals(List.of("confirm"), command.complete(player, new String[] {"edge", "conf"}));
+        assertEquals(List.of("reset"), command.complete(player, new String[] {"status", "r"}));
     }
 
     @Test

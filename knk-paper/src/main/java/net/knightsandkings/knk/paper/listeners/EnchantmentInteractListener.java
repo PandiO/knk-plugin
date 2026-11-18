@@ -5,6 +5,7 @@ import net.knightsandkings.knk.core.domain.enchantment.EnchantmentType;
 import net.knightsandkings.knk.core.ports.enchantment.CooldownManager;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentExecutor;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
+import net.knightsandkings.knk.paper.enchantment.EnchantmentPermissions;
 import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
@@ -30,6 +31,7 @@ public class EnchantmentInteractListener implements Listener {
     private final CooldownManager cooldownManager;
     private final boolean disableForCreative;
     private final String cooldownMessageTemplate;
+    private final EnchantmentPermissions permissions;
 
     public EnchantmentInteractListener(
             EnchantmentRepository enchantmentRepository,
@@ -38,6 +40,20 @@ public class EnchantmentInteractListener implements Listener {
             boolean disableForCreative,
             String cooldownMessageTemplate
     ) {
+        this(enchantmentRepository, enchantmentExecutor, cooldownManager, disableForCreative, cooldownMessageTemplate,
+                EnchantmentPermissions.bukkitOnly());
+    }
+
+    /** @param permissions who may use each ability: Bukkit or a rank grant (PandiO/knk-workspace#193) */
+    public EnchantmentInteractListener(
+            EnchantmentRepository enchantmentRepository,
+            EnchantmentExecutor enchantmentExecutor,
+            CooldownManager cooldownManager,
+            boolean disableForCreative,
+            String cooldownMessageTemplate,
+            EnchantmentPermissions permissions
+    ) {
+        this.permissions = permissions != null ? permissions : EnchantmentPermissions.bukkitOnly();
         this.enchantmentRepository = enchantmentRepository;
         this.enchantmentExecutor = enchantmentExecutor;
         this.cooldownManager = cooldownManager;
@@ -92,7 +108,7 @@ public class EnchantmentInteractListener implements Listener {
                 continue;
             }
 
-            if (!player.hasPermission("customenchantments." + enchantmentId)) {
+            if (!permissions.canUse(player, enchantmentId)) {
                 continue;
             }
 

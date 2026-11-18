@@ -36,6 +36,7 @@ import net.knightsandkings.knk.paper.config.KnkConfig;
 import net.knightsandkings.knk.paper.permissions.KnkPermissible;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.sound.Sound;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 
 /**
@@ -74,6 +75,8 @@ public class MessagingService {
     private final ReplyTargets replyTargets;
     private final RateLimiter rateLimiter;
     private final List<PrivateMessageGate> gates;
+    /** Chat hashtag tokens in private messages (PandiO/knk-workspace#233); null = plain text only. */
+    private volatile net.knightsandkings.knk.paper.chat.tokens.ChatTokenExpander tokenExpander;
 
     /**
      * @param ignores   who ignores whom (IgnoreService's cached lists)
@@ -99,6 +102,11 @@ public class MessagingService {
         KnkConfig.PrivateMessagesConfig.RateLimitConfig limit = config.rateLimit();
         this.rateLimiter = new RateLimiter(limit.maxMessages(), limit.window(), limit.duplicateWindow(), clock);
         this.gates = List.of(new FrozenGate(), new RateLimitGate(rateLimiter), new IgnoreGate(ignores));
+    }
+
+    /** Chat hashtag tokens (PandiO/knk-workspace#233): {@code #hand}, {@code #kills}, … in private messages. */
+    public void setTokenExpander(net.knightsandkings.knk.paper.chat.tokens.ChatTokenExpander expander) {
+        this.tokenExpander = expander;
     }
 
     /** Joins command arguments from {@code from} into the message text, trimmed ("" when there is none). */
@@ -128,9 +136,21 @@ public class MessagingService {
                 ? nodesHeld(target, PrivateMessageNodes.FREEZE)
                 : CompletableFuture.completedFuture(Set.of());
 
+        // Chat tokens (PandiO/knk-workspace#233): null = held for the share prompt, which sends it again.
+        var expander = tokenExpander;
+        CompletableFuture<Component> body = expander != null && sender instanceof Player tokenSender
+                ? expander.expand(tokenSender, capped, () -> send(sender, recipient, text, viaReply))
+                        .exceptionally(ex -> Component.text(capped))
+                : CompletableFuture.completedFuture(Component.text(capped));
+
         senderNodes.thenCombine(recipientNodes, (held, recipientHeld) -> new PrivateMessageGate.SendAttempt(
                         participantOf(sender), participantOf(recipient), capped, viaReply, senderFrozen, held, recipientHeld))
-                .thenAccept(attempt -> mainThread.execute(() -> deliver(sender, recipient, attempt)))
+                .thenCombine(body, (attempt, expanded) -> {
+                    if (expanded != null) {
+                        mainThread.execute(() -> deliver(sender, recipient, attempt, expanded));
+                    }
+                    return null;
+                })
                 .exceptionally(ex -> {
                     LOGGER.log(Level.WARNING, "Private message from " + sender.getName() + " failed", ex);
                     return null;
@@ -164,7 +184,7 @@ public class MessagingService {
         rateLimiter.forget(participant);
     }
 
-    private void deliver(CommandSender sender, CommandSender recipient, PrivateMessageGate.SendAttempt attempt) {
+    private void deliver(CommandSender sender, CommandSender recipient, PrivateMessageGate.SendAttempt attempt, Component body) {
         if (sender instanceof Player senderPlayer && !senderPlayer.isOnline()) {
             return;
         }
@@ -180,10 +200,10 @@ public class MessagingService {
         Optional<PrivateMessageGate.Denial> denial = PrivateMessageGate.firstDenial(gates, attempt);
         if (denial.isPresent() && denial.get().reason() == PrivateMessageGate.Reason.IGNORED) {
             // Silent drop (DESIGN.md §4 D5): the usual echo, nothing for the recipient, no reply link.
-            sender.sendMessage(PrivateMessageFormat.toSender(recipientParty, attempt.text()));
+            sender.sendMessage(PrivateMessageFormat.toSender(recipientParty, body));
             LOGGER.fine(() -> "Private message " + sender.getName() + " -> " + recipientParty.name() + " dropped: ignored");
             spyService.broadcast(attempt.sender(), attempt.recipient(),
-                    PrivateMessageFormat.toSpy(senderParty, recipientParty, attempt.text(), time, attempt.viaReply(), true));
+                    PrivateMessageFormat.toSpy(senderParty, recipientParty, body, time, attempt.viaReply(), true));
             messageLog.log(entry(now, PrivateMessageLogger.Outcome.BLOCKED_IGNORED, sender, senderParty, recipient, recipientParty, attempt));
             return;
         }
@@ -196,9 +216,8 @@ public class MessagingService {
             return;
         }
 
-        String text = attempt.text();
-        sender.sendMessage(PrivateMessageFormat.toSender(recipientParty, text));
-        recipient.sendMessage(PrivateMessageFormat.toRecipient(senderParty, text, time));
+        sender.sendMessage(PrivateMessageFormat.toSender(recipientParty, body));
+        recipient.sendMessage(PrivateMessageFormat.toRecipient(senderParty, body, time));
         KnkConfig.PrivateMessagesConfig.SoundConfig sound = config.sound();
         if (recipient instanceof Player target && sound.enabled()) {
             target.playSound(Sound.sound(PLING, Sound.Source.MASTER, sound.volume(), sound.pitch()));
@@ -207,7 +226,7 @@ public class MessagingService {
         replyTargets.recordDelivered(attempt.sender(), senderParty.name(), attempt.recipient(), recipientParty.name(),
                 VisiblePlayers.canSee(sender, recipient), VisiblePlayers.canSee(recipient, sender));
         spyService.broadcast(attempt.sender(), attempt.recipient(),
-                PrivateMessageFormat.toSpy(senderParty, recipientParty, text, time, attempt.viaReply(), false));
+                PrivateMessageFormat.toSpy(senderParty, recipientParty, body, time, attempt.viaReply(), false));
         messageLog.log(entry(now, PrivateMessageLogger.Outcome.DELIVERED, sender, senderParty, recipient, recipientParty, attempt));
     }
 

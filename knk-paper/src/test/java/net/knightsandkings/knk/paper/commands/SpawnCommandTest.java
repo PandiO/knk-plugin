@@ -22,6 +22,7 @@ import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import net.knightsandkings.knk.paper.teleport.TeleportExemptions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -369,5 +370,80 @@ class SpawnCommandTest {
         grant(TeleportNodes.STAFF_OTHERS);
         assertEquals(List.of("Alice"), command.onTabComplete(staff, mock(Command.class), "spawn", new String[]{"al"}));
         assertEquals(List.of(), command.onTabComplete(staff, mock(Command.class), "spawn", new String[]{"Bob", ""}));
+    }
+
+    // ===== PandiO/knk-workspace#171: exemptions and the all form =====
+
+    /** Exempt nodes per player name (the exemptions' own permission view; the command's grants stay sender-wide). */
+    private final Map<String, Set<String>> exemptGrants = new java.util.HashMap<>();
+    private final Set<Player> inMode = new HashSet<>();
+    private final Set<Player> higherForAll = new HashSet<>();
+    private boolean overridesExemption;
+
+    private net.knightsandkings.knk.paper.teleport.TeleportExemptions exemptions(List<Player> onlinePlayers) {
+        KnkPermissible perPlayer = mock(KnkPermissible.class);
+        when(perPlayer.checkAsync(any(), anyString())).thenAnswer(inv -> {
+            Player player = inv.getArgument(0);
+            String node = inv.getArgument(1);
+            boolean held = exemptGrants.getOrDefault(player.getName(), Set.of()).contains(node) || granted.contains(node) && player.getName().equals("Staff");
+            return CompletableFuture.completedFuture(net.knightsandkings.knk.core.domain.permissions.PermissionDecision.of(held));
+        });
+        when(perPlayer.hasPermission(any(Player.class), anyString())).thenAnswer(inv -> granted.contains(inv.<String>getArgument(1)));
+        PlayerCommandSupport exemptSupport = new PlayerCommandSupport(perPlayer, Runnable::run, name -> null, () -> onlinePlayers);
+        return new net.knightsandkings.knk.paper.teleport.TeleportExemptions(exemptSupport, inMode::contains,
+            (sender, target) -> CompletableFuture.completedFuture(!higherForAll.contains(target)),
+            sender -> CompletableFuture.completedFuture(overridesExemption));
+    }
+
+    private void exempt(Player player, String node) {
+        exemptGrants.computeIfAbsent(player.getName(), k -> new HashSet<>()).add(node);
+    }
+
+    private List<TeleportPlan> startedPlans() {
+        ArgumentCaptor<TeleportPlan> plan = ArgumentCaptor.forClass(TeleportPlan.class);
+        verify(teleportService, org.mockito.Mockito.atLeast(0)).start(plan.capture());
+        return plan.getAllValues();
+    }
+
+    @Test
+    void spawnAllSendsEveryEligiblePlayerToSpawn() {
+        grant(TeleportExemptions.Type.SPAWN.allNode());
+        Player carol = player("Carol");
+        exempt(bob, "knk.teleport.exempt.*");
+        exempt(bob, "knk.teleport.exempt.spawn"); // the API resolves the wildcard; the mock holds both
+        higherForAll.add(carol);
+        command.setExemptions(exemptions(List.of(staff, alice, bob, carol)));
+
+        run(staff, "all");
+
+        List<TeleportPlan> plans = startedPlans();
+        assertEquals(1, plans.size());
+        assertSame(alice, plans.get(0).subject());
+        assertEquals(worldSpawn, plans.get(0).destination().get());
+        verify(staff).sendMessage(contains("Teleported 1 of 1 player to spawn."));
+        verify(alice).sendMessage(contains("Staff sent you to spawn"));
+    }
+
+    @Test
+    void spawnOfAPlayerInOwnerModeIsRefusedButTheOverrideMovesThem() {
+        grant(TeleportNodes.STAFF_OTHERS);
+        inMode.add(bob);
+        command.setExemptions(exemptions(List.of(staff, alice, bob)));
+
+        run(staff, "Bob");
+        verify(teleportService, never()).start(any());
+        verify(staff).sendMessage(contains("staff or owner mode"));
+
+        overridesExemption = true;
+        run(staff, "Bob");
+        assertSame(bob, startedPlan().subject());
+    }
+
+    @Test
+    void completionOffersAllOnlyWithItsNode() {
+        command.setExemptions(exemptions(List.of(staff, alice, bob)));
+        assertEquals(List.of(), command.onTabComplete(staff, mock(Command.class), "spawn", new String[] {"a"}));
+        grant(TeleportExemptions.Type.SPAWN.allNode());
+        assertEquals(List.of("all"), command.onTabComplete(staff, mock(Command.class), "spawn", new String[] {"a"}));
     }
 }

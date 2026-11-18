@@ -59,7 +59,8 @@ public class GateDoorHitService {
      * not already destroyed, and the causing player (if any) is in Survival - a Creative/Spectator
      * player (or one who shot the arrow/lit the fire) risks nothing, so their hits shouldn't count
      * as real siege damage. Deliberately does not check isInvincible() - HealthSystem's damage
-     * handler already no-ops on that, so checking it twice would just duplicate the rule.
+     * handler already no-ops on that, so checking it twice would just duplicate the rule
+     * (ignition is the exception, see {@link #handleIgnite}).
      * Returns the fired event, or null if the gate doesn't qualify.
      */
     public GateDoorDamageEvent handleDamage(CachedGateDoor gate, Entity causingEntity, Block hitBlock, GateDoorDamageEvent.Cause cause) {
@@ -85,9 +86,12 @@ public class GateDoorHitService {
     /**
      * Fire a GateDoorIgniteEvent for a hit that should set the gate's door block alight (a
      * flaming projectile or fire charge), iff the gate is closed, active, not already destroyed,
-     * and the igniting player (if any) is in Survival - same qualification as handleDamage, since
-     * a door block only occupies a stable world position (the thing that actually "catches fire")
-     * while CLOSED. Returns the fired event, or null if the gate doesn't qualify.
+     * not invincible, and the igniting player (if any) is in Survival - the handleDamage
+     * qualification plus invincibility, since a door block only occupies a stable world position
+     * (the thing that actually "catches fire") while CLOSED. Unlike a direct hit, ignition is
+     * refused outright for an effectively-invincible gate: a burn on it would deal nothing (the
+     * continuous damage no-ops) yet still show fire and smoke for its duration, which reads as a
+     * gate that can be hurt. Returns the fired event, or null if the gate doesn't qualify.
      */
     public GateDoorIgniteEvent handleIgnite(CachedGateDoor gate, Entity causingEntity, Block hitBlock, GateDoorIgniteEvent.Cause cause) {
         return handleIgnite(gate, causingEntity, hitBlock, cause, null);
@@ -97,7 +101,7 @@ public class GateDoorHitService {
     public GateDoorIgniteEvent handleIgnite(CachedGateDoor gate, Entity causingEntity, Block hitBlock,
                                             GateDoorIgniteEvent.Cause cause, BlockFace hitFace) {
         if (gate == null || gate.getCurrentState() != AnimationState.CLOSED || !gate.isEffectivelyActive() || gate.isEffectivelyDestroyed()
-            || !isSurvivalOrNonPlayer(causingEntity)) {
+            || gate.isEffectivelyInvincible() || !isSurvivalOrNonPlayer(causingEntity)) {
             return null;
         }
 

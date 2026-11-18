@@ -11,16 +11,18 @@ class EnchantmentRegistryTest {
     @Test
     void allExpectedEnchantmentsAreRegistered() {
         EnchantmentRegistry registry = EnchantmentRegistry.getInstance();
-        assertEquals(12, registry.getAll().size());
+        assertEquals(13, registry.getAll().size());
         assertTrue(registry.getById("poison").isPresent());
         assertTrue(registry.getById("flash_chaos").isPresent());
         assertTrue(registry.getById("invisibility").isPresent());
+        assertTrue(registry.getById("cleaving").isPresent());
+        assertEquals(4, registry.getById("cleaving").orElseThrow().maxLevel());
     }
 
     @Test
     void lookupByTypeReturnsExpectedCounts() {
         EnchantmentRegistry registry = EnchantmentRegistry.getInstance();
-        assertEquals(6, registry.getByType(EnchantmentType.ATTACK).size());
+        assertEquals(7, registry.getByType(EnchantmentType.ATTACK).size());
         assertEquals(6, registry.getByType(EnchantmentType.SUPPORT).size());
     }
 

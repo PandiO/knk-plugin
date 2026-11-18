@@ -21,6 +21,7 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 
 import net.knightsandkings.knk.core.teleport.WarmupBook;
 import net.knightsandkings.knk.core.teleport.WarmupCancelReason;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 import net.knightsandkings.knk.paper.teleport.TeleportRequestService;
 import net.knightsandkings.knk.paper.teleport.TeleportService;
 
@@ -79,6 +80,9 @@ public class TeleportWarmupListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
+        if (NpcEntities.isNpc(event.getEntity())) {
+            return; // NPCs have no teleport warmup (NAV-08)
+        }
         if (event.getEntity() instanceof Player player) {
             teleportService.cancelWarmup(player.getUniqueId(), WarmupCancelReason.DAMAGED);
         }

@@ -21,12 +21,24 @@ import net.knightsandkings.knk.core.regions.access.RegionAccessRules.AccessState
  * region that still carries access flags but no longer belongs to any domain (deleted domain,
  * renamed region) has them cleared - a stale "deny" would otherwise lock players out for good.
  * Idempotent: a second run with the same rules changes nothing and does not save.
+ *
+ * <p>KNG-255: a domain's sub-regions get the same flags as its main region, and they are owned by the domain too.
  */
 public final class AccessFlagSync {
 
-    /** The three values the sync owns on a region. */
-    public record AccessFlags(AccessState entry, AccessState exit, String name) {
-        public static final AccessFlags NONE = new AccessFlags(AccessState.UNSET, AccessState.UNSET, null);
+    /**
+     * The values the sync owns on a region.
+     *
+     * @param domainId KNG-255: the domain the region belongs to ({@code knk-domain-id}), so every region of a domain (its
+     *                 main region and sub-regions) is recognised as the same domain at a border; null when unset
+     */
+    public record AccessFlags(AccessState entry, AccessState exit, String name, String domainId) {
+        public static final AccessFlags NONE = new AccessFlags(AccessState.UNSET, AccessState.UNSET, null, null);
+
+        /** Flags without a domain id (as synced before KNG-255). */
+        public AccessFlags(AccessState entry, AccessState exit, String name) {
+            this(entry, exit, name, null);
+        }
     }
 
     /** A region within a world (KNG-112); a null world means "every loaded world's region with this id". */
@@ -52,6 +64,11 @@ public final class AccessFlagSync {
         /** KNG-112: writes the region in {@code world} only (null: as {@link #write(String, AccessFlags)}). */
         default void write(String world, String regionId, AccessFlags flags) {
             write(regionId, flags);
+        }
+
+        /** KNG-255: whether the store can hold {@link AccessFlags#domainId()}; without it the id is left out. */
+        default boolean supportsDomainId() {
+            return true;
         }
 
         /** KNG-112: every region carrying access flags, with its world (null when the store can't tell). */
@@ -89,24 +106,30 @@ public final class AccessFlagSync {
                 continue;
             }
             String world = blankToNull(rule.worldName());
-            owned.add(key(world, regionId));
-            ownedInSomeWorld.add(key(null, regionId));
             AccessFlags desired = new AccessFlags(
                 RegionAccessRules.fromAllowed(rule.allowEntry()),
                 RegionAccessRules.fromAllowed(rule.allowExit()),
-                rule.name());
-            try {
-                Optional<AccessFlags> current = store.read(world, regionId);
-                if (current.isEmpty()) {
-                    missing.add(world == null ? regionId : regionId + " (" + world + ")");
-                } else if (current.get().equals(desired)) {
-                    unchanged++;
-                } else {
-                    store.write(world, regionId, desired);
-                    updated++;
+                rule.name(),
+                store.supportsDomainId() ? String.valueOf(rule.id()) : null);
+            List<String> regionIds = new ArrayList<>();
+            regionIds.add(regionId);
+            regionIds.addAll(rule.subRegionIds());
+            for (String id : regionIds) {
+                owned.add(key(world, id));
+                ownedInSomeWorld.add(key(null, id));
+                try {
+                    Optional<AccessFlags> current = store.read(world, id);
+                    if (current.isEmpty()) {
+                        missing.add(world == null ? id : id + " (" + world + ")");
+                    } else if (current.get().equals(desired)) {
+                        unchanged++;
+                    } else {
+                        store.write(world, id, desired);
+                        updated++;
+                    }
+                } catch (RuntimeException e) {
+                    failures.add(id + ": " + e.getMessage());
                 }
-            } catch (RuntimeException e) {
-                failures.add(regionId + ": " + e.getMessage());
             }
         }
 

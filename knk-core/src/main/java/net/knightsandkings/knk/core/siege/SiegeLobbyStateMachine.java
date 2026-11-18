@@ -13,6 +13,8 @@ import net.knightsandkings.knk.core.siege.SiegeEffect.CancelReason;
 import net.knightsandkings.knk.core.siege.SiegeEffect.DisableReason;
 import net.knightsandkings.knk.core.siege.SiegeEffect.DrawScenarioEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.EndMatchEffect;
+import net.knightsandkings.knk.core.siege.SiegeEffect.FinalCountdownEffect;
+import net.knightsandkings.knk.core.siege.SiegeEffect.PostMatchOverEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.LobbyDisabledEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.MatchmakingStartedEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.PhaseChangedEffect;
@@ -57,24 +59,33 @@ public final class SiegeLobbyStateMachine {
     /** Seconds after the start at which the teams' start messages show (legacy: progressExpire − 2). */
     public static final int START_MESSAGE_DELAY_SECONDS = 2;
 
+    /** The last seconds of a running match that are counted down to the members (PandiO/knk-workspace#199). */
+    public static final int FINAL_COUNTDOWN_SECONDS = 15;
+
     /**
-     * A player's {@code /siege skip} during matchmaking leaves this many seconds (never less than
-     * {@code voteClose + 1}, so voting still gets its last second). Developer request 2026-09-26.
+     * A player's {@code /siege skip} during matchmaking left this many seconds before the value became a
+     * setting ({@link KnkSiegeConfiguration#playerSkipMatchmakingSeconds()}, playtest 2026-10-24).
      */
-    public static final int PLAYER_SKIP_MATCHMAKING_SECONDS = 60;
+    public static final int PLAYER_SKIP_MATCHMAKING_SECONDS = KnkSiegeConfiguration.DEFAULT_PLAYER_SKIP_MATCHMAKING_SECONDS;
 
     public enum SkipRequester {
-        /** {@code /siege skip} ({@code knk.siege.skip}): cooldown → matchmaking; matchmaking → 1 minute left. */
+        /**
+         * {@code /siege skip} ({@code knk.siege.skip}): cooldown → matchmaking; matchmaking →
+         * {@code playerSkipMatchmakingSeconds} left (default 1 minute).
+         */
         PLAYER,
-        /** {@code /siege admin skip}: cooldown → matchmaking; matchmaking → T-(voteClose+1). */
+        /**
+         * {@code /siege admin skip}: cooldown → matchmaking; matchmaking → {@code adminSkipMatchmakingSeconds}
+         * left (default T-31). Both are floored at {@code voteClose + 1} so voting still gets its last second.
+         */
         ADMIN
     }
 
     public enum SkipResult {
         COOLDOWN_SKIPPED,
         /**
-         * Matchmaking was shortened: an admin to one second before voting closes (legacy T-31), a player
-         * to {@link #PLAYER_SKIP_MATCHMAKING_SECONDS}; {@link #secondsRemaining()} tells how long is left.
+         * Matchmaking was shortened to the requester's configured seconds (defaults: admin T-31, player one
+         * minute); {@link #secondsRemaining()} tells how long is left.
          */
         MATCHMAKING_SHORTENED,
         /** Matchmaking is already at or past that point; nothing changed. */
@@ -152,11 +163,23 @@ public final class SiegeLobbyStateMachine {
                 secondsElapsed++;
                 if (secondsRemaining <= 0) {
                     endMatch(SiegeEndReason.TIME_EXPIRED, effects);
-                } else if (secondsElapsed == START_MESSAGE_DELAY_SECONDS) {
-                    effects.add(new StartMessageEffect(drawnScenario));
+                } else {
+                    if (secondsElapsed == START_MESSAGE_DELAY_SECONDS) {
+                        effects.add(new StartMessageEffect(drawnScenario));
+                    }
+                    if (secondsRemaining <= FINAL_COUNTDOWN_SECONDS) {
+                        effects.add(new FinalCountdownEffect(secondsRemaining));
+                    }
                 }
             }
             case ENDING -> enterCooldown(effects);
+            case POST_MATCH -> {
+                secondsRemaining--;
+                if (secondsRemaining <= 0) {
+                    effects.add(new PostMatchOverEffect(drawnScenario));
+                    enterCooldown(effects);
+                }
+            }
             case COOLDOWN -> {
                 secondsRemaining--;
                 if (secondsRemaining <= 0) beginMatchmaking(effects);
@@ -178,8 +201,8 @@ public final class SiegeLobbyStateMachine {
 
     /**
      * The runtime ended the running match: an instant-victory capture, elimination or not enough
-     * players (DESIGN §6.8, §7.5). IN_PROGRESS → ENDING; the next tick enters cooldown.
-     * No-op outside IN_PROGRESS.
+     * players (DESIGN §6.8, §7.5). IN_PROGRESS → POST_MATCH for the configured post-match time (#198), or
+     * ENDING when it is 0 (the next tick enters cooldown). No-op outside IN_PROGRESS.
      */
     public List<SiegeEffect> endMatch(SiegeEndReason reason) {
         if (phase != SiegePhase.IN_PROGRESS) return List.of();
@@ -206,6 +229,8 @@ public final class SiegeLobbyStateMachine {
                         : reason == SiegeEndReason.API_OUTAGE ? CancelReason.API_OUTAGE : CancelReason.ADMIN_STOPPED,
                     phase == SiegePhase.HUB));
             case IN_PROGRESS -> effects.add(new EndMatchEffect(drawnScenario, reason));
+            // #198: the match is already recorded; the members waiting at the hub are restored now.
+            case POST_MATCH -> effects.add(new PostMatchOverEffect(drawnScenario));
             default -> { }
         }
         locks.release(lobby.id());
@@ -229,9 +254,7 @@ public final class SiegeLobbyStateMachine {
                 return new SkipOutcome(SkipResult.COOLDOWN_SKIPPED, List.copyOf(effects));
             }
             case MATCHMAKING -> {
-                int target = requester == SkipRequester.ADMIN
-                        ? timeline.voteClose() + 1
-                        : Math.max(PLAYER_SKIP_MATCHMAKING_SECONDS, timeline.voteClose() + 1);
+                int target = skipTarget(requester);
                 if (secondsRemaining <= target) return new SkipOutcome(SkipResult.TOO_LATE, List.of());
                 secondsRemaining = target;
                 return new SkipOutcome(SkipResult.MATCHMAKING_SHORTENED, List.of());
@@ -243,6 +266,17 @@ public final class SiegeLobbyStateMachine {
                 return new SkipOutcome(SkipResult.NOT_SKIPPABLE, List.of());
             }
         }
+    }
+
+    /**
+     * Seconds of matchmaking a skip by {@code requester} leaves (the configured value, never less than one
+     * second before voting closes).
+     */
+    public int skipTarget(SkipRequester requester) {
+        int configured = requester == SkipRequester.ADMIN
+                ? configuration.adminSkipMatchmakingSeconds()
+                : configuration.playerSkipMatchmakingSeconds();
+        return Math.max(configured, timeline.voteClose() + 1);
     }
 
     /**
@@ -274,12 +308,12 @@ public final class SiegeLobbyStateMachine {
         return phase;
     }
 
-    /** Seconds until the phase's next boundary: match start, match end, or end of cooldown. */
+    /** Seconds until the phase's next boundary: match start, match end, end of the post-match wait, or end of cooldown. */
     public int secondsRemaining() {
         return Math.max(0, secondsRemaining);
     }
 
-    /** Seconds since the match started (IN_PROGRESS/ENDING). */
+    /** Seconds since the match started (IN_PROGRESS/ENDING/POST_MATCH). */
     public int secondsElapsed() {
         return secondsElapsed;
     }
@@ -408,9 +442,19 @@ public final class SiegeLobbyStateMachine {
         effects.add(new StartMatchEffect(drawnScenario, matchDurationSeconds, memberCount));
     }
 
+    /**
+     * Alpha run 1 (PandiO/knk-workspace#198): with a post-match time the members wait at the hub with the result
+     * (POST_MATCH) before they are restored; without one the match ends as before (ENDING, cooldown next tick).
+     */
     private void endMatch(SiegeEndReason reason, List<SiegeEffect> effects) {
-        secondsRemaining = 0;
-        moveTo(SiegePhase.ENDING, effects);
+        int postMatch = configuration.postMatchSeconds();
+        if (postMatch > 0) {
+            secondsRemaining = postMatch;
+            moveTo(SiegePhase.POST_MATCH, effects);
+        } else {
+            secondsRemaining = 0;
+            moveTo(SiegePhase.ENDING, effects);
+        }
         effects.add(new EndMatchEffect(drawnScenario, reason));
     }
 

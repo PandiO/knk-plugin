@@ -167,7 +167,7 @@ class MinecraftCatalogScanTaskHandlerTest {
 
         List<CatalogEnchantment> enchantments = defaults.enchantments();
 
-        assertEquals(13, enchantments.size());
+        assertEquals(14, enchantments.size());   // sharpness + the 13 custom enchantments (cleaving since 2026-10-24)
         assertEquals(SHARPNESS, enchantments.get(0));
         assertTrue(enchantments.contains(FLASH_CHAOS));
     }

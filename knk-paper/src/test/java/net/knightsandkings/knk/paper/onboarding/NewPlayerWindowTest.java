@@ -41,6 +41,15 @@ class NewPlayerWindowTest {
     }
 
     @Test
+    void aFirstJoinIsANewAccountOrAnExistingAccountTheServerHasNotSeen() {
+        assertTrue(NewPlayerWindow.isFirstJoin(true, false), "game-first: the API created the account at this join");
+        assertTrue(NewPlayerWindow.isFirstJoin(false, false),
+            "web-first or /link: the account exists, the player has no data on this server yet");
+        assertFalse(NewPlayerWindow.isFirstJoin(false, true), "a returning player");
+        assertTrue(NewPlayerWindow.isFirstJoin(true, true), "a new account always counts, whatever the player data says");
+    }
+
+    @Test
     void theFirstJoinWelcomeIsTakenOnceAndOnlyForAMarkedPlayer() {
         NewPlayerWindow window = new NewPlayerWindow(new MovableClock(), Duration.ofMinutes(10));
         window.markFirstJoin(alice);
@@ -83,5 +92,33 @@ class NewPlayerWindowTest {
 
         assertFalse(window.isQuiet(alice));
         assertTrue(window.takeFirstJoinWelcome(alice), "the welcome does not depend on the quiet minutes");
+    }
+
+    /**
+     * #486: an erased account's player keeps Minecraft's player files (hasPlayedBefore) and may get an account back
+     * through a claim or the website (not created at this join): without the erasure's mark that was "Welcome back".
+     */
+    @Test
+    void aPlayerWhoseAccountWasErased_IsOnTheirFirstJoinAgain() {
+        assertFalse(NewPlayerWindow.isFirstJoin(false, true), "the bug: kept player files and a claimed account");
+        assertTrue(NewPlayerWindow.isFirstJoin(false, true, true), "the erasure's mark makes it a first join");
+        assertFalse(NewPlayerWindow.isFirstJoin(false, true, false), "a returning player without an erasure");
+    }
+
+    @Test
+    void forget_GivesAnErasedPlayerANewWindow_InTheSameServerSession() {
+        MovableClock clock = new MovableClock();
+        NewPlayerWindow window = new NewPlayerWindow(clock, Duration.ofMinutes(10));
+        window.markFirstJoin(alice);
+        assertTrue(window.takeFirstJoinWelcome(alice));
+        clock.advance(Duration.ofMinutes(30));
+        assertFalse(window.isQuiet(alice));
+
+        assertTrue(window.forget(alice) == 1);
+        window.markFirstJoin(alice);
+
+        assertTrue(window.takeFirstJoinWelcome(alice), "the new account's first join gets the welcome again");
+        assertTrue(window.isQuiet(alice), "and its own quiet minutes, from the new first join");
+        assertTrue(window.forget(bob) == 0);
     }
 }

@@ -10,6 +10,8 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 import net.knightsandkings.knk.core.gates.GateManager;
+import net.knightsandkings.knk.core.npc.nav.AccessSubject;
+import net.knightsandkings.knk.core.roads.walk.CellAccess;
 import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.walk.MovementProfile;
 import net.knightsandkings.knk.core.roads.walk.WalkBudget;
@@ -47,20 +49,36 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
      */
     public WalkLegPreparer(WalkSnapshotService snapshots, WalkAccessFactory access, NavigationConfig.WalkConfig config,
                            Function<String, GateCells> gatesOf, Function<World, WalkSnapshotService.WorldChunks> chunksOf) {
+        this(snapshots, access, config, false, gatesOf, chunksOf);
+    }
+
+    /**
+     * As above; with {@code guidanceV2} ({@code navigation.guidance-v2}, phase 6.1) the requests carry the profile with
+     * the clearance cost ({@link NavigationConfig.WalkConfig#profile(boolean)}); off, today's profile exactly.
+     */
+    public WalkLegPreparer(WalkSnapshotService snapshots, WalkAccessFactory access, NavigationConfig.WalkConfig config,
+                           boolean guidanceV2, Function<String, GateCells> gatesOf,
+                           Function<World, WalkSnapshotService.WorldChunks> chunksOf) {
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
         this.access = Objects.requireNonNull(access, "access");
         this.gatesOf = Objects.requireNonNull(gatesOf, "gatesOf");
         this.chunksOf = Objects.requireNonNull(chunksOf, "chunksOf");
         Objects.requireNonNull(config, "config");
         this.captureMargin = config.captureMargin();
-        this.profile = config.profile();
+        this.profile = config.profile(guidanceV2);
         this.budget = config.budget();
     }
 
     /** The server's preparer: the gate cache's door cells and Bukkit chunk snapshots. */
     public static WalkLegPreparer server(WalkSnapshotService snapshots, WalkAccessFactory access,
                                          NavigationConfig.WalkConfig config, GateManager gateManager) {
-        return new WalkLegPreparer(snapshots, access, config, world -> GateCellsIndex.of(gateManager, world),
+        return server(snapshots, access, config, false, gateManager);
+    }
+
+    /** The server's preparer with {@code navigation.guidance-v2} on or off (phase 6.1). */
+    public static WalkLegPreparer server(WalkSnapshotService snapshots, WalkAccessFactory access,
+                                         NavigationConfig.WalkConfig config, boolean guidanceV2, GateManager gateManager) {
+        return new WalkLegPreparer(snapshots, access, config, guidanceV2, world -> GateCellsIndex.of(gateManager, world),
             WalkSnapshotService::of);
     }
 
@@ -83,8 +101,9 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
             WalkAccessFactory.WalkAccess walkAccess = access.prepare(player, world, gates, captured, profile.headroom(),
                 destinationRegions);
             WalkTerrain terrain = captured.terrain().terrain();
-            return () -> new WalkRequest(terrain, walkAccess.resolve(), profile, from[0], from[1], from[2],
-                to[0], to[1], to[2], goal, budget);
+            Supplier<WalkRequest> request = () -> new WalkRequest(terrain, walkAccess.resolve(), profile, from[0], from[1],
+                from[2], to[0], to[1], to[2], goal, budget);
+            return new NavigationService.PreparedWalk(request, captured.stats());
         });
         prepared.whenComplete((ignored, error) -> {
             if (prepared.isCancelled()) {
@@ -92,6 +111,36 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
             }
         });
         return prepared;
+    }
+
+    /**
+     * PandiO/knk-workspace#360: what a local leg of a mover with its own access subject (an NPC) needs for the
+     * engine's path search - the box and the subject's cell access in it.
+     *
+     * @param access the subject's access, built on the walk executor (domain lookups may block); READY only
+     */
+    public record LegCapture(WalkSnapshotService.Status status, WalkBox box, Supplier<CellAccess> access) {
+    }
+
+    /**
+     * Main thread: captures the box around a leg from {@code feet} to {@code target} (a floor point) and decides the
+     * subject's gate, door and region access in it, judged from the subject's own regions. Loaded chunks only: an
+     * unloaded chunk or a box too large completes with that status and no access. Completes on the main thread.
+     */
+    public CompletableFuture<LegCapture> capture(AccessSubject subject, World world, double[] feet, double[] target) {
+        Objects.requireNonNull(subject, "subject");
+        Objects.requireNonNull(world, "world");
+        GateCells gates = gatesOf.apply(world.getName());
+        WalkBox box = WalkBox.around(world.getName(), feet[0], feet[1], feet[2], target[0], target[1], target[2],
+            captureMargin, world.getMinHeight(), world.getMaxHeight());
+        return snapshots.capture(chunksOf.apply(world), gates, box).thenApply(captured -> {
+            if (!captured.ready()) {
+                return new LegCapture(captured.status(), box, null);
+            }
+            WalkAccessFactory.WalkAccess walkAccess = access.prepare(subject, world, gates, captured,
+                profile.headroom(), null);
+            return new LegCapture(captured.status(), box, walkAccess::resolve);
+        });
     }
 
     @Override

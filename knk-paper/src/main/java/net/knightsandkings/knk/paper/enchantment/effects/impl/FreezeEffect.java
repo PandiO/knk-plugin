@@ -15,14 +15,15 @@ public class FreezeEffect extends AttackEnchantmentEffect {
     private final FrozenPlayerTracker frozenPlayerTracker;
 
     public FreezeEffect(Plugin plugin, FrozenPlayerTracker frozenPlayerTracker) {
-        super("freeze", 0.15d, plugin);
+        super("freeze", plugin);
         this.frozenPlayerTracker = frozenPlayerTracker;
     }
 
     @Override
     protected void applyEffect(ItemStack weapon, Player attacker, LivingEntity target, int level) {
-        int durationTicks = level * 60;
+        int durationTicks = tuning().durationTicksAt(level);
         frozenPlayerTracker.freeze(target, durationTicks);
+        display().debuff(target, "freeze", "Frozen", null, durationTicks);
         playSound(target.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.8f, 1.2f);
 
         for (int tick = 0; tick <= durationTicks; tick += 20) {

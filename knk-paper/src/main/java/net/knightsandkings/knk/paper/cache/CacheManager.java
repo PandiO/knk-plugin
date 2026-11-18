@@ -175,6 +175,29 @@ public class CacheManager {
     }
 
     /**
+     * Realtime S3 (PandiO/knk-workspace#182): runs only the named refresh hooks (an event names the caches it makes
+     * stale, e.g. the teleport and navigation ones); unknown names are skipped.
+     *
+     * @return the names that ran
+     */
+    public List<String> runRefreshHooks(String... names) {
+        List<String> ran = new java.util.ArrayList<>();
+        for (String name : names) {
+            Runnable refresh = refreshHooks.get(name);
+            if (refresh == null) {
+                continue;
+            }
+            try {
+                refresh.run();
+                ran.add(name);
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, "Refreshing the " + name + " cache failed", ex);
+            }
+        }
+        return ran;
+    }
+
+    /**
      * Resets all cache metrics (hit/miss counters).
      * <p>
      * Useful for periodic metric snapshots or when you want to measure

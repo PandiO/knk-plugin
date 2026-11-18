@@ -29,6 +29,12 @@ import java.util.stream.Collectors;
  * @param wallCost    extra cost of a cell with a wall (anything not passable at feet or head height)
  *                    among its 8 neighbours: paths keep a block from walls and round corners wider where
  *                    there is room (live test 2026-10-08, finding N7; player 1.0, config {@code wall-cost})
+ * @param clearanceCost off-road navigation phase 6.1 (PandiO/knk-workspace#710, DESIGN § 7.1.4): extra cost per block
+ *                    of clearance a standing cell lacks to {@code wallClearance} ({@link WalkClearance}); above 0 it
+ *                    replaces {@code wallCost}. 0 (the default, and whenever {@code navigation.guidance-v2} is off)
+ *                    keeps the wall cost exactly as before (config {@code walk.clearance-cost}, 5 with the flag on)
+ * @param wallClearance the clearance a cell should keep from walls, posts and drops (config {@code walk.wall-clearance},
+ *                    default {@link #DEFAULT_WALL_CLEARANCE}); only read when {@code clearanceCost} is above 0
  */
 public record MovementProfile(
     int headroom,
@@ -41,20 +47,37 @@ public record MovementProfile(
     double waterFactor,
     Set<String> climbables,
     double climbCost,
-    double wallCost
+    double wallCost,
+    double clearanceCost,
+    double wallClearance
 ) {
+
+    /** The clearance a walk path keeps from walls where there is room (DESIGN § 7.1.2: 0.8, as for NPCs). */
+    public static final double DEFAULT_WALL_CLEARANCE = 0.8;
+    /** The least {@code wall-clearance}: the body's half width plus 0.05 (the shaper's hard minimum). */
+    public static final double MIN_WALL_CLEARANCE = 0.35;
+    /** The largest {@code wall-clearance}: the clearance map's cap ({@code Corridor.CAP}). */
+    public static final double MAX_WALL_CLEARANCE = 2.0;
 
     /** A player is just under two blocks tall. */
     public static final int PLAYER_HEADROOM = 2;
 
     /** The player, with the defaults decided 2026-10-02 (§4, §11). */
     public static final MovementProfile PLAYER = new MovementProfile(
-        PLAYER_HEADROOM, 3, 10.0, 1.0, true, 3.0, true, 3.0, Set.of("LADDER"), 2.0, 1.0);
+        PLAYER_HEADROOM, 3, 10.0, 1.0, true, 3.0, true, 3.0, Set.of("LADDER"), 2.0, 1.0, 0.0, DEFAULT_WALL_CLEARANCE);
 
     /** A profile without a wall cost (the geometry fixtures, NPC profiles that do not mind walls). */
     public MovementProfile(int headroom, int maxDrop, double dropPenalty, double jumpCost, boolean opensDoors,
                            double doorCost, boolean wades, double waterFactor, Set<String> climbables, double climbCost) {
         this(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades, waterFactor, climbables, climbCost, 0.0);
+    }
+
+    /** A profile without a clearance cost (callers from before phase 6.1): the wall cost alone, as before. */
+    public MovementProfile(int headroom, int maxDrop, double dropPenalty, double jumpCost, boolean opensDoors,
+                           double doorCost, boolean wades, double waterFactor, Set<String> climbables, double climbCost,
+                           double wallCost) {
+        this(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades, waterFactor, climbables, climbCost,
+            wallCost, 0.0, DEFAULT_WALL_CLEARANCE);
     }
 
     public MovementProfile {
@@ -68,6 +91,11 @@ public record MovementProfile(
         requireCost(jumpCost, "jumpCost");
         requireCost(doorCost, "doorCost");
         requireCost(wallCost, "wallCost");
+        requireCost(clearanceCost, "clearanceCost");
+        if (!(wallClearance >= MIN_WALL_CLEARANCE && wallClearance <= MAX_WALL_CLEARANCE)) {
+            throw new IllegalArgumentException("wallClearance must be " + MIN_WALL_CLEARANCE + ".." + MAX_WALL_CLEARANCE
+                + ": " + wallClearance);
+        }
         if (!(waterFactor >= 1.0) || Double.isInfinite(waterFactor)) {
             throw new IllegalArgumentException("waterFactor must be a finite number >= 1: " + waterFactor);
         }
@@ -90,19 +118,33 @@ public record MovementProfile(
     /** This profile with other drop settings (config {@code navigation.walk.max-drop}, {@code drop-penalty}). */
     public MovementProfile withDrops(int maxDrop, double dropPenalty) {
         return new MovementProfile(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades,
-            waterFactor, climbables, climbCost, wallCost);
+            waterFactor, climbables, climbCost, wallCost, clearanceCost, wallClearance);
     }
 
     /** This profile with another wall cost (config {@code navigation.walk.wall-cost}). */
     public MovementProfile withWallCost(double wallCost) {
         return new MovementProfile(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades,
-            waterFactor, climbables, climbCost, wallCost);
+            waterFactor, climbables, climbCost, wallCost, clearanceCost, wallClearance);
     }
 
     /** This profile with another climbable list (config {@code navigation.walk.climbables}). */
     public MovementProfile withClimbables(Set<String> climbables) {
         return new MovementProfile(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades,
-            waterFactor, climbables, climbCost, wallCost);
+            waterFactor, climbables, climbCost, wallCost, clearanceCost, wallClearance);
+    }
+
+    /**
+     * This profile with a clearance cost (off-road phase 6.1, config {@code walk.clearance-cost} and
+     * {@code walk.wall-clearance} with {@code navigation.guidance-v2} on); a cost of 0 keeps the wall cost.
+     */
+    public MovementProfile withClearance(double clearanceCost, double wallClearance) {
+        return new MovementProfile(headroom, maxDrop, dropPenalty, jumpCost, opensDoors, doorCost, wades,
+            waterFactor, climbables, climbCost, wallCost, clearanceCost, wallClearance);
+    }
+
+    /** Whether the search uses the clearance cost instead of the wall cost. */
+    public boolean usesClearance() {
+        return clearanceCost > 0;
     }
 
     /** Whether a material name is climbed by this mover. */

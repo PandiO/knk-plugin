@@ -154,7 +154,7 @@ public final class MenuRenderer {
         MenuVariableScope rootScope = variableRegistry.scope(player, menuContext,
                 Map.of(MenuVariableProviderRegistry.ROOT_MENU, MenuView.of(menu.key(), menu.title(), session),
                         MenuVariableProviderRegistry.ROOT_STATE, MenuStateView.of(session)));
-        Predicate<String> permissionChecker = player::hasPermission;
+        Predicate<String> permissionChecker = MenuPermissions.of(player);
 
         // Step 2 (main thread): start every content-source fetch.
         Map<Integer, CompletableFuture<ContentFetch>> fetches = new LinkedHashMap<>();
@@ -274,7 +274,7 @@ public final class MenuRenderer {
     private MenuRenderResult compose(RuntimeMenu menu, MenuSession session, Player player, MenuContextParams menuContext,
                                      MenuVariableScope rootScope, Map<Integer, String> keys,
                                      Map<Integer, ContentFetch> fetched, long currentTick, MenuService menuService) {
-        Predicate<String> permissionChecker = player::hasPermission;
+        Predicate<String> permissionChecker = MenuPermissions.of(player);
 
         Map<Integer, ItemStack> itemStacksBySlot = new HashMap<>();
         Map<Integer, RuntimeMenuItem> itemsBySlot = new HashMap<>();

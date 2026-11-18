@@ -167,4 +167,40 @@ class ChatLineFormatTest {
     void blankTitle_isTreatedAsMissing() {
         assertEquals("Pandi: Hello", plain(ChatLineFormat.render(Rank.MEMBER, "Pandi", summary(" ", null, null, null, null), MSG)));
     }
+
+    // ---- PandiO/knk-workspace#260: a group's own chat colors beat the fixed owner/staff style ----
+
+    private static UserSummary withGroups(String primary, Integer primaryFrom, String secondary, Integer secondaryFrom) {
+        return new UserSummary(1, "Pandi", UUID.randomUUID(), null, 0, 0, 0, false, false,
+            GatePassThroughMethod.DEFAULT, ActiveMode.NONE, 3, "Knight", 0,
+            null, null, null, false, null, null, primary, secondary, primary, List.of(), null, primaryFrom, secondaryFrom);
+    }
+
+    @Test
+    void staff_withTheStaffGroupsChatColors_usesThem_tagStays() {
+        Component line = ChatLineFormat.render(Rank.STAFF, "Pandi", withGroups("&c", 50, "&4", 50), MSG);
+
+        assertEquals("[STAFF]-{Knight}- Pandi: Hello", plain(line));
+        assertEquals(NamedTextColor.DARK_RED, piece(line, "[").color());
+        assertEquals(NamedTextColor.RED, piece(line, "STAFF").color());
+        assertEquals(NamedTextColor.RED, piece(line, "Knight").color());
+        assertEquals(TextDecoration.State.TRUE, piece(line, "Knight").decoration(TextDecoration.BOLD));
+        assertEquals(NamedTextColor.RED, piece(line, " Pandi: ").color());
+    }
+
+    @Test
+    void staff_groupSetsOnlyThePrimary_bracketsKeepTheFixedStaffStyle() {
+        Component line = ChatLineFormat.render(Rank.STAFF, "Pandi", withGroups("&c", 50, "&2", null), MSG);
+
+        assertEquals(ColorOptions.staffformat, piece(line, "[").color());
+        assertEquals(NamedTextColor.RED, piece(line, "STAFF").color());
+    }
+
+    @Test
+    void owner_defaultGroupColors_dontReplaceTheOwnerStyle() {
+        Component line = ChatLineFormat.render(Rank.OWNER, "Pandi", withGroups("&a", null, "&2", null), MSG);
+
+        assertEquals(ColorOptions.ownerformat, piece(line, "-{").color());
+        assertEquals(ColorOptions.ownersubjects, piece(line, "Knight").color());
+    }
 }

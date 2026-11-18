@@ -23,7 +23,7 @@ class RegionsAdminCommandTest {
 
     @Test
     void completesRepairTempAndPurge() {
-        assertEquals(List.of("repair", "temp"), command.complete(sender, new String[] {""}));
+        assertEquals(List.of("repair", "sync", "temp"), command.complete(sender, new String[] {""}));
         assertEquals(List.of("temp"), command.complete(sender, new String[] {"t"}));
         assertEquals(List.of("purge"), command.complete(sender, new String[] {"temp", "p"}));
         assertEquals(List.of(), command.complete(sender, new String[] {"repair", ""}));

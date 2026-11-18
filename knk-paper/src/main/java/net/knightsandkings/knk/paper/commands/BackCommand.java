@@ -32,7 +32,7 @@ import net.knightsandkings.knk.paper.teleport.VisibleTargetResolver;
  *       {@code teleport.back.expire-seconds}; a player teleport: warmup, cooldown, combat tag, safe-spot
  *       check, every guard, and {@code teleport.back.price-coins} when set ({@link BackService}).</li>
  *   <li>{@code /back <player> [-s]} - send someone back to their latest place of any kind
- *       ({@value TeleportNodes#STAFF_BACK_OTHERS}; you must outrank them). A staff teleport: instant,
+ *       ({@value TeleportNodes#STAFF_BACK_OTHERS}; your rank or lower since PandiO/knk-workspace#171). A staff teleport: instant,
  *       audited, uses their entry up. Console allowed. {@code -s} needs {@value TeleportNodes#STAFF_SILENT};
  *       always silent while you're vanished.</li>
  * </ul>

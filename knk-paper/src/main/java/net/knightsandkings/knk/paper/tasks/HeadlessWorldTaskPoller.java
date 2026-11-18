@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.tasks;
 
+import net.knightsandkings.knk.api.dto.ClaimTaskDto;
 import net.knightsandkings.knk.api.dto.WorldTaskDto;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
 import org.bukkit.plugin.Plugin;
@@ -15,6 +16,10 @@ import java.util.logging.Logger;
  * and dispatches each to the first registered handler that supports its TaskType.
  * Runs no scanning/game logic itself; each handler owns its own thread-safety.
  *
+ * <p>PandiO/knk-workspace#180: a task is claimed (claim mode "headless") before its handler runs, so a second game server
+ * polling the same API gets a 409 and skips it instead of running the scan twice, and the claim is heartbeated while the
+ * scan runs (LeaseTrackingWorldTasksApi).
+ *
  * TODO: Replace this pull-based polling loop with a push notification from the API (e.g. a
  * SignalR hub the plugin subscribes to) that fires the moment a headless WorldTask is created,
  * instead of the plugin discovering it up to headless-poll-max-interval-seconds later. The
@@ -29,6 +34,7 @@ public class HeadlessWorldTaskPoller {
 
     private final WorldTasksApi worldTasksApi;
     private final Plugin plugin;
+    private final String serverId;
     private final long minIntervalTicks;
     private final long maxIntervalTicks;
     private final List<IHeadlessWorldTaskHandler> handlers = new ArrayList<>();
@@ -36,21 +42,40 @@ public class HeadlessWorldTaskPoller {
 
     private volatile long currentIntervalTicks;
     private volatile boolean running;
+    private volatile java.util.function.BooleanSupplier hubConnected = () -> false;
     private org.bukkit.scheduler.BukkitTask task;
 
-    public HeadlessWorldTaskPoller(WorldTasksApi worldTasksApi, Plugin plugin) {
+    public HeadlessWorldTaskPoller(WorldTasksApi worldTasksApi, Plugin plugin, String serverId) {
         this(worldTasksApi, plugin,
             plugin.getConfig().getLong("world-tasks.headless-poll-interval-seconds", DEFAULT_MIN_INTERVAL_SECONDS),
-            plugin.getConfig().getLong("world-tasks.headless-poll-max-interval-seconds", DEFAULT_MAX_INTERVAL_SECONDS));
+            plugin.getConfig().getLong("world-tasks.headless-poll-max-interval-seconds", DEFAULT_MAX_INTERVAL_SECONDS),
+            serverId);
     }
 
     public HeadlessWorldTaskPoller(WorldTasksApi worldTasksApi, Plugin plugin,
-                                   long minIntervalSeconds, long maxIntervalSeconds) {
+                                   long minIntervalSeconds, long maxIntervalSeconds, String serverId) {
         this.worldTasksApi = worldTasksApi;
         this.plugin = plugin;
+        this.serverId = serverId;
         this.minIntervalTicks = Math.max(1L, minIntervalSeconds) * 20L;
         this.maxIntervalTicks = Math.max(this.minIntervalTicks, Math.max(1L, maxIntervalSeconds) * 20L);
         this.currentIntervalTicks = this.minIntervalTicks;
+    }
+
+    /**
+     * PandiO/knk-workspace#181 (DESIGN §8.4): while the realtime channel is connected, {@code WorldTaskCreated} starts a
+     * scan at once ({@link #pollNow()}) and this poll is only the safety net, at the idle interval (60 s).
+     */
+    public void setHubConnected(java.util.function.BooleanSupplier connected) {
+        this.hubConnected = connected != null ? connected : () -> false;
+    }
+
+    /** #181: one poll right away (a {@code WorldTaskCreated} arrived), next to the scheduled ones. */
+    public void pollNow() {
+        if (!running) {
+            return;
+        }
+        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, (Runnable) () -> pollOnce(false));
     }
 
     public void registerHandler(IHeadlessWorldTaskHandler handler) {
@@ -79,29 +104,46 @@ public class HeadlessWorldTaskPoller {
         if (!running) {
             return;
         }
-        task = plugin.getServer().getScheduler().runTaskLaterAsynchronously(plugin, this::pollOnce, delayTicks);
+        task = plugin.getServer().getScheduler().runTaskLaterAsynchronously(plugin, () -> pollOnce(), delayTicks);
     }
 
-    private void pollOnce() {
+    void pollOnce() {
+        pollOnce(true);
+    }
+
+    /** @param scheduled false for {@link #pollNow()}: it doesn't schedule the next poll (the scheduled chain goes on). */
+    void pollOnce(boolean scheduled) {
         worldTasksApi.listByStatus("Pending").thenAccept(tasks -> {
             boolean dispatchedAny = false;
             for (WorldTaskDto candidate : tasks) {
                 dispatchedAny |= dispatchIfSupported(candidate);
             }
-            onPollFinished(dispatchedAny);
+            if (scheduled) {
+                onPollFinished(dispatchedAny);
+            }
         }).exceptionally(ex -> {
             LOGGER.warning("HeadlessWorldTaskPoller failed to list pending tasks: " + ex.getMessage());
-            onPollFinished(false);
+            if (scheduled) {
+                onPollFinished(false);
+            }
             return null;
         });
     }
 
-    /** Polls fast while there is headless work, and backs off exponentially while idle. */
+    /**
+     * Polls fast while there is headless work, and backs off exponentially while idle; #181: while the hub is connected the
+     * safety-net poll stays at the idle interval (pushes start the scans).
+     */
     private void onPollFinished(boolean dispatchedAny) {
-        currentIntervalTicks = dispatchedAny
-            ? minIntervalTicks
-            : Math.min(maxIntervalTicks, currentIntervalTicks * 2L);
+        currentIntervalTicks = nextInterval(dispatchedAny, hubConnected.getAsBoolean());
         scheduleNextPoll(currentIntervalTicks);
+    }
+
+    long nextInterval(boolean dispatchedAny, boolean connected) {
+        if (connected) {
+            return maxIntervalTicks;
+        }
+        return dispatchedAny ? minIntervalTicks : Math.min(maxIntervalTicks, currentIntervalTicks * 2L);
     }
 
     private boolean dispatchIfSupported(WorldTaskDto candidate) {
@@ -118,13 +160,26 @@ public class HeadlessWorldTaskPoller {
             return true; // already being processed from a previous poll cycle
         }
 
-        LOGGER.info("Dispatching headless task " + candidate.id() + " (" + candidate.taskType() + ")");
-        try {
-            handler.execute(candidate, () -> inFlightTaskIds.remove(candidate.id()));
-        } catch (Exception e) {
-            LOGGER.warning("Headless handler threw for task " + candidate.id() + ": " + e.getMessage());
+        // #180: claim first; only the server whose claim succeeds runs the scan.
+        worldTasksApi.claim(candidate.id(), ClaimTaskDto.headless(serverId)).thenAccept(claimed -> {
+            LOGGER.info("Dispatching headless task " + candidate.id() + " (" + candidate.taskType() + ")");
+            try {
+                handler.execute(claimed != null ? claimed : candidate, () -> inFlightTaskIds.remove(candidate.id()));
+            } catch (Exception e) {
+                LOGGER.warning("Headless handler threw for task " + candidate.id() + ": " + e.getMessage());
+                inFlightTaskIds.remove(candidate.id());
+                worldTasksApi.fail(candidate.id(), "The game server's scan handler failed: " + e.getMessage())
+                    .exceptionally(ignored -> null);
+            }
+        }).exceptionally(ex -> {
             inFlightTaskIds.remove(candidate.id());
-        }
+            if (WorldTaskApiErrors.status(ex) == 409) {
+                LOGGER.fine("Headless task " + candidate.id() + " is taken (another server, or no longer Pending)");
+            } else {
+                LOGGER.warning("Claiming headless task " + candidate.id() + " failed: " + ex.getMessage());
+            }
+            return null;
+        });
         return true;
     }
 

@@ -2,8 +2,11 @@ package net.knightsandkings.knk.paper.siege;
 
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeLobby;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
+import net.knightsandkings.knk.core.domain.siege.KnkSiegeTeam;
 import net.knightsandkings.knk.core.siege.SiegeDisplayText;
 import net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine;
+import net.knightsandkings.knk.core.siege.SiegeMatchRoster.SpawnChoice;
+import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard;
 import net.knightsandkings.knk.core.siege.SiegePhase;
 
 import java.util.Collections;
@@ -18,9 +21,11 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * One lobby at runtime: its {@link SiegeLobbyStateMachine}, its members (join order) and the state of
- * the current round - the draw's match token and Phase 6 match id, the team split, and the running
- * {@link SiegeMatch}. Read-only to everything outside {@link SiegeService}; commands and the Phase 8b
- * menu views read it through these getters. Main thread only.
+ * the current round - the draw's match token and Phase 6 match id, the team split, the members' spawn
+ * choices made at the hub before the start (playtest 2026-10-24: the spawn picker opens at the team split,
+ * against the scenario's initial objective holdings), and the running {@link SiegeMatch}. Read-only to
+ * everything outside {@link SiegeService}; commands and the Phase 8b menu views read it through these
+ * getters. Main thread only.
  */
 public final class SiegeLobbyRuntime {
 
@@ -31,7 +36,12 @@ public final class SiegeLobbyRuntime {
     private String matchToken;
     private CompletableFuture<Long> matchId;
     private Map<Integer, List<UUID>> split;
+    /** The scenario as it starts (initial holders), for spawn options between the split and the start. */
+    private SiegeObjectiveBoard preMatchBoard;
+    private final Map<UUID, SpawnChoice> preMatchSpawnChoices = new HashMap<>();
     private SiegeMatch match;
+    /** The match ended and was recorded; its members wait at the hub with the result (PandiO/knk-workspace#198). */
+    private boolean matchOver;
     private boolean disabledLogged;
 
     SiegeLobbyRuntime(SiegeLobbyStateMachine machine) {
@@ -79,6 +89,14 @@ public final class SiegeLobbyRuntime {
         return Optional.ofNullable(match);
     }
 
+    /**
+     * True from the end of a match until its members are released (alpha run 1, PandiO/knk-workspace#198): the
+     * match is recorded and its rewards granted, and the members wait at the hub with the result (POST_MATCH).
+     */
+    public boolean matchOver() {
+        return matchOver;
+    }
+
     public Optional<KnkSiegeScenario> drawnScenario() {
         return machine.drawnScenario();
     }
@@ -89,6 +107,27 @@ public final class SiegeLobbyRuntime {
 
     public Optional<String> matchToken() {
         return Optional.ofNullable(matchToken);
+    }
+
+    /** The member's team from the split (HUB, after the team split), else empty. */
+    public Optional<KnkSiegeTeam> splitTeamOf(UUID playerId) {
+        if (split == null) return Optional.empty();
+        Optional<KnkSiegeScenario> scenario = drawnScenario();
+        if (scenario.isEmpty()) return Optional.empty();
+        return split.entrySet().stream()
+                .filter(e -> e.getValue().contains(playerId))
+                .findFirst()
+                .flatMap(e -> scenario.get().team(e.getKey()));
+    }
+
+    /** The scenario's objectives as the match starts; present from the team split until the start. */
+    public Optional<SiegeObjectiveBoard> preMatchBoard() {
+        return Optional.ofNullable(preMatchBoard);
+    }
+
+    /** A member's spawn choice made before the start (carried into the match roster at T-0). */
+    public Optional<SpawnChoice> preMatchSpawnChoice(UUID playerId) {
+        return Optional.ofNullable(preMatchSpawnChoices.get(playerId));
     }
 
     // ==================== Mutators (SiegeService only) ====================
@@ -114,8 +153,20 @@ public final class SiegeLobbyRuntime {
         this.split = split;
     }
 
+    void setPreMatchBoard(SiegeObjectiveBoard board) {
+        this.preMatchBoard = board;
+    }
+
+    Map<UUID, SpawnChoice> preMatchSpawnChoices() {
+        return preMatchSpawnChoices;
+    }
+
     void setMatch(SiegeMatch match) {
         this.match = match;
+    }
+
+    void setMatchOver(boolean matchOver) {
+        this.matchOver = matchOver;
     }
 
     /** Clears everything round-specific (after an end or a cancel). Members are handled by the caller. */
@@ -123,7 +174,10 @@ public final class SiegeLobbyRuntime {
         matchToken = null;
         matchId = null;
         split = null;
+        preMatchBoard = null;
+        preMatchSpawnChoices.clear();
         match = null;
+        matchOver = false;
     }
 
     boolean disabledLogged() {

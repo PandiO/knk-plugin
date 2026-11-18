@@ -34,7 +34,7 @@ class KnkTaskClaimCommandTest {
 
         assertTrue(handled);
         verify(player).sendMessage(ChatColor.RED + "You still have task #271 (WgRegionId) open. "
-                + "Finish it, or type 'cancel' to stop it, then claim again.");
+                + "Finish it, or type 'cancel' to hand it back, then claim again.");
         verifyNoInteractions(worldTasksApi);
     }
 

@@ -9,6 +9,8 @@ import net.knightsandkings.knk.core.domain.common.Page;
 import net.knightsandkings.knk.core.domain.item.KnkKit;
 import net.knightsandkings.knk.core.domain.item.KnkKitAvailability;
 import net.knightsandkings.knk.core.domain.item.KnkKitClaimResult;
+import net.knightsandkings.knk.core.domain.item.KnkKitDelivery;
+import net.knightsandkings.knk.api.dto.KitDeliveryDto;
 import net.knightsandkings.knk.core.domain.item.KnkKitContent;
 import net.knightsandkings.knk.core.domain.item.KnkKitPurchaseResult;
 
@@ -84,6 +86,23 @@ public final class KitsMapper {
                 dto.handId(),
                 toCoreContents(dto.contents())
         );
+    }
+
+    /** A pending delivery; null when it carries no claim id or loadout (nothing that could be placed once). */
+    public static KnkKitDelivery toCore(KitDeliveryDto dto) {
+        if (dto == null || dto.claimId() == null || dto.loadout() == null) return null;
+
+        return new KnkKitDelivery(
+                dto.claimId(),
+                dto.kitId() != null ? dto.kitId() : 0,
+                dto.kitName() != null ? dto.kitName() : "",
+                toCore(dto.loadout())
+        );
+    }
+
+    public static List<KnkKitDelivery> mapDeliveryList(List<KitDeliveryDto> dtos) {
+        if (dtos == null) return List.of();
+        return dtos.stream().map(KitsMapper::toCore).filter(java.util.Objects::nonNull).toList();
     }
 
     public static KnkKitPurchaseResult toCore(KitPurchaseResultDto dto) {

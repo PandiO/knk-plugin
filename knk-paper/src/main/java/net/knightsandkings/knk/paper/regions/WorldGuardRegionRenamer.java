@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
 
+import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldguard.domains.DefaultDomain;
 import com.sk89q.worldguard.protection.flags.Flag;
 import com.sk89q.worldguard.protection.managers.RegionManager;
@@ -30,6 +31,10 @@ import net.knightsandkings.knk.core.regions.RegionRenamePlan.Plan;
  *
  * <p>All of it happens on the caller's (main) thread before WorldGuard saves; if any step throws, every region is put
  * back the way it was, so the world never ends up with neither region.
+ *
+ * <p>The new region keeps the drawn region's shape exactly: its outline and its Y range (PandiO/knk-workspace#487; a
+ * lootbox spawn area was stretched to the world's full build height under #34 until then). The result's detail names
+ * the Y range, for the log.
  */
 public final class WorldGuardRegionRenamer {
 
@@ -122,17 +127,23 @@ public final class WorldGuardRegionRenamer {
         if (!children.isEmpty()) {
             detail += " (" + children.size() + " child region(s) re-linked)";
         }
+        detail += " (Y " + newRegion.getMinimumPoint().y() + " to " + newRegion.getMaximumPoint().y() + ")";
         return new Result(true, plan.action(), detail);
     }
 
-    /** The same shape under a new id, or null for a type WorldGuard regions here are never drawn as (e.g. global). */
+    /**
+     * The same shape (outline and Y range) under a new id, or null for a type WorldGuard regions here are never drawn as
+     * (e.g. global).
+     */
     private static ProtectedRegion withNewId(ProtectedRegion region, String newRegionId) {
         if (region instanceof ProtectedPolygonalRegion polygon) {
             return new ProtectedPolygonalRegion(newRegionId, polygon.getPoints(),
-                    polygon.getMinimumPoint().getBlockY(), polygon.getMaximumPoint().getBlockY());
+                polygon.getMinimumPoint().getBlockY(), polygon.getMaximumPoint().getBlockY());
         }
         if (region instanceof ProtectedCuboidRegion cuboid) {
-            return new ProtectedCuboidRegion(newRegionId, cuboid.getMinimumPoint(), cuboid.getMaximumPoint());
+            BlockVector3 min = cuboid.getMinimumPoint();
+            BlockVector3 max = cuboid.getMaximumPoint();
+            return new ProtectedCuboidRegion(newRegionId, min, max);
         }
         return null;
     }

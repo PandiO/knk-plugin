@@ -4,9 +4,11 @@ import net.knightsandkings.knk.core.dataaccess.FetchResult;
 import net.knightsandkings.knk.core.dataaccess.ItemBlueprintsDataAccess;
 import net.knightsandkings.knk.core.dataaccess.MinecraftMaterialRefsDataAccess;
 import net.knightsandkings.knk.core.domain.enchantments.KnkEnchantmentDefinition;
+import net.knightsandkings.knk.core.domain.item.KnkArmorTrim;
 import net.knightsandkings.knk.core.domain.item.KnkGrade;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintDefaultEnchantment;
+import net.knightsandkings.knk.core.domain.item.KnkShieldBanner;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimEnchantment;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxClaimResult;
 import net.knightsandkings.knk.core.lootbox.LootboxDeliveryMethod;
@@ -166,6 +168,30 @@ class LootboxDeliveryTest {
         KnkItemBlueprint overridden = LootboxDelivery.withClaimGrade(rare, claim(1L, 1, List.of(), 4, 4));
         assertEquals(Integer.valueOf(4), overridden.grade().stars());
         assertEquals(rare.defaultEnchantments(), overridden.defaultEnchantments());
+    }
+
+    @Test
+    void theClaimsLookReplacesTheBlueprintsWhenTheApiSentOne() {
+        KnkItemBlueprint blueprint = blueprint(null);
+        KnkShieldBanner banner = new KnkShieldBanner("RED", List.of(new KnkShieldBanner.Layer("minecraft:cross", "WHITE")));
+        KnkArmorTrim trim = new KnkArmorTrim("minecraft:silence", "minecraft:netherite");
+
+        // An API from before #232: nothing to apply, the blueprint stays as the plugin read it.
+        assertSame(blueprint, LootboxDelivery.withClaimLook(blueprint, claim(1L, 1, List.of(), null, null)));
+
+        KnkLootboxClaimResult dressed = new KnkLootboxClaimResult(41, false, 9, 12, 3, 5, "Box", 1L, 77, "Shield",
+                null, null, 1, false, List.of(), false, null, null, banner, trim);
+        KnkItemBlueprint overridden = LootboxDelivery.withClaimLook(blueprint, dressed);
+        assertEquals(banner, overridden.shieldBanner());
+        assertEquals(trim, overridden.armorTrim());
+        assertEquals(blueprint.defaultEnchantments(), overridden.defaultEnchantments());
+        assertSame(overridden, LootboxDelivery.withClaimLook(overridden, dressed), "already that look");
+
+        // The instance was minted plain; the blueprint got a pattern since: the drop is the plain instance.
+        KnkLootboxClaimResult plain = new KnkLootboxClaimResult(41, false, 9, 12, 3, 5, "Box", 1L, 77, "Shield",
+                null, null, 1, false, List.of(), false, null, null, new KnkShieldBanner(null, List.of()), null);
+        assertTrue(LootboxDelivery.withClaimLook(overridden, plain).shieldBanner().isEmpty());
+        assertNull(LootboxDelivery.withClaimLook(overridden, plain).armorTrim());
     }
 
     @Test

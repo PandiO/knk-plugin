@@ -15,7 +15,12 @@ public class InvisibilityEffect extends SupportEnchantmentEffect {
 
     @Override
     protected void applyEffect(ItemStack item, Player player, int level) {
-        player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 200, 0));
+        int durationTicks = tuning().durationTicksAt(level);
+        // PandiO/knk-workspace#211: the swirl particles stay on (developer decision 2026-11-03).
+        player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, durationTicks, 0));
+        // PandiO/knk-workspace#169: the invoker's own name tag stays hidden from other players while invisible;
+        // #211: their armour and held items too (InvisibleEquipment), while they stay in the tab list.
+        display().invisible(player, durationTicks);
         playEffect(player.getLocation().clone().add(0.0d, 1.0d, 0.0d), Effect.POTION_BREAK, 0);
     }
 }

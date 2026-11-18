@@ -3,6 +3,7 @@ package net.knightsandkings.knk.paper.listeners;
 import net.knightsandkings.knk.core.siege.SiegeCombatRules;
 import net.knightsandkings.knk.core.siege.SiegeCombatRules.Combatant;
 import net.knightsandkings.knk.core.siege.SiegeCombatRules.Outcome;
+import net.knightsandkings.knk.paper.npc.nav.NpcEntities;
 import net.knightsandkings.knk.paper.siege.SiegeMessages;
 import net.knightsandkings.knk.paper.siege.SiegeService;
 import net.kyori.adventure.text.Component;
@@ -45,6 +46,8 @@ public class SiegeCombatListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDamage(EntityDamageByEntityEvent event) {
+        // NPCs are no siege combatants (NAV-08)
+        if (NpcEntities.isNpc(event.getEntity()) || NpcEntities.isNpc(resolveAttacker(event.getDamager()))) return;
         if (!(event.getEntity() instanceof Player victim)) return;
         Projectile projectile = event.getDamager() instanceof Projectile p ? p : null;
         Player attacker = resolveAttacker(event.getDamager());
@@ -82,7 +85,8 @@ public class SiegeCombatListener implements Listener {
         return switch (outcome) {
             case DENY_VICTIM_SAFE -> "You can't hurt players inside their spawn area!";
             case DENY_ATTACKER_SAFE -> "You can't hurt players while you are inside your spawn area!";
-            case DENY_NOT_STARTED -> "The siege hasn't started yet.";
+            // Also at the hub after the match (PandiO/knk-workspace#198).
+            case DENY_NOT_STARTED -> "There is no fighting outside the running match.";
             case DENY_MEMBER_VS_NON_MEMBER -> attackerInSiege
                     ? "In a siege you can only fight enemies in your own match."
                     : "You can't attack players who are in a siege.";

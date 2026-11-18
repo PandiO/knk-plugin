@@ -140,6 +140,51 @@ public final class LocalFilePrivateMessageLog implements PrivateMessageLogger {
         }
     }
 
+    /**
+     * Account erasure (PandiO/knk-workspace#184): removes every line the player sent or received ({@code Name(uuid)} on
+     * either side) from the log files, on the log's own thread so it can't interleave with a write. Waits for it.
+     *
+     * @return how many lines were removed
+     */
+    public int purge(UUID playerId) throws InterruptedException, ExecutionException, TimeoutException {
+        if (playerId == null) {
+            return 0;
+        }
+        return executor.submit(() -> purgeNow(playerId)).get(30, TimeUnit.SECONDS);
+    }
+
+    int purgeNow(UUID playerId) throws IOException {
+        if (!Files.isDirectory(directory)) {
+            return 0;
+        }
+        String marker = "(" + playerId + ")";
+        int removed = 0;
+        try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, FILE_PREFIX + "*" + FILE_SUFFIX)) {
+            for (Path file : files) {
+                java.util.List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                java.util.List<String> kept = lines.stream().filter(line -> !mentions(line, marker)).toList();
+                if (kept.size() == lines.size()) {
+                    continue;
+                }
+                removed += lines.size() - kept.size();
+                if (kept.isEmpty()) {
+                    Files.deleteIfExists(file);
+                } else {
+                    Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+                    Files.write(temp, kept, StandardCharsets.UTF_8);
+                    Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+        return removed;
+    }
+
+    /** The sender or recipient part of a line ({@code time | outcome | sender -> recipient | text}) names the player. */
+    private static boolean mentions(String line, String marker) {
+        String[] parts = line.split(" \\| ", 4);
+        return parts.length >= 3 ? parts[2].contains(marker) : line.contains(marker);
+    }
+
     private void append(Entry entry) {
         try {
             Files.createDirectories(directory);

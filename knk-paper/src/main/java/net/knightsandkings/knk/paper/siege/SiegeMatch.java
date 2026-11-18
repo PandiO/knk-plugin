@@ -4,6 +4,7 @@ import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeTeam;
 import net.knightsandkings.knk.core.siege.AllianceResolver;
 import net.knightsandkings.knk.core.siege.CaptureCalculator;
+import net.knightsandkings.knk.core.siege.SiegeMatchContributions;
 import net.knightsandkings.knk.core.siege.SiegeMatchRoster;
 import net.knightsandkings.knk.core.siege.SiegeObjectiveBoard;
 import net.knightsandkings.knk.core.siege.WinResolver;
@@ -37,9 +38,17 @@ public final class SiegeMatch {
     private final Map<String, Instant> captureTimes = new HashMap<>();
     /** The attacking team shown on each objective's banner gradient (last leading attacker). */
     private final Map<Integer, Integer> leadingAttackerByObjective = new HashMap<>();
+    /** Alpha run 1 (PandiO/knk-workspace#165/#166): gate damage and active time per member. */
+    private final SiegeMatchContributions contributions = new SiegeMatchContributions();
 
     SiegeMatch(KnkSiegeScenario scenario, KnkSiegeConfiguration configuration, String matchToken,
                Map<Integer, List<UUID>> teams) {
+        this(scenario, configuration, matchToken, teams, Map.of());
+    }
+
+    /** @param spawnChoices the members' spawn choices made at the hub (playtest 2026-10-24), carried into the roster */
+    SiegeMatch(KnkSiegeScenario scenario, KnkSiegeConfiguration configuration, String matchToken,
+               Map<Integer, List<UUID>> teams, Map<UUID, SiegeMatchRoster.SpawnChoice> spawnChoices) {
         this.scenario = scenario;
         this.configuration = configuration;
         this.matchToken = matchToken;
@@ -47,6 +56,7 @@ public final class SiegeMatch {
         this.board = new SiegeObjectiveBoard(scenario, new CaptureCalculator(configuration), alliances);
         this.winResolver = new WinResolver(alliances);
         this.roster = new SiegeMatchRoster(teams);
+        spawnChoices.forEach(roster::setSpawnChoice);
         this.startedAt = Instant.now();
     }
 
@@ -81,6 +91,11 @@ public final class SiegeMatch {
 
     public Instant startedAt() {
         return startedAt;
+    }
+
+    /** Gate damage and active time per member (#165/#166), reported with {@code complete}. */
+    public SiegeMatchContributions contributions() {
+        return contributions;
     }
 
     public Optional<KnkSiegeTeam> teamOf(UUID playerId) {

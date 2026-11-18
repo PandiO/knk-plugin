@@ -11,7 +11,8 @@ class ItemBlueprintLoreColorTest {
 
     @Test
     void anUncoloredDescription_isDarkGray_lineByLine() {
-        assertEquals(List.of("\u00a78Forged in the last fire of a fallen dojo.", "\u00a78Its edge never cools."),
+        // The first line is 41 visible characters: since PandiO/knk-workspace#212 it wraps at the default 40.
+        assertEquals(List.of("\u00a78Forged in the last fire of a fallen", "\u00a78dojo.", "\u00a78Its edge never cools."),
                 ItemBlueprintBukkitMapper.buildLore("Forged in the last fire of a fallen dojo.\nIts edge never cools."));
     }
 
@@ -19,6 +20,13 @@ class ItemBlueprintLoreColorTest {
     void aColorTheDescriptionSetsItself_winsOverTheDefault() {
         assertEquals(List.of("\u00a77Gray line", "\u00a7aGreen " + "\u00a78then dark"),
                 ItemBlueprintBukkitMapper.buildLore("&7Gray line\n&aGreen &8then dark"));
+    }
+
+    @Test
+    void aLineWiderThanTheLoreWidth_continuesOnTheNextLineInItsColour() {
+        // PandiO/knk-workspace#212: 63 visible characters, the default width is 40.
+        assertEquals(List.of("\u00a78Forged in the last fire of a fallen", "\u00a78dojo, where the steel sang."),
+                ItemBlueprintBukkitMapper.buildLore("Forged in the last fire of a fallen dojo, where the steel sang."));
     }
 
     @Test

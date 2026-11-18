@@ -100,6 +100,33 @@ class KitsMenuFeatureTest {
     }
 
     @Test
+    void aKitWithManyContentsGetsAWrappedAndCappedContentsList() {
+        // PandiO/knk-workspace#172: "War set cursed" listed every item on one line, off the screen.
+        List<KnkKitContent> contents = new java.util.ArrayList<>();
+        for (int slot = 0; slot < 30; slot++) {
+            contents.add(new KnkKitContent(slot, 100, 64));
+        }
+        KnkKit big = new KnkKit(3, "War set cursed", null, null, null, null, null, null, 10,
+                contents, null, null, null, false, 0, null, null, false, null);
+        when(kits.getAvailableForUserAsync(42)).thenReturn(CompletableFuture.completedFuture(
+                List.of(available(3, "War set cursed"))));
+        when(kits.getByIdAsync(3)).thenReturn(CompletableFuture.completedFuture(FetchResult.hit(big)));
+        when(blueprints.getByIdAsync(10)).thenReturn(CompletableFuture.completedFuture(
+                FetchResult.hit(blueprint(10, "Bow", "minecraft:bow"))));
+        when(blueprints.getByIdAsync(100)).thenReturn(CompletableFuture.completedFuture(
+                FetchResult.hit(blueprint(100, "Arrow", "minecraft:arrow"))));
+
+        List<String> lore = fetch().get(0).getLoreLines();
+
+        int start = lore.indexOf(lore.stream().filter(l -> l.startsWith("&7Other contents: ")).findFirst().orElseThrow());
+        List<String> others = lore.subList(start, start + KitMenuRow.CONTENTS_MAX_LINES);
+        assertTrue(others.get(others.size() - 1).matches("&7… and \\d+ more"), others.toString());
+        for (String line : lore) {
+            assertTrue(line.replaceAll("&[0-9a-fk-or]", "").length() <= KitMenuRow.CONTENTS_WIDTH, "too wide: " + line);
+        }
+    }
+
+    @Test
     void availabilityIsCachedPerViewerUntilAMutationInvalidatesIt() {
         stubKits();
 

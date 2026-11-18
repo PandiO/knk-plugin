@@ -403,6 +403,15 @@ public class GateAnimationTask extends BukkitRunnable {
             GateBlockPlacer.removeBlockIfMatches(world, vacancy.position(), vacancy.blockData(), fallbackMaterial);
         }
 
+        // KNG-272: a cell this gate occupied last time that one of its own blocks now enters with
+        // other blockdata (a fence rising into the cell a chain just left) still holds the gate's
+        // old block - clear it first, as applyKeyframe does, or placeBlockIfVacant takes it for an
+        // obstruction and the door jams on itself.
+        for (RestingCell replaced : resolveReplacedCells(
+                lastPlacedCellsByGate.get(gate.getId()), fallbackPreviousCells, targetCells)) {
+            GateBlockPlacer.removeBlockIfMatches(world, replaced.position(), replaced.blockData(), fallbackMaterial);
+        }
+
         int blockedCount = 0;
         for (RestingCell placement : targetCells) {
             if (!GateBlockPlacer.placeBlockIfVacant(world, placement.position(), placement.blockData(), fallbackMaterial)) {
@@ -592,6 +601,17 @@ public class GateAnimationTask extends BukkitRunnable {
                                                  List<RestingCell> targetCells) {
         List<RestingCell> previousCells = remembered != null ? remembered : fallback;
         return GateRestingFramePlacer.cellsToClear(previousCells, targetCells);
+    }
+
+    /**
+     * KNG-272: the cells this gate's blocks occupied last time (same remembered/fallback choice as
+     * {@link #resolveVacateCells}) that this frame fills again with different blockdata, each with
+     * the blockdata that is there now, so the old block can be cleared before the new one goes in.
+     */
+    static List<RestingCell> resolveReplacedCells(List<RestingCell> remembered, List<RestingCell> fallback,
+                                                   List<RestingCell> targetCells) {
+        List<RestingCell> previousCells = remembered != null ? remembered : fallback;
+        return keyframeDiff(previousCells, targetCells).changed();
     }
 
     private static List<Vector> positionsOf(List<RestingCell> cells) {

@@ -1,0 +1,340 @@
+package net.knightsandkings.knk.core.domain.enchantment;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** PandiO/knk-workspace#151: admin-configurable combat values per custom enchantment. */
+class EnchantmentTuningTableTest {
+
+    private static EnchantmentTuningOverride override(String key, Double chance, Double perLevel, Boolean cooldownOn,
+                                                      Integer cooldownSeconds, Double durationSeconds, Double multiplier) {
+        return new EnchantmentTuningOverride(key, chance, perLevel, cooldownOn, cooldownSeconds, durationSeconds, multiplier);
+    }
+
+    @Test
+    void everyEnchantmentOfTheRegistryHasBuiltInValues_CleavingToo() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        for (Enchantment enchantment : EnchantmentRegistry.getInstance().getAll()) {
+            assertTrue(table.builtIn(enchantment.id()).isPresent(), enchantment.id());
+        }
+    }
+
+    /** PandiO/knk-workspace#156; knk-web-api's EnchantmentCombatDefaultsSeedTests pins the same numbers. */
+    @Test
+    void builtInValuesAreTheWeakerDefaults() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        for (String id : List.of("poison", "wither", "confusion", "freeze")) {
+            EnchantmentTuning tuning = table.get(id);
+            assertEquals(0.10d, tuning.chanceAt(1), 1e-9, id);
+            assertEquals(0.20d, tuning.chanceAt(3), 1e-9, id);
+            assertTrue(tuning.cooldownEnabled(), id);
+        }
+        assertEquals(List.of(60, 90, 120), durations(table.get("poison")));
+        assertEquals(List.of(60, 90, 120), durations(table.get("confusion")));
+        assertEquals(List.of(40, 60, 80), durations(table.get("wither")));
+        assertEquals(8_000L, table.get("poison").effectiveCooldownMs());
+        // Freeze: 1.5 / 2.25 / 3 s, then 20 s before the same attacker can freeze again.
+        assertEquals(List.of(30, 45, 60), durations(table.get("freeze")));
+        assertEquals(20_000L, table.get("freeze").effectiveCooldownMs());
+        // Blindness no longer on every hit: 20 / 30 / 40 %, 2 / 3 / 4 s, 10 s cooldown.
+        assertEquals(0.40d, table.get("blindness").chanceAt(3), 1e-9);
+        assertEquals(List.of(40, 60, 80), durations(table.get("blindness")));
+        assertEquals(10_000L, table.get("blindness").effectiveCooldownMs());
+        // Unchanged: strength and the right-click abilities.
+        assertEquals(0.45d, table.get("strength").chanceAt(3), 1e-9);
+        assertEquals(300, table.get("strength").durationTicksAt(2));
+        assertEquals(120_000L, table.get("strength").effectiveCooldownMs());
+        assertEquals(90_000L, table.get("chaos").effectiveCooldownMs());
+        assertEquals(90_000L, table.get("flash_chaos").effectiveCooldownMs());
+        assertEquals(90_000L, table.get("invisibility").effectiveCooldownMs());
+        assertEquals(120_000L, table.get("health_boost").effectiveCooldownMs());
+        assertEquals(120_000L, table.get("armor_repair").effectiveCooldownMs());
+        assertEquals(List.of(200, 300, 400), durations(table.get("resistance")));
+        assertEquals(200, table.get("invisibility").durationTicksAt(1));
+    }
+
+    private static List<Integer> durations(EnchantmentTuning tuning) {
+        return List.of(tuning.durationTicksAt(1), tuning.durationTicksAt(2), tuning.durationTicksAt(3));
+    }
+
+    @Test
+    void chanceAndDurationScalePerLevel() {
+        EnchantmentTuning tuning = new EnchantmentTuning(0.10d, 0.05d, true, 20_000L, 30, 0.5d);
+
+        assertEquals(0.0d, tuning.chanceAt(0), 1e-9);
+        assertEquals(0.10d, tuning.chanceAt(1), 1e-9);
+        assertEquals(0.20d, tuning.chanceAt(3), 1e-9);
+        assertEquals(30, tuning.durationTicksAt(1));
+        assertEquals(45, tuning.durationTicksAt(2));
+        assertEquals(60, tuning.durationTicksAt(3));
+        assertEquals(20_000L, tuning.effectiveCooldownMs());
+    }
+
+    @Test
+    void chanceIsKeptBetweenZeroAndOne() {
+        assertEquals(1.0d, new EnchantmentTuning(0.6d, 0.6d, false, 0L, 0, 0d).chanceAt(3), 1e-9);
+        assertEquals(0.0d, new EnchantmentTuning(0.1d, -0.2d, false, 0L, 0, 0d).chanceAt(3), 1e-9);
+    }
+
+    @Test
+    void aSwitchedOffCooldownKeepsItsLength() {
+        EnchantmentTuning tuning = new EnchantmentTuning(1d, 0d, false, 30_000L, 0, 0d);
+        assertEquals(0L, tuning.effectiveCooldownMs());
+        assertEquals(30_000L, tuning.cooldownMs());
+    }
+
+    @Test
+    void anOverrideReplacesOnlyTheValuesItSets() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        EnchantmentTuning before = table.get("freeze");
+
+        int matched = table.replaceOverrides(List.of(override("knk:freeze", 10d, null, true, 20, null, null)));
+
+        EnchantmentTuning after = table.get("freeze");
+        assertEquals(1, matched);
+        assertEquals(0.10d, after.procChance(), 1e-9);
+        assertEquals(before.procChancePerLevel(), after.procChancePerLevel(), 1e-9);
+        assertTrue(after.cooldownEnabled());
+        assertEquals(20_000L, after.effectiveCooldownMs());
+        assertEquals(before.durationTicks(), after.durationTicks());
+        assertEquals(before.levelMultiplier(), after.levelMultiplier(), 1e-9);
+        assertTrue(table.override("freeze").isPresent());
+    }
+
+    @Test
+    void secondsBecomeTicksAndPercentBecomesAFraction() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(override("Flash Chaos", null, null, false, 45, null, null),
+                override("poison", 12.5d, 2.5d, null, null, 1.5d, 0d)));
+
+        EnchantmentTuning poison = table.get("poison");
+        assertEquals(0.125d, poison.chanceAt(1), 1e-9);
+        assertEquals(0.175d, poison.chanceAt(3), 1e-9);
+        assertEquals(30, poison.durationTicksAt(1));
+        assertEquals(30, poison.durationTicksAt(3));
+        assertEquals(0L, table.get("flash_chaos").effectiveCooldownMs());
+        assertEquals(45_000L, table.get("flash_chaos").cooldownMs());
+    }
+
+    @Test
+    void aDefinitionNoLongerListedFallsBackToTheBuiltInValues() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(override("freeze", 50d, 0d, null, null, null, null)));
+        table.replaceOverrides(List.of());
+
+        assertEquals(table.builtIn("freeze").orElseThrow(), table.get("freeze"));
+        assertFalse(table.override("freeze").isPresent());
+    }
+
+    @Test
+    void unknownKeysAndVanillaKeysAreIgnored() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        int matched = table.replaceOverrides(List.of(override("minecraft:sharpness", 50d, null, null, null, null, null),
+                override("lifesteal", 50d, null, null, null, null, null)));
+        assertEquals(0, matched);
+        assertSame(EnchantmentTuning.NONE, table.get("lifesteal"));
+    }
+
+    @Test
+    void outOfRangeValuesAreClamped() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(override("wither", 250d, -300d, true, -5, -1d, 99d)));
+
+        EnchantmentTuning wither = table.get("wither");
+        assertEquals(1.0d, wither.procChance(), 1e-9);
+        assertEquals(-1.0d, wither.procChancePerLevel(), 1e-9);
+        assertEquals(0L, wither.cooldownMs());
+        assertEquals(0, wither.durationTicks());
+        assertEquals(10.0d, wither.levelMultiplier(), 1e-9);
+    }
+
+    @Test
+    void matchKeyIgnoresNamespaceCaseAndSeparators() {
+        assertEquals("flashchaos", EnchantmentTuningTable.matchKey("knk:Flash_Chaos"));
+        assertEquals("healthboost", EnchantmentTuningTable.matchKey(" health boost "));
+        assertEquals("", EnchantmentTuningTable.matchKey(null));
+    }
+
+    // PandiO/knk-workspace#201: Flash Chaos's Slowness (duration + effect level) and Nausea (second duration).
+
+    @Test
+    void flashChaosBuiltInValuesAreTheOldHardCodedOnes() {
+        EnchantmentTuning flash = new EnchantmentTuningTable().get("flash_chaos");
+        assertEquals(100, flash.durationTicksAt(1));
+        assertEquals(1, flash.effectLevel());
+        assertEquals(0, flash.effectAmplifier());
+        assertEquals(250, flash.secondaryDurationTicksAt(1));
+        // The other enchantments have no effect level and no second effect.
+        EnchantmentTuning freeze = new EnchantmentTuningTable().get("freeze");
+        assertEquals(0, freeze.effectLevel());
+        assertEquals(0, freeze.secondaryDurationTicksAt(3));
+    }
+
+    @Test
+    void flashChaosOverrideSetsSlownessAndNausea_AndBothScaleWithTheMultiplier() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("knk:flash_chaos", null, null, null, null, 8d, 0.5d,
+                3, 20d)));
+
+        EnchantmentTuning flash = table.get("flash_chaos");
+        assertEquals(160, flash.durationTicksAt(1));
+        assertEquals(240, flash.durationTicksAt(2));
+        assertEquals(3, flash.effectLevel());
+        assertEquals(2, flash.effectAmplifier());
+        assertEquals(400, flash.secondaryDurationTicksAt(1));
+        assertEquals(600, flash.secondaryDurationTicksAt(2));
+        assertEquals(90_000L, flash.effectiveCooldownMs());
+    }
+
+    @Test
+    void flashChaosOverrideWithoutTheNewValuesKeepsTheBuiltInOnes() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(override("flash_chaos", null, null, true, 60, null, null)));
+
+        EnchantmentTuning flash = table.get("flash_chaos");
+        assertEquals(60_000L, flash.effectiveCooldownMs());
+        assertEquals(100, flash.durationTicksAt(1));
+        assertEquals(1, flash.effectLevel());
+        assertEquals(250, flash.secondaryDurationTicksAt(1));
+    }
+
+    @Test
+    void effectLevelAndSecondDurationAreClamped() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null,
+                99, 9_999d)));
+        EnchantmentTuning flash = table.get("flash_chaos");
+        assertEquals(EnchantmentTuning.MAX_EFFECT_LEVEL, flash.effectLevel());
+        assertEquals(72_000, flash.secondaryDurationTicks());
+
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null,
+                0, -3d)));
+        flash = table.get("flash_chaos");
+        assertEquals(1, flash.effectLevel());
+        assertEquals(0, flash.secondaryDurationTicks());
+    }
+
+    @Test
+    void anOverrideWithOnlyTheNewValuesIsNotEmpty() {
+        assertFalse(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null, 2, null).isEmpty());
+        assertFalse(new EnchantmentTuningOverride("flash_chaos", null, null, null, null, null, null, null, 1d).isEmpty());
+        assertTrue(override("flash_chaos", null, null, null, null, null, null).isEmpty());
+    }
+
+    // PandiO/knk-workspace#223: Chaos / Flash Chaos area damage, gate damage and radii.
+
+    private static EnchantmentTuningOverride area(String key, Double damage, Double gateDamage, Double damageRadius,
+                                                  Double effectRadius) {
+        return new EnchantmentTuningOverride(key, null, null, null, null, null, null, null, null,
+                damage, gateDamage, damageRadius, effectRadius);
+    }
+
+    @Test
+    void chaosAndFlashChaosBuiltInBlastsAreTheOldHardCodedOnes() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        assertEquals(new AreaBlast(40.0d, 40.0d, 3.0d, 5.0d), table.get("chaos").area());
+        assertEquals(new AreaBlast(60.0d, 60.0d, 3.0d, 5.0d), table.get("flash_chaos").area());
+        assertEquals(40.0d, table.get("chaos").areaDamageAt(1));
+        assertEquals(60.0d, table.get("flash_chaos").gateDamageAt(1));
+        assertEquals(AreaBlast.NONE, table.get("freeze").area());
+        assertEquals(AreaBlast.NONE, EnchantmentTuning.NONE.area());
+    }
+
+    @Test
+    void anAreaOverrideReplacesOnlyTheValuesItSets() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(area("knk:chaos", 6d, null, 2d, null)));
+
+        EnchantmentTuning chaos = table.get("chaos");
+        assertEquals(new AreaBlast(6.0d, 40.0d, 2.0d, 5.0d), chaos.area());
+        assertEquals(90_000L, chaos.cooldownMs());
+        assertEquals(new AreaBlast(60.0d, 60.0d, 3.0d, 5.0d), table.get("flash_chaos").area());
+    }
+
+    @Test
+    void areaAndGateDamageGrowWithTheLevelMultiplier_TheRadiiDoNot() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("chaos", null, null, null, null, null, 0.5d, null,
+                null, 10d, 100d, 2d, 4d)));
+
+        EnchantmentTuning chaos = table.get("chaos");
+        assertEquals(10.0d, chaos.areaDamageAt(1));
+        assertEquals(15.0d, chaos.areaDamageAt(2));
+        assertEquals(20.0d, chaos.areaDamageAt(3));
+        assertEquals(150.0d, chaos.gateDamageAt(2));
+        assertEquals(10.0d, chaos.areaDamageAt(0));
+        assertEquals(2.0d, chaos.area().damageRadius());
+        assertEquals(4.0d, chaos.area().effectRadius());
+    }
+
+    @Test
+    void areaValuesAreClamped() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(area("chaos", 5_000d, 50_000d, 100d, -1d)));
+        AreaBlast blast = table.get("chaos").area();
+        assertEquals(EnchantmentTuningTable.MAX_AREA_DAMAGE, blast.damage());
+        assertEquals(EnchantmentTuningTable.MAX_GATE_DAMAGE, blast.gateDamage());
+        assertEquals(EnchantmentTuningTable.MAX_RADIUS_BLOCKS, blast.damageRadius());
+        assertEquals(0.0d, blast.effectRadius());
+    }
+
+    @Test
+    void theReachIsTheLargerOfBothRadii() {
+        assertEquals(5.0d, new AreaBlast(1, 1, 3, 5).reach());
+        assertEquals(6.0d, new AreaBlast(1, 1, 6, 2).reach());
+        assertEquals(new AreaBlast(0, 0, 0, 0), new AreaBlast(-1, Double.NaN, Double.POSITIVE_INFINITY, -3));
+    }
+
+    // PandiO/knk-workspace#259: Cleaving's gate bonus and charged strike.
+
+    @Test
+    void cleavingBuiltInValuesAreTheOldConfigDefaults() {
+        EnchantmentTuning cleaving = new EnchantmentTuningTable().get("cleaving");
+        assertEquals(new GateStrike(0.25d, 5.0d, 1.0d, -10), cleaving.gateStrike());
+        assertEquals(List.of(1.25d, 1.5d, 1.75d, 2.0d),
+                List.of(1, 2, 3, 4).stream().map(l -> cleaving.gateStrike().damageMultiplierAt(l)).toList());
+        assertEquals(List.of(5.0d, 6.0d, 7.0d, 8.0d),
+                List.of(1, 2, 3, 4).stream().map(l -> cleaving.gateStrike().strikeMultiplierAt(l)).toList());
+        assertEquals(List.of(60_000L, 50_000L, 40_000L, 30_000L),
+                List.of(1, 2, 3, 4).stream().map(cleaving::strikeCooldownMsAt).toList());
+        assertEquals(1.0d, cleaving.gateStrike().damageMultiplierAt(0));
+        assertEquals(GateStrike.NONE, new EnchantmentTuningTable().get("chaos").gateStrike());
+    }
+
+    @Test
+    void aCleavingOverrideReplacesOnlyTheValuesItSets_AndIsClamped() {
+        EnchantmentTuningTable table = new EnchantmentTuningTable();
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("cleaving", null, null, null, null, null, null,
+                null, null, null, null, null, null, null, 4.0d, null, null)));
+        assertEquals(new GateStrike(0.25d, 4.0d, 1.0d, -10), table.get("cleaving").gateStrike());
+
+        table.replaceOverrides(List.of(new EnchantmentTuningOverride("cleaving", null, null, null, null, null, null,
+                null, null, null, null, null, null, 99d, 1_000d, -500d, -999_999)));
+        GateStrike clamped = table.get("cleaving").gateStrike();
+        assertEquals(EnchantmentTuningTable.MAX_GATE_DAMAGE_BONUS_PER_LEVEL, clamped.damageBonusPerLevel());
+        assertEquals(EnchantmentTuningTable.MAX_STRIKE_MULTIPLIER, clamped.strikeMultiplier());
+        assertEquals(-EnchantmentTuningTable.MAX_STRIKE_MULTIPLIER, clamped.strikeMultiplierPerLevel());
+        assertEquals(-86_400, clamped.cooldownPerLevelSeconds());
+        assertEquals(0.0d, clamped.strikeMultiplierAt(3), "never below 0");
+    }
+
+    @Test
+    void anOverrideWithOnlyGateStrikeValuesIsNotEmpty() {
+        assertFalse(new EnchantmentTuningOverride("cleaving", null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, -5).isEmpty());
+    }
+
+    @Test
+    void anOverrideWithOnlyAreaValuesIsNotEmpty() {
+        assertFalse(area("chaos", 6d, null, null, null).isEmpty());
+        assertFalse(area("chaos", null, 1d, null, null).isEmpty());
+        assertFalse(area("chaos", null, null, 1d, null).isEmpty());
+        assertFalse(area("chaos", null, null, null, 1d).isEmpty());
+    }
+}

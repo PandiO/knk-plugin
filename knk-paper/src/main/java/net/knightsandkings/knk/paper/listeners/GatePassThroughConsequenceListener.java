@@ -61,7 +61,7 @@ public class GatePassThroughConsequenceListener implements Listener {
 
         if (preferred == GatePassThroughMethod.INSTANT_OPEN
             && !isAdmin
-            && !player.hasPermission("knk.gate.passthrough.instant")) {
+            && !GatePassThroughRules.mayUseInstant(player)) {
             return GatePassThroughMethod.DEFAULT;
         }
 

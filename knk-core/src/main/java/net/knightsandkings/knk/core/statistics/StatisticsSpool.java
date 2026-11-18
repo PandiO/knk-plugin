@@ -101,6 +101,36 @@ public final class StatisticsSpool {
         }
     }
 
+    /**
+     * Account erasure (PandiO/knk-workspace#184): removes every entry about {@code userId} from the spooled batches - their
+     * sessions, durations, counters and records, and PvP kills where they were killer or victim (the API deletes those
+     * kill pairs too). A batch left empty is deleted; the others are rewritten under the same batch id.
+     *
+     * @return how many entries were removed
+     */
+    public synchronized int removeUser(int userId) {
+        int removed = 0;
+        for (StatisticsBatch batch : list()) {
+            StatisticsBatch kept = new StatisticsBatch(batch.batchId(), batch.sentAt(),
+                batch.sessions().stream().filter(e -> e.userId() != userId).toList(),
+                batch.durations().stream().filter(e -> e.userId() != userId).toList(),
+                batch.counters().stream().filter(e -> e.userId() != userId).toList(),
+                batch.records().stream().filter(e -> e.userId() != userId).toList(),
+                batch.pvpKills().stream().filter(e -> e.killerUserId() != userId && e.victimUserId() != userId).toList());
+            int gone = batch.entryCount() - kept.entryCount();
+            if (gone == 0) {
+                continue;
+            }
+            removed += gone;
+            if (kept.isEmpty()) {
+                delete(batch.batchId());
+            } else if (!write(kept)) {
+                delete(batch.batchId()); // never leave the erased player's entries behind
+            }
+        }
+        return removed;
+    }
+
     public synchronized boolean contains(UUID batchId) {
         return Files.isRegularFile(file(batchId));
     }

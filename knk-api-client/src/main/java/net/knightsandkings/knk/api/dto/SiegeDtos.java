@@ -48,7 +48,12 @@ public final class SiegeDtos {
             @JsonProperty("enchantLevelMin") Integer enchantLevelMin,
             @JsonProperty("enchantLevelMax") Integer enchantLevelMax,
             @JsonProperty("maxBooksAlive") Integer maxBooksAlive,
-            @JsonProperty("nonMemberGateView") String nonMemberGateView
+            @JsonProperty("nonMemberGateView") String nonMemberGateView,
+            @JsonProperty("giveNavigationItem") Boolean giveNavigationItem,
+            @JsonProperty("playerSkipMatchmakingSeconds") Integer playerSkipMatchmakingSeconds,
+            @JsonProperty("adminSkipMatchmakingSeconds") Integer adminSkipMatchmakingSeconds,
+            // Alpha run 1 (PandiO/knk-workspace#198): the post-match wait at the hub; null from an older API.
+            @JsonProperty("postMatchSeconds") Integer postMatchSeconds
     ) {}
 
     public record RuntimeLobbyDto(
@@ -60,6 +65,7 @@ public final class SiegeDtos {
             @JsonProperty("cooldownSeconds") Integer cooldownSeconds,
             @JsonProperty("voteCandidateCount") Integer voteCandidateCount,
             @JsonProperty("allowRandomVote") Boolean allowRandomVote,
+            @JsonProperty("navigationItem") String navigationItem,
             @JsonProperty("rotation") List<RotationEntryDto> rotation,
             @JsonProperty("skippedScenarios") List<SkippedScenarioDto> skippedScenarios
     ) {}
@@ -101,6 +107,7 @@ public final class SiegeDtos {
             @JsonProperty("lockdownScenarioArea") Boolean lockdownScenarioArea,
             @JsonProperty("allowRecapture") Boolean allowRecapture,
             @JsonProperty("enchantDropsEnabled") Boolean enchantDropsEnabled,
+            @JsonProperty("navigationItem") String navigationItem,
             @JsonProperty("teams") List<RuntimeTeamDto> teams,
             @JsonProperty("objectives") List<RuntimeObjectiveDto> objectives,
             @JsonProperty("gates") List<RuntimeGateDto> gates,

@@ -27,7 +27,8 @@ public final class LinkCodeMessage {
         "&aYour link code is &6{code}&a. It expires in {minutes} minutes.\n"
             + "&aNew to the website? Register at &e{url}/auth/register\n"
             + "&aEnter the code when you register on the website, or on your Account page if you already have a"
-            + " web login.";
+            + " web login.\n"
+            + "&cNever give this code to anyone; staff never ask for it.";
 
     /** {@code messages.link-code-entered-in-game}: the reply to {@code /account link <code>}. */
     public static final String DEFAULT_ENTERED_IN_GAME_TEMPLATE =

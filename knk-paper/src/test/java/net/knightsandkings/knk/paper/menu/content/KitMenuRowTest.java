@@ -128,9 +128,90 @@ class KitMenuRowTest {
     }
 
     @Test
-    void wrapBreaksOnWordsAndSkipsBlank() {
-        assertEquals(List.of("aaa bbb", "ccc"), KitMenuRow.wrap("aaa bbb ccc", 7));
-        assertTrue(KitMenuRow.wrap("  ", 10).isEmpty());
-        assertTrue(KitMenuRow.wrap(null, 10).isEmpty());
+    void descriptionWrapsGrayOnWordsAndSkipsBlank() {
+        assertEquals(List.of("&7A basic set of iron gear for new", "&7knights and squires alike"),
+                KitMenuRow.descriptionLines("A basic set of iron gear for new\nknights   and squires alike"));
+        assertTrue(KitMenuRow.descriptionLines("  ").isEmpty());
+        assertTrue(KitMenuRow.descriptionLines(null).isEmpty());
+    }
+
+    // ===== PandiO/knk-workspace#212: the rank-rule / requirement line wraps too =====
+
+    @Test
+    void aLongRankRuleReasonWrapsInItsColour() {
+        String reason = "You need the rank Knight (or higher) in the Kingdom of Cinix to claim this kit";
+        KitMenuRow row = KitMenuRow.of(availability(false, reason, null, false, null, false, null), kit(3, 2), BLUEPRINTS, CLOCK);
+
+        List<String> lore = row.getLoreLines();
+        int first = lore.indexOf("&cYou need the rank Knight (or higher) in");
+        assertTrue(first > 0, "reason starts a line: " + lore);
+        List<String> reasonLines = lore.subList(first, lore.size());
+        assertTrue(reasonLines.size() > 1, "wrapped: " + reasonLines);
+        for (String line : reasonLines) {
+            assertTrue(line.startsWith("&c"), "colour kept: " + line);
+            assertTrue(visibleLength(line) <= net.knightsandkings.knk.core.util.LoreWrap.DEFAULT_MAX_WIDTH, "too wide: " + line);
+        }
+        assertEquals(reason, String.join(" ", reasonLines.stream().map(l -> l.substring(2)).toList()));
+    }
+    // ===== PandiO/knk-workspace#172: "Other contents" wraps and is capped =====
+
+    private static int visibleLength(String line) {
+        return line.replaceAll("&[0-9a-fk-or]", "").length();
+    }
+
+    @Test
+    void otherContentsWrapsOverSeveralLinesWithinTheMaximumWidth() {
+        List<String> items = List.of("Netherite Sword", "Cleaving Netherite Axe", "Macebdu", "Crossbow", "Bow",
+                "Cooked Beef x64", "Cobweb x16", "Golden Apple x8");
+
+        List<String> lines = KitMenuRow.otherContentLines(items);
+
+        assertTrue(lines.size() > 1, "wrapped: " + lines);
+        assertTrue(lines.get(0).startsWith("&7Other contents: &fNetherite Sword,"));
+        for (String line : lines) {
+            assertTrue(visibleLength(line) <= KitMenuRow.CONTENTS_WIDTH, "too wide: " + line);
+        }
+        String joined = String.join(" ", lines.stream().map(l -> l.replaceAll("&[0-9a-fk-or]", "")).toList());
+        for (String item : items) {
+            assertTrue(joined.contains(item), "every item shown: " + item);
+        }
+        assertFalse(lines.get(lines.size() - 1).endsWith(","), "no trailing comma on the last line");
+        assertFalse(joined.contains("more"));
+    }
+
+    @Test
+    void aVeryLongListIsCappedWithAndNMore() {
+        List<String> items = new java.util.ArrayList<>();
+        for (int i = 1; i <= 40; i++) {
+            items.add("Enchanted Item Number " + i);
+        }
+
+        List<String> lines = KitMenuRow.otherContentLines(items);
+
+        assertEquals(KitMenuRow.CONTENTS_MAX_LINES, lines.size());
+        String last = lines.get(lines.size() - 1);
+        assertTrue(last.matches("&7… and \\d+ more"), last);
+        int shown = 0;
+        for (String line : lines.subList(0, lines.size() - 1)) {
+            shown += line.split(", ").length;
+            assertTrue(visibleLength(line) <= KitMenuRow.CONTENTS_WIDTH, "too wide: " + line);
+        }
+        assertEquals(40 - shown, Integer.parseInt(last.replaceAll("&7… and (\\d+) more", "$1")));
+    }
+
+    @Test
+    void anItemWiderThanTheLineIsShortened() {
+        String huge = "A".repeat(60);
+
+        List<String> lines = KitMenuRow.otherContentLines(List.of("Bread", huge));
+
+        assertEquals(List.of("&7Other contents: &fBread,", "&f" + "A".repeat(KitMenuRow.CONTENTS_WIDTH - 1) + "…"), lines);
+    }
+
+    @Test
+    void aShortListStaysOnOneLine() {
+        assertEquals(List.of("&7Other contents: &fBread x16, Arrow x2"),
+                KitMenuRow.otherContentLines(List.of("Bread x16", "Arrow x2")));
+        assertTrue(KitMenuRow.otherContentLines(List.of()).isEmpty());
     }
 }

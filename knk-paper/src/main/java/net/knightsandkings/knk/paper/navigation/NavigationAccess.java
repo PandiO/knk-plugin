@@ -17,6 +17,10 @@ import org.bukkit.entity.Player;
 import net.knightsandkings.knk.core.domain.gates.CachedGateDoor;
 import net.knightsandkings.knk.core.domain.roads.RoadEdge;
 import net.knightsandkings.knk.core.gates.GateManager;
+import net.knightsandkings.knk.core.gates.target.GateBox;
+import net.knightsandkings.knk.core.npc.nav.AccessSubject;
+import net.knightsandkings.knk.core.npc.nav.DomainEntryRule;
+import net.knightsandkings.knk.core.npc.nav.SubjectRegionAvailability;
 import net.knightsandkings.knk.core.regions.DomainAccessEvaluator;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver;
 import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
@@ -28,6 +32,8 @@ import net.knightsandkings.knk.core.roads.route.GateAvailability;
 import net.knightsandkings.knk.core.roads.route.GateAvailability.GateView;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.StaticFlagsAvailability;
+import net.knightsandkings.knk.core.siege.SiegeGateStance;
+import net.knightsandkings.knk.paper.gates.GateDoorBounds;
 import net.knightsandkings.knk.paper.gates.GatePassThroughRules;
 import net.knightsandkings.knk.paper.regions.RegionIds;
 import net.knightsandkings.knk.paper.siege.SiegeGateController;
@@ -112,6 +118,78 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
                 bypass.test(player)));
     }
 
+    /** The player as an access subject (PandiO/knk-workspace#360): the same answers, read through the subject port. */
+    public PlayerAccessSubject subjectOf(Player player) {
+        return new PlayerAccessSubject(player, this);
+    }
+
+    /**
+     * PandiO/knk-workspace#360: the policy of any mover (a player through {@link #subjectOf}, an NPC with its access
+     * profile). Main thread. The rules are the player policy's - static flags, gates, domains - judged from the
+     * regions the subject stands in; on top, the subject's own lists: a region it is always allowed in counts as a
+     * region without a domain, a region it never enters blocks the edges through it.
+     */
+    @Override
+    public AccessPolicy policyFor(AccessSubject subject, RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
+        Set<Integer> doorIds = new HashSet<>();
+        for (RoadEdge edge : snapshot.edges()) {
+            doorIds.addAll(edge.gateDoorIds());
+        }
+        return policyFor(subject, snapshot, destinationRegions, doorIds);
+    }
+
+    private AccessPolicy policyFor(AccessSubject subject, RoadNetworkSnapshot snapshot, Set<String> destinationRegions,
+                                   Collection<Integer> doorIds) {
+        String world = snapshot.world() != null ? snapshot.world() : subject.world();
+        DomainAvailability.DomainLookup lookup = regionId ->
+            subject.regionOverride(regionId) == AccessSubject.RegionOverride.ALLOW ? Optional.empty()
+                : domainByRegionId(world, regionId);
+        return CompositeAccessPolicy.of(new StaticFlagsAvailability(), gateAvailability(subject, doorIds),
+            new DomainAvailability(evaluator, lookup, roadRule, subject.currentRegions(), destinationRegions,
+                subject.bypassesDomainRules()),
+            new SubjectRegionAvailability(subject));
+    }
+
+    /**
+     * PandiO/knk-workspace#361: the router's entry rule per region for any mover, for the recheck of an NPC's way
+     * ahead and the trespass guard - {@link #policyFor(AccessSubject, RoadNetworkSnapshot, Set)}'s domain rule and
+     * the subject's own lists, with the domain cache only (a region of unknown domain is open, as for the trail).
+     */
+    @Override
+    public Predicate<String> mayEnter(AccessSubject subject) {
+        // PandiO/knk-workspace#593: shared with the core tests; each region is judged on its own
+        // PandiO/knk-workspace#724: NPCs read the last known answers while the map is warmed again after a clear; a
+        // player subject reads the map as player navigation does (its access checks unchanged)
+        return DomainEntryRule.of(subject, evaluator, subject.playerId().isPresent()
+            ? resolver::getDomainByRegionIdNoRefresh : resolver::getLastKnownDomain, roadRule);
+    }
+
+    /** PandiO/knk-workspace#361: the router's gate rule for one door, read now. */
+    @Override
+    public boolean gateBlocks(AccessSubject subject, int doorId) {
+        return gateAvailability(subject, java.util.List.of(doorId)).decide(doorId).isBlocked();
+    }
+
+    /**
+     * PandiO/knk-workspace#507: the door's box as the gate commands and the gate safety code know it
+     * ({@link GateDoorBounds}: its closed footprint and its captured closed and opened regions); empty for a door the
+     * gate cache does not know.
+     */
+    @Override
+    public Optional<GateBox> doorBox(int doorId) {
+        CachedGateDoor door = gateManager.getGate(doorId);
+        return door == null ? Optional.empty() : Optional.ofNullable(GateDoorBounds.of(door, gateManager));
+    }
+
+    /**
+     * PandiO/knk-workspace#361: the subject's policy for one edge, reading only that edge's gates (the full policy
+     * reads every gate of the network).
+     */
+    @Override
+    public boolean edgeBlocked(AccessSubject subject, RoadNetworkSnapshot snapshot, RoadEdge edge) {
+        return policyFor(subject, snapshot, null, edge.gateDoorIds()).check(edge).isBlocked();
+    }
+
     /**
      * KNG-110: the router's entry rule per region ({@link DomainAvailability#mayEnter}) for the trail, with the domain
      * cache only - the trail is drawn on the main thread, and a region of unknown domain is open, as for the router.
@@ -143,8 +221,23 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
      * (KNG-51 §6). The result can be used from any thread.
      */
     public GateAvailability gateAvailability(Player player, Collection<Integer> doorIds) {
-        boolean admin = GatePassThroughRules.isAdmin(player);
-        boolean use = GatePassThroughRules.mayUse(player);
+        return gateAvailability(GatePassThroughRules.isAdmin(player), GatePassThroughRules.mayUse(player), player,
+            doorIds);
+    }
+
+    /**
+     * PandiO/knk-workspace#360: the gate rule for any mover. A {@link PlayerAccessSubject} gets the player's rule
+     * (siege lockdown membership included). Any other subject is no member of a siege lockdown and is not carried
+     * through a locked gate; a closed door is passable only with the subject's own gate rights, which an NPC does
+     * not have (gate pass-through for NPCs is later work).
+     */
+    public GateAvailability gateAvailability(AccessSubject subject, Collection<Integer> doorIds) {
+        return gateAvailability(subject.gateAdmin(), subject.mayUseGates(),
+            subject instanceof PlayerAccessSubject adapter ? adapter.player() : null, doorIds);
+    }
+
+    /** {@code player}: who the siege rules are asked about; null for a mover that is not a player. */
+    private GateAvailability gateAvailability(boolean admin, boolean use, Player player, Collection<Integer> doorIds) {
         SiegeGateController siege = siegeGates.get();
         Map<Integer, GateView> gates = new HashMap<>();
         Map<Integer, Boolean> passable = new HashMap<>();
@@ -153,11 +246,16 @@ public final class NavigationAccess implements NavigationService.PolicyFactory {
             if (door == null) {
                 continue;
             }
-            boolean locked = siege != null && siege.isLocked(door.getGateStructureId());
-            boolean carries = locked && siege.canCarryNonMember(door);
+            int structureId = door.getGateStructureId();
+            boolean locked = siege != null && siege.isLocked(structureId);
+            boolean member = locked && player != null && siege.isLockdownMember(player, structureId);
+            // KNG-234: the gate's real state decides. A match member is never routed through a closed gate that is
+            // not theirs to open (an attacker's route to the objective behind a gate objective stops at the gate).
+            SiegeGateStance stance = SiegeGateStance.of(locked, member, member && siege.mayControl(player, structureId),
+                locked && !member && player != null && siege.canCarryNonMember(door));
             gates.put(doorId, new GateView(doorId, gateName(door), door.getCurrentState(), door.isJammed(),
-                door.isEffectivelyDestroyed(), door.isEffectivelyAllowPassThrough(), locked, carries));
-            passable.put(doorId, GatePassThroughRules.canPass(admin, use, door));
+                door.isEffectivelyDestroyed(), door.isEffectivelyAllowPassThrough(), stance.siegeLocked(), stance.siegeCarries()));
+            passable.put(doorId, stance.passable() || GatePassThroughRules.canPass(admin, use, door));
         }
         GateAvailability.GateState gateState = doorId -> Optional.ofNullable(gates.get(doorId));
         GateAvailability.PassRule passRule = doorId -> passable.getOrDefault(doorId, false);

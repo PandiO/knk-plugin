@@ -14,7 +14,6 @@ import com.sk89q.worldedit.regions.Polygonal2DRegion;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.flags.Flag;
-import com.sk89q.worldguard.protection.flags.StringFlag;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.managers.RemovalStrategy;
 import com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion;
@@ -22,7 +21,9 @@ import com.sk89q.worldguard.protection.regions.ProtectedPolygonalRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.domain.validation.ValidationResult;
 import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
+import net.knightsandkings.knk.paper.regions.DomainRegionUnion;
 import net.knightsandkings.knk.paper.regions.WorldGuardRegionRenamer;
+import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
 import net.knightsandkings.knk.paper.tasks.validation.ParentRegionFeedback;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -47,14 +48,14 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     private static final String FIELD_NAME = "WgRegionId";
     private static final String TEMP_REGION_PREFIX = "tempregion_worldtask_";
     
-    // Custom flag to store creation timestamp
-    public static final StringFlag CREATION_TIMESTAMP = new StringFlag("knk-creation-timestamp");
 
     private final WorldTasksApi worldTasksApi;
     private final Plugin plugin;
     
     // Track active tasks: player -> TaskContext
-    private final Map<Player, TaskContext> activeTasksByPlayer = new HashMap<>();
+    // #180: keyed by UUID (a rejoining player is a new Player object) and read from the async chat thread
+    private final Map<java.util.UUID, TaskContext> activeTasksByPlayer = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile WorldTaskLifecycle lifecycle = WorldTaskLifecycle.NONE;
 
     /**
      * Told when a temporary region became its final name, so the category's parent, priority and flags can be applied
@@ -70,6 +71,46 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
     public void setRegionFinalizer(RegionFinalizer regionFinalizer) {
         this.regionFinalizer = regionFinalizer;
+    }
+
+    /** KNG-255: told when a domain sub-region got its final name and was made a copy of its main region. */
+    @FunctionalInterface
+    public interface SubRegionFinalizer {
+        void finalized(String subRegionId, String mainRegionId, String world);
+    }
+
+    private volatile SubRegionFinalizer subRegionFinalizer;
+
+    public void setSubRegionFinalizer(SubRegionFinalizer subRegionFinalizer) {
+        this.subRegionFinalizer = subRegionFinalizer;
+    }
+
+    /**
+     * Overview map (PandiO/knk-workspace#735): told after every successful rename (main region or sub-region), with the
+     * world, the old name, the new name and the previous region it replaced (KNG-103; null for none).
+     */
+    @FunctionalInterface
+    public interface RenameListener {
+        void renamed(String world, String oldRegionId, String newRegionId, String replacedRegionId);
+    }
+
+    private volatile RenameListener renameListener;
+
+    public void setRenameListener(RenameListener renameListener) {
+        this.renameListener = renameListener;
+    }
+
+    private void notifyRenamed(String world, String oldRegionId, String newRegionId, String replacedRegionId) {
+        RenameListener listener = renameListener;
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.renamed(world, oldRegionId, newRegionId, replacedRegionId);
+        } catch (RuntimeException e) {
+            // The rename succeeded; the next repair reports the outline again.
+            LOGGER.warning("Rename listener for " + newRegionId + " failed: " + e.getMessage());
+        }
     }
 
     /**
@@ -123,7 +164,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             }
         }
         
-        activeTasksByPlayer.put(player, context);
+        activeTasksByPlayer.put(player.getUniqueId(), context);
         
         // Enable CUI selection for WorldEdit (must run on main thread)
         plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -135,7 +176,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 player.sendMessage("§7[WorldTask] Task ID: " + taskId);
                 player.sendMessage("§eOption 1 - Create new region: Use '//sel poly' or '//sel cuboid', then type 'save'");
                 player.sendMessage("§eOption 2 - Select existing: Type 'select {regionname}'");
-                player.sendMessage("§7Or type 'cancel' to abort.");
+                player.sendMessage("§7Type 'cancel' to hand the task back, or 'discard' to cancel it for good.");
                 if (context.parentRegionId != null) {
                     player.sendMessage("§7Note: Region must be inside parent region: " + context.parentRegionId);
                 }
@@ -150,12 +191,42 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
     @Override
     public boolean isHandling(Player player) {
-        return activeTasksByPlayer.containsKey(player);
+        return activeTasksByPlayer.containsKey(player.getUniqueId());
+    }
+
+    @Override
+    public boolean isHandling(java.util.UUID playerId) {
+        return playerId != null && activeTasksByPlayer.containsKey(playerId);
+    }
+
+    /** PandiO/knk-workspace#269: whether a player on this server is running task {@code taskId} (its temp region stays). */
+    public boolean isHandlingTask(int taskId) {
+        return activeTasksByPlayer.values().stream().anyMatch(context -> context.taskId == taskId);
+    }
+
+    @Override
+    public void setLifecycle(WorldTaskLifecycle lifecycle) {
+        this.lifecycle = lifecycle != null ? lifecycle : WorldTaskLifecycle.NONE;
+    }
+
+    /**
+     * PandiO/knk-workspace#180: the player ends the task in chat. {@code cancel} hands it back (Pending again, its task
+     * code works for anyone), {@code discard} cancels it for good; either way the API is told.
+     */
+    private void endInChat(Player player, int taskId, boolean discard) {
+        cancel(player);
+        if (discard) {
+            lifecycle.discarded(player, taskId);
+            player.sendMessage("§7[WorldTask] Task " + taskId + " discarded; the web app shows it as cancelled.");
+        } else {
+            lifecycle.handedBack(player, taskId);
+            player.sendMessage("§7[WorldTask] Task " + taskId + " handed back; its task code works again.");
+        }
     }
 
     @Override
     public void cancel(Player player) {
-        TaskContext context = activeTasksByPlayer.remove(player);
+        TaskContext context = activeTasksByPlayer.remove(player.getUniqueId());
         if (context != null) {
             // Cleanup: remove temp region if created
             if (context.createdRegionId != null) {
@@ -167,14 +238,14 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             // Clear WorldEdit session
             WorldEdit.getInstance().getSessionManager().remove(BukkitAdapter.adapt(player));
             
-            player.sendMessage("§c[WorldTask] Task cancelled.");
+            player.sendMessage("§c[WorldTask] Task stopped.");
             LOGGER.info("Cancelled WgRegionId task for player " + player.getName() + " (task " + context.taskId + ")");
         }
     }
 
     @Override
     public Integer getTaskId(Player player) {
-        TaskContext context = activeTasksByPlayer.get(player);
+        TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         return context != null ? context.taskId : null;
     }
 
@@ -187,7 +258,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @return true if the message was handled and should be cancelled
      */
     public boolean onPlayerChat(Player player, String message) {
-        TaskContext context = activeTasksByPlayer.get(player);
+        TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         if (context == null) return false;
 
         String cmd = message.trim().toLowerCase();
@@ -195,8 +266,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         if (cmd.equals("save")) {
             handleSave(player, context);
             return true;
-        } else if (cmd.equals("cancel")) {
-            cancel(player);
+        } else if (cmd.equals("cancel") || cmd.equals("discard")) {
+            endInChat(player, context.taskId, cmd.equals("discard"));
             return true;
         } else if (cmd.equals("pause") || cmd.equals("suspend")) {
             handlePause(player, context);
@@ -238,6 +309,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 // Validate region against validation rules from InputJson (KNG-173: a warning saves, a block refuses)
                 player.sendMessage("§7Validating region selection...");
                 ValidationResult validation = validateRegion(player, world, selectionPoints(selection),
+                    net.knightsandkings.knk.paper.integration.WorldGuardIntegration.createRegionFromSelection(
+                        selection, "knk_selection_check", 0),
                     "Your selection", context);
                 if (!reportValidation(player, validation)) {
                     return; // Block save
@@ -268,9 +341,15 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 String tempRegionId = TEMP_REGION_PREFIX + context.taskId;
                 ProtectedRegion region = net.knightsandkings.knk.paper.integration.WorldGuardIntegration.createRegionFromSelection(
                     selection, tempRegionId, context.priority);
+                // KNG-257: say what a round selection became
+                net.knightsandkings.knk.paper.integration.SelectionShapes.outlineOf(selection)
+                    .map(net.knightsandkings.knk.paper.integration.SelectionShapes.Outline::note)
+                    .ifPresent(note -> player.sendMessage("§7[WorldTask] " + note + "."));
                 
                 // Store creation timestamp for retention policy
-                region.setFlag(CREATION_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
+                net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.set(region,
+                    net.knightsandkings.knk.paper.regions.RegionBookkeepingFlags.CREATION_TIMESTAMP,
+                    String.valueOf(System.currentTimeMillis()));
                 
                 // Apply flags if any
                 if (!context.flags.isEmpty()) {
@@ -342,7 +421,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
                 // KNG-173: the task's validation rules apply to a selected region the same as to a drawn one
                 player.sendMessage("§7Validating region " + regionName + "...");
-                ValidationResult validation = validateRegion(player, world, regionPoints(region),
+                ValidationResult validation = validateRegion(player, world, regionPoints(region), region,
                     "Region " + regionName, context);
                 if (!reportValidation(player, validation)) {
                     return;
@@ -388,7 +467,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     private void handlePause(Player player, TaskContext context) {
         context.paused = true;
         player.sendMessage("§e[WorldTask] Task paused. Your selection is preserved.");
-        player.sendMessage("§7Type 'resume' to continue, or 'cancel' to abort.");
+        player.sendMessage("§7Type 'resume' to continue, 'cancel' to hand the task back, or 'discard' to cancel it.");
         LOGGER.info("Paused WgRegionId task " + context.taskId + " for player " + player.getName());
     }
 
@@ -428,7 +507,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         worldTasksApi.complete(context.taskId, outputJson)
             .thenAccept(completedTask -> {
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    activeTasksByPlayer.remove(player);
+                    activeTasksByPlayer.remove(player.getUniqueId());
                     player.sendMessage("§a[WorldTask] ✓ Task completed! Region " + regionId + " has been created.");
                     LOGGER.info("Completed WgRegionId task for player " + player.getName() 
                         + " (task " + context.taskId + ") with region: " + regionId);
@@ -439,6 +518,13 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                     player.sendMessage("§c[WorldTask] Failed to complete task: " + ex.getMessage());
                     player.sendMessage("§7The region was created but not saved. Cleaning up...");
                     cleanupTempRegion(player.getWorld(), regionId);
+                    if (WorldTaskApiErrors.taskMovedOn(ex)) {
+                        // #180: cancelled in the web app, released or taken over meanwhile: end the session too.
+                        TaskContext gone = activeTasksByPlayer.remove(player.getUniqueId());
+                        if (gone != null) {
+                            WorldEdit.getInstance().getSessionManager().remove(BukkitAdapter.adapt(player));
+                        }
+                    }
                     LOGGER.warning("Failed to complete WgRegionId task " + context.taskId + ": " + ex.getMessage());
                 });
                 return null;
@@ -544,7 +630,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     @Deprecated
     public void onRegionEnter(Player player, String regionId) {
-        // TaskContext context = activeTasksByPlayer.get(player);
+        // TaskContext context = activeTasksByPlayer.get(player.getUniqueId());
         // if (context == null) return;
 
         // // Build output JSON
@@ -558,7 +644,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
         // worldTasksApi.complete(context.taskId, outputJson)
         //     .thenAccept(completedTask -> {
         //         plugin.getServer().getScheduler().runTask(plugin, () -> {
-        //             activeTasksByPlayer.remove(player);
+        //             activeTasksByPlayer.remove(player.getUniqueId());
         //             player.sendMessage("§a[WorldTask] ✓ Task completed! Region " + regionId + " has been claimed.");
         //             LOGGER.info("Completed WgRegionId task for player " + player.getName() 
         //                 + " (task " + context.taskId + ") with region: " + regionId);
@@ -638,7 +724,23 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      */
     public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
                                 String world, String replaceRegionId) {
+        return renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world, replaceRegionId, null);
+    }
+
+    /**
+     * KNG-255: as above; with {@code subRegionOf} (the domain's main region) the renamed region is one of the domain's
+     * sub-regions: instead of the category policy it becomes a copy of the main region at once (priority, parent = the
+     * main region, flags, owners, members, {@link net.knightsandkings.knk.core.regions.SubRegionMirror}), and the
+     * {@link SubRegionFinalizer} is told. The rename itself follows the same plan as a main region's (KNG-103 replace).
+     */
+    public boolean renameRegion(String oldRegionId, String newRegionId, String domainType, String parentRegionId,
+                                String world, String replaceRegionId, String subRegionOf) {
+        // The renamed region keeps the drawn outline and Y range, a lootbox spawn area's too (PandiO/knk-workspace#487).
         boolean renamed = renameRegionInternal(oldRegionId, newRegionId, world, replaceRegionId);
+        if (renamed && subRegionOf != null && !subRegionOf.isBlank()) {
+            finalizeSubRegion(newRegionId, subRegionOf.trim(), world);
+            return true;
+        }
         RegionFinalizer finalizer = regionFinalizer;
         if (renamed && finalizer != null && domainType != null && !domainType.isBlank()) {
             try {
@@ -654,6 +756,34 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             }
         }
         return renamed;
+    }
+
+    private void finalizeSubRegion(String subRegionId, String mainRegionId, String worldName) {
+        try {
+            World world = findWorldByRegion(subRegionId, worldName);
+            RegionManager manager = world == null ? null
+                : WorldGuard.getInstance().getPlatform().getRegionContainer().get(BukkitAdapter.adapt(world));
+            ProtectedRegion sub = manager == null ? null : manager.getRegion(subRegionId);
+            ProtectedRegion main = manager == null ? null : manager.getRegion(mainRegionId);
+            if (sub == null || main == null) {
+                // The rename succeeded; the next access sync sets the sub-region up once the API lists it.
+                LOGGER.warning("Sub-region " + subRegionId + " renamed, but " + (sub == null ? "it" : "its main region " + mainRegionId)
+                    + " is not in the same world; it is set up by the next region access sync");
+                return;
+            }
+            WorldGuardSubRegionMirrorStore.apply(sub, main,
+                net.knightsandkings.knk.core.regions.SubRegionMirror.desiredFor(main.getId(), WorldGuardSubRegionMirrorStore.stateOf(main)),
+                WorldGuard.getInstance().getFlagRegistry());
+            manager.saveChanges();
+            LOGGER.info("Sub-region " + subRegionId + " set up as a copy of " + mainRegionId + " in " + world.getName());
+            SubRegionFinalizer finalizer = subRegionFinalizer;
+            if (finalizer != null) {
+                finalizer.finalized(subRegionId, mainRegionId, world.getName());
+            }
+        } catch (Exception e) {
+            // The rename itself succeeded; the next access sync makes it a copy of the main region.
+            LOGGER.warning("Setting up sub-region " + subRegionId + " as a copy of " + mainRegionId + " failed: " + e.getMessage());
+        }
     }
 
     private boolean renameRegionInternal(String oldRegionId, String newRegionId, String worldName, String replaceRegionId) {
@@ -693,6 +823,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             }
             LOGGER.info("Successfully renamed region from " + oldRegionId + " to " + newRegionId + " in " + world.getName()
                 + ": " + result.detail());
+            notifyRenamed(world.getName(), oldRegionId, newRegionId, replaceRegionId);
             return true;
             
         } catch (Exception e) {
@@ -758,8 +889,11 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return true;
             }
 
-            // Use shape-aware containment check logic
-            boolean isContained = isRegionInsideRegion(parentRegion, childRegion);
+            // Use shape-aware containment check logic; KNG-257: against the parent domain's every region
+            List<ProtectedRegion> parentUnion = DomainRegionUnion.of(regionManager, parentRegion);
+            boolean isContained = parentUnion.size() > 1
+                ? DomainRegionUnion.outside(parentUnion, childRegion, regionPoints(childRegion), 1).isEmpty()
+                : isRegionInsideRegion(parentRegion, childRegion);
             
             LOGGER.info("Region containment check: " + childRegionId + " inside " + parentRegionId + " = " + isContained);
             return isContained;
@@ -826,7 +960,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
 
     private static final List<String> BLOCKED_ADVICE = List.of(
         "Region not saved. Please adjust your selection and type 'save' again, or 'select' another region.",
-        "Or type 'cancel' to abort the task.",
+        "Or type 'cancel' to hand the task back ('discard' cancels it for good).",
         "If you believe this is an error, contact a developer.");
 
     /**
@@ -852,8 +986,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @param context      task context containing InputJson with validation rules
      * @return ValidationResult indicating success or failure
      */
-    private ValidationResult validateRegion(Player player, World subjectWorld, List<BlockVector3> points, String what,
-                                            TaskContext context) {
+    private ValidationResult validateRegion(Player player, World subjectWorld, List<BlockVector3> points,
+                                            ProtectedRegion subject, String what, TaskContext context) {
         try {
             // Parse validation context from InputJson
             LOGGER.info("validateRegion called for task " + context.taskId);
@@ -886,7 +1020,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 LOGGER.info("Processing validation rule: " + validationType);
 
                 if ("RegionContainment".equals(validationType)) {
-                    ValidationResult result = validateRegionContainment(player, subjectWorld, points, what, rule);
+                    ValidationResult result = validateRegionContainment(player, subjectWorld, points, subject, what, rule);
                     if (!result.isValid()) {
                         LOGGER.info("Validation failed (blocking: " + result.isBlocking() + "): " + result.getMessage());
                     }
@@ -916,7 +1050,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * @return ValidationResult
      */
     private ValidationResult validateRegionContainment(Player player, World subjectWorld, List<BlockVector3> points,
-                                                       String what, JsonObject rule) {
+                                                       ProtectedRegion subject, String what, JsonObject rule) {
         try {
             // Parse config
             JsonObject config = rule.has("configJson") && !rule.get("configJson").isJsonNull()
@@ -981,21 +1115,19 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return parent.wrongWorld(what, subjectWorld.getName(), parentWorld.getName());
             }
 
-            // Check every corner point of the region against the parent region
+            // Check the region's corner points against the parent domain's regions (KNG-257: its main region and its
+            // sub-regions; with several, its columns are sampled too)
             StringBuilder violations = new StringBuilder();
-            int violationCount = 0;
             final int maxViolations = 5; // Limit violation output
 
             player.sendMessage("§7Checking against " + parent.describe() + "...");
-            for (BlockVector3 point : points) {
-                if (!parentRegion.contains(point)) {
-                    violationCount++;
-                    if (violationCount <= maxViolations) {
-                        if (violations.length() > 0) violations.append(", ");
-                        violations.append("(").append(point.x()).append(", ").append(point.y()).append(", ")
-                            .append(point.z()).append(")");
-                    }
-                }
+            List<ProtectedRegion> parentUnion = DomainRegionUnion.of(regionManager, parentRegion);
+            List<BlockVector3> outside = DomainRegionUnion.outside(parentUnion, subject, points, 1000);
+            int violationCount = outside.size();
+            for (BlockVector3 point : outside.subList(0, Math.min(maxViolations, outside.size()))) {
+                if (violations.length() > 0) violations.append(", ");
+                violations.append("(").append(point.x()).append(", ").append(point.y()).append(", ")
+                    .append(point.z()).append(")");
             }
 
             LOGGER.info("Containment check complete. Points checked: " + points.size() + ", outside: " + violationCount);
@@ -1056,8 +1188,10 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
      * highest Y, a cuboid's eight corners, else the minimum and maximum point.
      */
     static List<BlockVector3> selectionPoints(Region selection) {
-        if (selection instanceof Polygonal2DRegion poly) {
-            return polygonPoints(poly.getPoints(), poly.getMinimumY(), poly.getMaximumY());
+        // KNG-257: a cylinder, ellipsoid or convex selection is checked as the polygon it is stored as.
+        var outline = net.knightsandkings.knk.paper.integration.SelectionShapes.outlineOf(selection);
+        if (outline.isPresent()) {
+            return polygonPoints(outline.get().points(), outline.get().minY(), outline.get().maxY());
         }
         if (selection instanceof CuboidRegion) {
             return cuboidCorners(selection.getMinimumPoint(), selection.getMaximumPoint());

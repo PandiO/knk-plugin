@@ -12,6 +12,8 @@ import net.knightsandkings.knk.core.siege.SiegeEffect.CancelReason;
 import net.knightsandkings.knk.core.siege.SiegeEffect.DisableReason;
 import net.knightsandkings.knk.core.siege.SiegeEffect.DrawScenarioEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.EndMatchEffect;
+import net.knightsandkings.knk.core.siege.SiegeEffect.FinalCountdownEffect;
+import net.knightsandkings.knk.core.siege.SiegeEffect.PostMatchOverEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.LobbyDisabledEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.MatchmakingStartedEffect;
 import net.knightsandkings.knk.core.siege.SiegeEffect.PhaseChangedEffect;
@@ -227,7 +229,11 @@ class SiegeLobbyStateMachineTest {
 
         assertTrue(m.tick(8).isEmpty());
         assertEquals(List.of(new StartMessageEffect(m.drawnScenario().orElseThrow())), m.tick(8));
-        ticks(m, 597, 8);
+        ticks(m, 597 - 15, 8);
+        // PandiO/knk-workspace#199: the last 15 seconds of the match are counted down (15 .. 1).
+        for (int left = 15; left >= 1; left--) {
+            assertEquals(List.of(new FinalCountdownEffect(left)), m.tick(8), left + " s left");
+        }
         assertEquals(SiegePhase.IN_PROGRESS, m.phase());
         assertEquals(1, m.secondsRemaining());
 
@@ -242,6 +248,84 @@ class SiegeLobbyStateMachineTest {
                 new RefreshConfigEffect(1)), m.tick(8));
         assertEquals(OptionalInt.empty(), locks.lockedScenarioOf(1));
         assertTrue(m.drawnScenario().isEmpty());
+    }
+
+    /** PandiO/knk-workspace#198: with a post-match time the members wait at the hub, then cooldown. */
+    @Test
+    void aPostMatchTimeKeepsTheRoundAtTheHubBeforeCooldown() {
+        SiegeLobbyStateMachine m = machine(lobby(1, 300, 900, 2, true, cinix, harbor), CONFIG.withPostMatchSeconds(30));
+        m.start();
+        runMatchmaking(m, 4);
+        KnkSiegeScenario scenario = m.drawnScenario().orElseThrow();
+
+        assertEquals(List.of(
+                new PhaseChangedEffect(SiegePhase.IN_PROGRESS, SiegePhase.POST_MATCH),
+                new EndMatchEffect(scenario, SiegeEndReason.INSTANT_VICTORY)), m.endMatch(SiegeEndReason.INSTANT_VICTORY));
+        assertEquals(30, m.secondsRemaining());
+        assertTrue(locks.lockedScenarioOf(1).isPresent(), "the scenario stays locked while members wait at its hub");
+        assertTrue(m.endMatch(SiegeEndReason.TEAM_ELIMINATED).isEmpty(), "only once");
+        assertEquals(SkipResult.NOT_SKIPPABLE, m.skip(SkipRequester.ADMIN).result());
+
+        ticks(m, 29, 4);
+        assertEquals(SiegePhase.POST_MATCH, m.phase());
+        assertEquals(1, m.secondsRemaining());
+        assertEquals(List.of(
+                new PostMatchOverEffect(scenario),
+                new PhaseChangedEffect(SiegePhase.POST_MATCH, SiegePhase.COOLDOWN),
+                new RefreshConfigEffect(1)), m.tick(4));
+        assertEquals(OptionalInt.empty(), locks.lockedScenarioOf(1));
+        assertEquals(900, m.secondsRemaining());
+    }
+
+    @Test
+    void aTimeoutAlsoGoesToThePostMatchWait_andNoCountdownRunsThere() {
+        SiegeLobbyStateMachine m = machine(lobby(1, 300, 900, 2, true, cinix, harbor), CONFIG.withPostMatchSeconds(5));
+        m.start();
+        runMatchmaking(m, 4);
+        ticks(m, m.secondsRemaining() - 1, 4);
+
+        List<SiegeEffect> end = m.tick(4);
+
+        assertEquals(new PhaseChangedEffect(SiegePhase.IN_PROGRESS, SiegePhase.POST_MATCH), end.get(0));
+        assertInstanceOf(EndMatchEffect.class, end.get(1));
+        for (int i = 0; i < 4; i++) {
+            assertTrue(m.tick(4).isEmpty(), "no countdown or other effect while members wait");
+        }
+        assertInstanceOf(PostMatchOverEffect.class, m.tick(4).get(0));
+    }
+
+    /** #198: an admin stop or a shutdown during the wait sends everyone home at once (the match is already recorded). */
+    @Test
+    void stoppingDuringThePostMatchWaitReleasesTheMembers_withoutAnotherEnd() {
+        SiegeLobbyStateMachine m = machine(lobby(1, 300, 900, 2, true, cinix, harbor), CONFIG.withPostMatchSeconds(30));
+        m.start();
+        runMatchmaking(m, 4);
+        KnkSiegeScenario scenario = m.drawnScenario().orElseThrow();
+        m.endMatch(SiegeEndReason.INSTANT_VICTORY);
+
+        List<SiegeEffect> stop = m.stop(SiegeEndReason.SERVER_RESTART);
+
+        assertEquals(new PostMatchOverEffect(scenario), stop.get(0));
+        assertTrue(stop.stream().noneMatch(e -> e instanceof EndMatchEffect));
+        assertEquals(SiegePhase.DISABLED, m.phase());
+        assertEquals(OptionalInt.empty(), locks.lockedScenarioOf(1));
+    }
+
+    /** #199: only the last FINAL_COUNTDOWN_SECONDS of the match phase are counted down. */
+    @Test
+    void theFinalCountdownCoversTheLastFifteenSeconds() {
+        SiegeLobbyStateMachine m = defaultMachine();
+        m.start();
+        runMatchmaking(m, 4);
+        List<Integer> counted = new ArrayList<>();
+        while (m.phase() == SiegePhase.IN_PROGRESS) {
+            for (SiegeEffect e : m.tick(4)) {
+                if (e instanceof FinalCountdownEffect c) counted.add(c.secondsLeft());
+            }
+        }
+        List<Integer> expected = new ArrayList<>();
+        for (int s = SiegeLobbyStateMachine.FINAL_COUNTDOWN_SECONDS; s >= 1; s--) expected.add(s);
+        assertEquals(expected, counted);
     }
 
     @Test
@@ -272,6 +356,29 @@ class SiegeLobbyStateMachineTest {
         assertEquals(SkipResult.MATCHMAKING_SHORTENED, m.skip(SkipRequester.ADMIN).result(), "an admin can still go to T-31");
         assertEquals(31, m.secondsRemaining());
         assertEquals(SkipResult.TOO_LATE, m.skip(SkipRequester.PLAYER).result());
+    }
+
+    /** Playtest 2026-10-24: the seconds a skip leaves come from the configuration, floored at voteClose + 1. */
+    @Test
+    void skipSecondsComeFromTheConfigurationAndNeverCutIntoVotingsLastSecond() {
+        KnkSiegeConfiguration base = CONFIG;
+        KnkSiegeConfiguration tuned = new KnkSiegeConfiguration(base.captureAttackBase(), base.captureAttackPerExtra(),
+                base.captureAttackPerExtraInstantVictory(), base.captureDefendBase(), base.captureDefendPerExtra(),
+                base.captureDefendPerExtraInstantVictory(), base.sideCaptureReduction(), base.voteCloseSecondsBeforeStart(),
+                base.drawSecondsBeforeStart(), base.hubSecondsBeforeStart(), base.teamSplitSecondsBeforeStart(),
+                base.matchmakingAnnouncementMarks(), base.killAnnouncementThresholds(), base.killStreakAnnounceAbove(),
+                base.headshotMultiplier(), base.allowedCommands(), base.spawnPickerDelayTicks(), base.enchantDropChancePerMille(),
+                base.allowedEnchantmentKeys(), base.enchantLevelMin(), base.enchantLevelMax(), base.maxBooksAlive(),
+                base.nonMemberGateView(), base.giveNavigationItem(), 90, 5);
+        SiegeLobbyStateMachine m = machine(lobby(1, 300, 900, 2, true, cinix, harbor), tuned);
+        m.start();
+
+        assertEquals(90, m.skipTarget(SkipRequester.PLAYER));
+        assertEquals(31, m.skipTarget(SkipRequester.ADMIN), "5 s would close voting early: floored at voteClose + 1");
+        assertEquals(SkipResult.MATCHMAKING_SHORTENED, m.skip(SkipRequester.PLAYER).result());
+        assertEquals(90, m.secondsRemaining());
+        assertEquals(SkipResult.MATCHMAKING_SHORTENED, m.skip(SkipRequester.ADMIN).result());
+        assertEquals(31, m.secondsRemaining());
     }
 
     @Test

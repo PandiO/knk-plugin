@@ -39,7 +39,10 @@ class ArchitectureGuardTest {
         "roads",
         "navigation",
         "domain/roads",
-        "catalog"
+        "catalog",
+        "realtime",
+        "privacy",
+        "scenario"
     );
 
     /** Individual files that must stay Bukkit-free (must exist - they are Phase 2a's extractions). */
@@ -51,6 +54,7 @@ class ArchitectureGuardTest {
 
     private static final Pattern BUKKIT_IMPORT = Pattern.compile("^\\s*import\\s+(static\\s+)?org\\.bukkit\\b");
     private static final Pattern BUKKIT_REFERENCE = Pattern.compile("\\borg\\.bukkit\\.");
+    private static final Pattern NPC_REFERENCE = Pattern.compile("\\bnet\\.knightsandkings\\.knk\\.core\\.npc\\.");
 
     /** The engine package, the only place that may construct the handle (its tests included). */
     private static final String ENGINE_PACKAGE = "net.knightsandkings.knk.core.navigation.destinations";
@@ -155,6 +159,38 @@ class ArchitectureGuardTest {
         assertTrue(violations.isEmpty(),
             "AllowedDestination is minted by the destination engine only (destination engine DESIGN §6):\n  "
                 + String.join("\n  ", violations));
+    }
+
+    /**
+     * The shared shaping package is used by NPC navigation and the players' trail alike (off-road navigation design
+     * O11, acceptance A26, PandiO/knk-workspace#704): it must not depend on the NPC packages.
+     */
+    @Test
+    void sharedShapingPackageDoesNotUseNpcPackages() throws IOException {
+        Path dir = CORE_ROOT.resolve("navigation/shape");
+        assertTrue(Files.isDirectory(dir), "shared shaping package is missing: " + dir);
+        List<Path> sources;
+        try (Stream<Path> walk = Files.walk(dir)) {
+            sources = walk.filter(p -> p.toString().endsWith(".java")).sorted().toList();
+        }
+        assertTrue(!sources.isEmpty(), "shared shaping package has no sources: " + dir);
+
+        List<String> violations = new ArrayList<>();
+        for (Path source : sources) {
+            List<String> lines = Files.readAllLines(source);
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (isCommentLine(line)) {
+                    continue;
+                }
+                if (NPC_REFERENCE.matcher(line).find()) {
+                    violations.add(CORE_ROOT.relativize(source) + ":" + (i + 1) + ": " + line.trim());
+                }
+            }
+        }
+
+        assertTrue(violations.isEmpty(),
+            "core/navigation/shape must not import or reference core/npc:\n  " + String.join("\n  ", violations));
     }
 
     private static boolean isCommentLine(String line) {

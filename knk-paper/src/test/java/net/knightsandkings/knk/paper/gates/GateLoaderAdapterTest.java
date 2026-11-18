@@ -676,7 +676,7 @@ class GateLoaderAdapterTest {
     }
 
     @Test
-    void loadAndCacheStructure_VerticalGateWithOpenedSnapshots_PairsByIndexPosition() {
+    void loadAndCacheStructure_VerticalGateWithOpenedSnapshotsElsewhere_PairsNearestWhenNothingLinesUpAlongTheSlide() {
         GateManager gateManager = new GateManager();
         GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
 
@@ -710,13 +710,162 @@ class GateLoaderAdapterTest {
         assertNotNull(gate);
         assertEquals(2, gate.getOpenBlocks().size());
 
-        // Closed block id 1 (SortOrder 0) pairs with open block id 10 (SortOrder 0), etc.
+        // KNG-271: the open scan sits 100 blocks away and the door has no motion distance, so no
+        // block lines up along the slide; the leftovers pair by nearest distance.
         BlockSnapshot paired0 = gate.getPairedOpenBlock(1);
         BlockSnapshot paired1 = gate.getPairedOpenBlock(2);
         assertNotNull(paired0);
         assertNotNull(paired1);
         assertEquals(10, paired0.getId());
         assertEquals(11, paired1.getId());
+    }
+
+    @Test
+    void loadAndCacheStructure_RisingDoorWithChains_PairsEachBlockWithTheOneTheSlidePutsItOn() {
+        // KNG-271, GateDoor 17 "Main gate" (2026-10-23): 3x8, fences at y0-4 in every column,
+        // chains at y5-7 in the outer columns, open scan from the same anchor with air at y0-2
+        // and fences at y3-7, rising 3. Pairing by list position (after air is dropped) sent the
+        // left chains into the middle column and jammed the door; along the slide every fence
+        // meets the fence 3 above it and the chains stay unpaired.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
+
+        GateDoorDto door = doorOf(55, 55, "Main gate");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setGeometryWidth(3);
+        door.setGeometryHeight(8);
+        door.setGeometryDepth(1);
+        door.setMotionDistanceBlocks(3);
+        door.setAnchorPoint("{\"x\":1398,\"y\":79,\"z\":-548}");
+        door.setReferencePoint1("{\"x\":1400,\"y\":79,\"z\":-548}");
+        door.setReferencePoint2("{\"x\":1398,\"y\":86,\"z\":-548}");
+        door.setOpenAnchorPoint("{\"x\":1398,\"y\":79,\"z\":-548}");
+
+        List<GateBlockSnapshotDto> closed = new java.util.ArrayList<>();
+        List<GateBlockSnapshotDto> open = new java.util.ArrayList<>();
+        int sortOrder = 0;
+        for (int x = 0; x < 3; x++) {
+            for (int y = 0; y < 8; y++) {
+                String closedBlock = y < 5 ? "minecraft:spruce_fence" : (x == 1 ? "minecraft:air" : "minecraft:iron_chain");
+                String openBlock = y < 3 ? "minecraft:air" : "minecraft:spruce_fence";
+                closed.add(new GateBlockSnapshotDto(100 + sortOrder, 55, x, y, 0, 0, 0, 0, closedBlock, closedBlock, "{}", sortOrder));
+                open.add(new GateBlockSnapshotDto(200 + sortOrder, 55, x, y, 0, 0, 0, 0, openBlock, openBlock, "{}", sortOrder));
+                sortOrder++;
+            }
+        }
+        door.setBlockSnapshots(closed);
+        door.setOpenedBlockSnapshots(open);
+
+        adapter.loadAndCacheStructure(structureOf(55, "Garrison", door));
+
+        CachedGateDoor gate = gateManager.getGate(55);
+        assertNotNull(gate);
+        assertEquals(21, gate.getBlocks().size());
+        assertEquals(15, gate.getOpenBlocks().size());
+        int paired = 0;
+        for (BlockSnapshot block : gate.getBlocks()) {
+            BlockSnapshot target = gate.getPairedOpenBlock(block.getId());
+            Vector from = block.getRelativePosition();
+            if (from.getY() >= 5) {
+                assertNull(target, "a chain was paired: " + from);
+                continue;
+            }
+            assertNotNull(target, "a fence was left unpaired: " + from);
+            assertEquals(from.getX(), target.getRelativePosition().getX(), EPSILON);
+            assertEquals(from.getY() + 3, target.getRelativePosition().getY(), EPSILON);
+            paired++;
+        }
+        assertEquals(15, paired);
+    }
+
+    @Test
+    void openScanAnchorMismatch_ScanFromTheAnchor_Fits() {
+        Vector anchor = new Vector(1398.4, 79, -548.6);
+        List<GateBlockSnapshotDto> scan = List.of(
+            new GateBlockSnapshotDto(1, 17, 0, 3, 0, 1398, 82, -549, "minecraft:spruce_fence", "minecraft:spruce_fence", "{}", 3));
+
+        assertNull(GateLoaderAdapter.openScanAnchorMismatch(anchor, scan));
+    }
+
+    @Test
+    void openScanAnchorMismatch_ScanFromAnotherAnchor_SaysWhere() {
+        // KNG-270: door 17's open scan was made from y86 while the anchor is y79.
+        List<GateBlockSnapshotDto> scan = List.of(
+            new GateBlockSnapshotDto(1, 17, 0, 0, 0, 1398, 86, -548, "minecraft:iron_chain", "minecraft:iron_chain", "{}", 0));
+
+        String reason = GateLoaderAdapter.openScanAnchorMismatch(new Vector(1398, 79, -548), scan);
+
+        assertNotNull(reason);
+        assertTrue(reason.contains("(1398, 86, -548)"), reason);
+        assertTrue(reason.contains("(1398, 79, -548)"), reason);
+    }
+
+    @Test
+    void openScanAnchorMismatch_RowsWithoutWorldCoordinates_AreNotChecked() {
+        List<GateBlockSnapshotDto> scan = List.of(
+            new GateBlockSnapshotDto(1, 17, 0, 0, 0, 0, 0, 0, "minecraft:oak_log", "minecraft:oak_log", "{}", 0));
+
+        assertNull(GateLoaderAdapter.openScanAnchorMismatch(new Vector(100, 64, 100), scan));
+    }
+
+    @Test
+    void loadAndCacheStructure_OpenScanWithoutOpenDoorAnchor_IsReadFromTheAnchor() {
+        // KNG-270: an empty open-door anchor = the opened door stays inside the door box.
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
+
+        GateDoorDto door = doorOf(56, 56, "In-box door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setMotionDistanceBlocks(1);
+        door.setAnchorPoint("{\"x\":10,\"y\":64,\"z\":10}");
+        door.setReferencePoint1("{\"x\":11,\"y\":64,\"z\":10}");
+        door.setReferencePoint2("{\"x\":10,\"y\":65,\"z\":10}");
+        door.setBlockSnapshots(List.of(
+            new GateBlockSnapshotDto(1, 56, 0, 0, 0, 10, 64, 10, "minecraft:oak_fence", "minecraft:oak_fence", "{}", 0)));
+        door.setOpenedBlockSnapshots(List.of(
+            new GateBlockSnapshotDto(10, 56, 0, 1, 0, 10, 65, 10, "minecraft:oak_fence", "minecraft:oak_fence", "{}", 1)));
+
+        adapter.loadAndCacheStructure(structureOf(56, "In-box gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(56);
+        assertNotNull(gate);
+        assertEquals(10, gate.getOpenAnchorPoint().getX(), EPSILON);
+        assertEquals(64, gate.getOpenAnchorPoint().getY(), EPSILON);
+        assertEquals(10, gate.getPairedOpenBlock(1).getId());
+    }
+
+    @Test
+    void loadAndCacheStructure_OpenScanFromAnotherAnchor_IsIgnored() {
+        GateManager gateManager = new GateManager();
+        GateLoaderAdapter adapter = new GateLoaderAdapter(gateManager, () -> "world");
+
+        GateDoorDto door = doorOf(57, 57, "Stale scan door");
+        door.setGateType("SLIDING");
+        door.setMotionType("VERTICAL");
+        door.setGeometryDefinitionMode("PLANE_GRID");
+        door.setAnimationDurationTicks(60);
+        door.setAnimationTickRate(1);
+        door.setAnchorPoint("{\"x\":10,\"y\":64,\"z\":10}");
+        door.setBlockSnapshots(List.of(
+            new GateBlockSnapshotDto(1, 57, 0, 0, 0, 10, 64, 10, "minecraft:oak_fence", "minecraft:oak_fence", "{}", 0)));
+        door.setOpenedBlockSnapshots(List.of(
+            new GateBlockSnapshotDto(10, 57, 0, 0, 0, 10, 71, 10, "minecraft:spruce_stairs", "minecraft:spruce_stairs", "{}", 0)));
+
+        adapter.loadAndCacheStructure(structureOf(57, "Stale scan gate", door));
+
+        CachedGateDoor gate = gateManager.getGate(57);
+        assertNotNull(gate);
+        assertTrue(gate.getOpenBlocks().isEmpty());
+        assertNull(gate.getOpenAnchorPoint());
+        assertNull(gate.getPairedOpenBlock(1));
     }
 
     @Test

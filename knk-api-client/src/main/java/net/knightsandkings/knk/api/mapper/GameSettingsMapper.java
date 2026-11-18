@@ -9,6 +9,7 @@ import net.knightsandkings.knk.api.dto.GameSettingsDto;
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.settings.KnkGameSettings;
 import net.knightsandkings.knk.core.domain.settings.KnkGroupOverride;
+import net.knightsandkings.knk.core.domain.settings.KnkChatTokenSettings;
 import net.knightsandkings.knk.core.domain.settings.KnkHubRules;
 import net.knightsandkings.knk.core.domain.settings.KnkHubSettings;
 import net.knightsandkings.knk.core.domain.settings.KnkRespawnPolicy;
@@ -49,7 +50,17 @@ public final class GameSettingsMapper {
         }
         return new KnkGameSettings(dto.joinSpawnMode(), toCore(dto.joinSpawnReference()), dto.joinAnnouncement(),
             dto.leaveAnnouncement(), toCore(dto.defaultRespawnPolicy()), worlds, dto.updatedAt(),
-            dto.motd() == null || dto.motd().isBlank() ? null : dto.motd(), groups, toCore(dto.hub()));
+            dto.motd() == null || dto.motd().isBlank() ? null : dto.motd(), groups, toCore(dto.hub()),
+            toCore(dto.chatTokens()));
+    }
+
+    /** The chat-token limits; off when the API sent none (PandiO/knk-workspace#233). */
+    static KnkChatTokenSettings toCore(GameSettingsDto.ChatTokens chatTokens) {
+        if (chatTokens == null) {
+            return KnkChatTokenSettings.off();
+        }
+        return new KnkChatTokenSettings(chatTokens.maxTokensPerMessage() != null ? chatTokens.maxTokensPerMessage() : 0,
+            chatTokens.statCooldownSeconds() != null ? chatTokens.statCooldownSeconds() : 0);
     }
 
     /** The hub block; {@link KnkHubSettings#none()} when the API sent none. */

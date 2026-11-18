@@ -22,6 +22,7 @@ public class ReloadEnchantmentCommand implements EnchantmentSubcommand {
     @Override
     public boolean execute(CommandSender sender, String[] args) {
         handler.configManager().reload();
+        handler.runReloadHook();
         sender.sendMessage(handler.colorize(handler.message("messages.cmd-reload", "&aPlugin configuration was reloaded.")));
         return true;
     }

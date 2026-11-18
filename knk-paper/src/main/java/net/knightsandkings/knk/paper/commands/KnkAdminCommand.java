@@ -57,7 +57,11 @@ import net.knightsandkings.knk.paper.commands.support.CommandPermissions;
  */
 public class KnkAdminCommand implements CommandExecutor, TabCompleter {
     private final CommandRegistry registry = new CommandRegistry();
+    /** {@code /knk item} (held-item rename/lore and the enchantment catalogue), PandiO/knk-workspace#158. */
+    public static final String ITEM_NODE = "knk.admin.item";
     private CommandPermissions commandPermissions = CommandPermissions.bukkitOnly();
+    /** {@code /knk item more} (PandiO/knk-workspace#175); null until KnKPlugin sets it. */
+    private volatile ItemMoreCommand itemMoreCommand;
     /** Nodes a subcommand checks synchronously inside its executor; asked for before it runs (KNG-24). */
     private final java.util.Map<String, List<String>> nodesCheckedInside = new java.util.HashMap<>();
     private GateCommand gateCommand;
@@ -124,7 +128,8 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         
         // Register health
         HealthCommand healthCommand = new HealthCommand(plugin, healthApi,
-                plugin instanceof net.knightsandkings.knk.paper.KnKPlugin knkPlugin ? knkPlugin::privateMessageLogQueueDepth : null);
+                plugin instanceof net.knightsandkings.knk.paper.KnKPlugin knkPlugin ? knkPlugin::privateMessageLogQueueDepth : null,
+                plugin instanceof net.knightsandkings.knk.paper.KnKPlugin knkPlugin2 ? knkPlugin2::realtimeStatusLine : null);
         registry.register(
                 new CommandMetadata("health", "Check API backend health", "/knk health", "knk.admin.health"),
                 (sender, args) -> healthCommand.onCommand(sender, null, "knk", new String[0])
@@ -236,8 +241,10 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         "item",
                         "Rename/edit lore on your held item, or manage the enchantment definition catalog",
                         "/knk item rename <displayName> | /knk item lore <add <text>|set <line> <text>|remove <line>> | " +
-                                "/knk item enchantments <list|vanilla|search|apply>",
-                        "knk.admin",
+                                "/knk item enchantments <list|vanilla|search|apply> | /knk item more [amount]",
+                        // Own node (PandiO/knk-workspace#158) instead of the knk.admin umbrella, so a rank can
+                        // be given held-item editing without every /knk subcommand. knk.admin still covers it.
+                        ITEM_NODE,
                         List.of(
                                 "/knk item rename &6&lFlametongue",
                                 "/knk item lore add &7A blade wreathed in fire",
@@ -248,10 +255,25 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                                 "/knk item enchantments search key minecraft:sharpness",
                                 "/knk item enchantments apply 1 3",
                                 "/knk item enchantments apply sharpness 3",
-                                "/knk item enchantments apply poison 2"
+                                "/knk item enchantments apply poison 2",
+                                "/knk item more",
+                                "/knk item more 64"
                         )
                 ),
-                (sender, args) -> itemCommand.onCommand(sender, null, "knk", args)
+                (sender, args) -> {
+                        // #175: /knk item more also needs its own admin node.
+                        if (args.length >= 1 && "more".equalsIgnoreCase(args[0])) {
+                                ItemMoreCommand more = itemMoreCommand;
+                                if (more == null) {
+                                        sender.sendMessage(ChatColor.RED + "/knk item more isn't available right now.");
+                                        return true;
+                                }
+                                String[] moreArgs = Arrays.copyOfRange(args, 1, args.length);
+                                commandPermissions.whenAllowed(sender, ItemMoreCommand.NODE, () -> more.execute(sender, moreArgs));
+                                return true;
+                        }
+                        return itemCommand.onCommand(sender, null, "knk", args);
+                }
         );
 
         ItemBlueprintsDebugCommand itemBlueprintsCommand = new ItemBlueprintsDebugCommand(
@@ -329,15 +351,19 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         KnkTaskListCommand taskListCommand = new KnkTaskListCommand(plugin, worldTasksApi);
         registry.register(
                 new CommandMetadata("tasks", "List world tasks by status", "/knk tasks [status]", "knk.tasks",
-                        List.of("/knk tasks", "/knk tasks Pending", "/knk tasks Claimed")),
+                        List.of("/knk tasks", "/knk tasks Pending", "/knk tasks InProgress")),
                 (sender, args) -> taskListCommand.onCommand(sender, null, "knk", args)
         );
         
+        // PandiO/knk-workspace#180: /knk task <task code> is the command; task-claim stays as an alias. Claiming by
+        // numeric id needs knk.tasks.any (checked in KnkTaskClaimCommand).
         KnkTaskClaimCommand taskClaimCommand = new KnkTaskClaimCommand(plugin, worldTasksApi, worldTaskHandlerRegistry, serverId);
         registry.register(
-                new CommandMetadata("task-claim", "Claim a world task", "/knk task-claim <id|linkCode>", "knk.tasks",
-                        List.of("/knk task-claim 1", "/knk task-claim ABC123")),
-                (sender, args) -> taskClaimCommand.onCommand(sender, null, "knk", args)
+                new CommandMetadata("task", "Claim a world task with its task code, or answer an offer from the web app",
+                        "/knk task <task code> | accept <id> | decline <id>", "knk.tasks",
+                        List.of("/knk task ABC123", "/knk task accept 42")),
+                (sender, args) -> taskClaimCommand.onCommand(sender, null, "knk", args),
+                "task-claim"
         );
 
         // Dedicated ItemScan entry point (docs/specs/items/IMPLEMENTATION_PLAN.md §5.1) - a
@@ -345,11 +371,11 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // ultimately invoking the exact same claim/handler-dispatch logic in
         // KnkTaskClaimCommand.onCommand - no duplicated business logic.
         registry.register(
-                new CommandMetadata("itemscan", "Claim and scan a held item for an ItemScan WorldTask", "/knk itemscan claim <linkCode>", "knk.tasks",
+                new CommandMetadata("itemscan", "Claim and scan a held item for an ItemScan WorldTask", "/knk itemscan claim <task code>", "knk.tasks",
                         List.of("/knk itemscan claim ABC123")),
                 (sender, args) -> {
                     if (args.length < 2 || !args[0].equalsIgnoreCase("claim")) {
-                        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk itemscan claim <linkCode>");
+                        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk itemscan claim <task code>");
                         return true;
                     }
                     return taskClaimCommand.onCommand(sender, null, "knk", new String[]{args[1]});
@@ -359,11 +385,11 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         // Dedicated KitScan entry point (docs/specs/kits/DESIGN.md §6.2), same shape as itemscan
         // above: a shortcut into the same KnkTaskClaimCommand.onCommand /knk task-claim uses.
         registry.register(
-                new CommandMetadata("kitscan", "Claim and scan your inventory for a KitScan WorldTask", "/knk kitscan claim <linkCode>", "knk.tasks",
+                new CommandMetadata("kitscan", "Claim and scan your inventory for a KitScan WorldTask", "/knk kitscan claim <task code>", "knk.tasks",
                         List.of("/knk kitscan claim ABC123")),
                 (sender, args) -> {
                     if (args.length < 2 || !args[0].equalsIgnoreCase("claim")) {
-                        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk kitscan claim <linkCode>");
+                        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk kitscan claim <task code>");
                         return true;
                     }
                     return taskClaimCommand.onCommand(sender, null, "knk", new String[]{args[1]});
@@ -372,7 +398,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
 
         KnkTaskStatusCommand taskStatusCommand = new KnkTaskStatusCommand(plugin, worldTasksApi);
         registry.register(
-                new CommandMetadata("task-status", "Check world task status", "/knk task-status <id|linkCode>", "knk.tasks",
+                new CommandMetadata("task-status", "Check world task status", "/knk task-status <id|task code>", "knk.tasks",
                         List.of("/knk task-status 1", "/knk task-status ABC123")),
                 (sender, args) -> taskStatusCommand.onCommand(sender, null, "knk", args)
         );
@@ -541,6 +567,11 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    /** {@code /knk item more} (PandiO/knk-workspace#175). */
+    public void setItemMoreCommand(ItemMoreCommand itemMoreCommand) {
+        this.itemMoreCommand = itemMoreCommand;
+    }
+
     /** {@code gates.here.*} / {@code gates.lookat.*} for the gate commands' implicit targets (KNG-78/79). */
     public void setGateTargetingSettings(net.knightsandkings.knk.paper.gates.GateTargeting.Settings settings) {
         if (gateCommand != null) {
@@ -647,7 +678,7 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                                 case "location" -> filterByPrefix(List.of("here"), current);
                                 case "itemblueprints" -> filterByPrefix(List.of("list", "search", "get", "give"), current);
                                 case "menu" -> filterByPrefix(List.of("open", "page", "search", "filter"), current);
-                                case "tasks" -> filterByPrefix(List.of("Pending", "Claimed", "InProgress", "Completed", "Failed"), current);
+                                case "tasks" -> filterByPrefix(List.of("Pending", "InProgress", "Completed", "Failed", "Cancelled", "Expired"), current);
                                 case "itemscan", "kitscan" -> filterByPrefix(List.of("claim"), current);
                                 case "tp" -> visiblePlayers.completeOthers(sender, current);
                                 default -> List.of();
@@ -691,10 +722,16 @@ public class KnkAdminCommand implements CommandExecutor, TabCompleter {
                         return Collections.emptyList();
                 }
                 if (itemArgs.length == 1) {
-                        return filterByPrefix(List.of("rename", "lore", "enchantments"), itemArgs[0]);
+                        return filterByPrefix(List.of("rename", "lore", "enchantments", "more"), itemArgs[0]);
                 }
 
                 String sub = itemArgs[0].toLowerCase(Locale.ROOT);
+
+                if ("more".equals(sub)) {
+                        // #175 round 2: /knk item more [amount]
+                        return itemArgs.length == 2 ? filterByPrefix(ItemMoreCommand.AMOUNT_SUGGESTIONS, itemArgs[1])
+                                        : Collections.emptyList();
+                }
 
                 if ("lore".equals(sub) && itemArgs.length == 2) {
                         return filterByPrefix(List.of("add", "set", "remove"), itemArgs[1]);

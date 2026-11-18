@@ -259,6 +259,32 @@ class GateManagerTest {
         assertEquals(List.of(1), fired);
     }
 
+    // Realtime S3 (PandiO/knk-workspace#182): a door or structure deleted in the web app leaves the cache and the index.
+    @Test
+    void removeStructureAndRetainDoors_dropTheDoorsAndTheirIndexCells() {
+        GateManager manager = new GateManager();
+        CachedGateDoor kept = closedGateWithOneBlockAt(1, new Vector(100, 64, 100));
+        CachedGateDoor gone = closedGateWithOneBlockAt(2, new Vector(200, 64, 200));
+        manager.cacheGate(kept);
+        manager.cacheGate(gone);
+        manager.cacheStructure(new net.knightsandkings.knk.core.domain.gates.CachedGateStructure(1, "Gate"));
+        Integer goneCell = manager.getSpatialIndex().lookup(gone.getWorldName(), (int) Math.floor(gone.getAnchorPoint().getX()),
+            (int) Math.floor(gone.getAnchorPoint().getY()), (int) Math.floor(gone.getAnchorPoint().getZ()));
+
+        assertEquals(List.of(2), manager.retainDoorsOfStructure(1, List.of(1)));
+        assertNull(manager.getGate(2));
+        assertNotNull(manager.getGate(1));
+        if (goneCell != null) {
+            assertNull(manager.getSpatialIndex().lookup(gone.getWorldName(), (int) Math.floor(gone.getAnchorPoint().getX()),
+                (int) Math.floor(gone.getAnchorPoint().getY()), (int) Math.floor(gone.getAnchorPoint().getZ())));
+        }
+
+        assertEquals(List.of(1), manager.removeStructure(1));
+        assertTrue(manager.getAllGates().isEmpty());
+        assertNull(manager.getStructure(1));
+        assertFalse(manager.removeGate(1));
+    }
+
     private static CachedGateDoor closedGateWithOneBlock(int id) {
         return closedGateWithOneBlockAt(id, new Vector(100, 64, 100));
     }

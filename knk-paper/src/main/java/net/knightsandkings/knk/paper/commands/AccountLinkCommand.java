@@ -8,11 +8,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
-import net.knightsandkings.knk.api.dto.DuplicateCheckResponseDto;
 import net.knightsandkings.knk.api.dto.LinkCodeResponseDto;
-import net.knightsandkings.knk.api.dto.MergeAccountsRequestDto;
-import net.knightsandkings.knk.api.dto.UserResponseDto;
-import net.knightsandkings.knk.core.domain.users.GatePassThroughMethod;
 import net.knightsandkings.knk.core.ports.api.UserAccountApi;
 import net.knightsandkings.knk.paper.chat.ChatCaptureManager;
 import net.knightsandkings.knk.paper.config.KnkConfig;
@@ -136,88 +132,6 @@ public class AccountLinkCommand implements CommandExecutor {
         }
     }
 
-    private void startMergeFlow(Player player, DuplicateCheckResponseDto check) {
-        UserResponseDto primary = check.primaryUser();
-        UserResponseDto conflicting = check.conflictingUser();
-
-        if (primary == null || conflicting == null) {
-            sendPrefixed(player, "&cAccount merge data unavailable. Please try again later.");
-            plugin.getLogger().warning("Merge flow for " + player.getName() + " failed: missing account data");
-            return;
-        }
-
-        plugin.getLogger().info("Starting merge flow for " + player.getName() + " (Primary ID: " + primary.id() + ", Conflicting ID: " + conflicting.id() + ")");
-
-        chatCaptureManager.startMergeFlow(
-            player,
-            safeInt(primary.coins()), safeInt(primary.gems()), safeInt(primary.experiencePoints()), primary.email(),
-            safeInt(conflicting.coins()), safeInt(conflicting.gems()), safeInt(conflicting.experiencePoints()), conflicting.email(),
-            data -> {
-                String choice = data.get("choice");
-                if (choice == null) {
-                    runSync(() -> sendPrefixed(player, "&cInvalid choice. Please try again."));
-                    return;
-                }
-
-                Integer primaryId = choice.equalsIgnoreCase("A") ? primary.id() : conflicting.id();
-                Integer secondaryId = choice.equalsIgnoreCase("A") ? conflicting.id() : primary.id();
-
-                if (primaryId == null || secondaryId == null) {
-                    runSync(() -> sendPrefixed(player, "&cMerge failed due to missing account IDs."));
-                    return;
-                }
-
-                mergeAccounts(player, primaryId, secondaryId);
-            },
-            () -> runSync(() -> sendPrefixed(player, "&cMerge cancelled"))
-        );
-    }
-
-    private void mergeAccounts(Player player, Integer primaryId, Integer secondaryId) {
-        plugin.getLogger().info("Merging accounts for " + player.getName() + " (keeping: " + primaryId + ", merging: " + secondaryId + ")");
-        userAccountApi.mergeAccounts(new MergeAccountsRequestDto(primaryId, secondaryId))
-            .thenAccept(mergedObj -> {
-                UserResponseDto merged = (UserResponseDto) mergedObj;
-                runSync(() -> {
-                    PlayerUserData userData = userManager.getCachedUser(player.getUniqueId());
-                    updateCachedUser(player, userData, merged);
-
-                    String message = config.messages().mergeComplete()
-                        .replace("{coins}", String.valueOf(safeInt(merged.coins())))
-                        .replace("{gems}", String.valueOf(safeInt(merged.gems())))
-                        .replace("{exp}", String.valueOf(safeInt(merged.experiencePoints())));
-                    sendPrefixed(player, message);
-                    plugin.getLogger().info("Account merge complete for " + player.getName() + " (final balance: " + safeInt(merged.coins()) + " coins, " + safeInt(merged.gems()) + " gems, " + safeInt(merged.experiencePoints()) + " XP)");
-                });
-            })
-            .exceptionally(ex -> {
-                plugin.getLogger().severe("Failed to merge accounts for " + player.getName() + ": " + ex.getMessage());
-                if (ex.getCause() != null) {
-                    plugin.getLogger().severe("  Cause: " + ex.getCause().getMessage());
-                }
-                runSync(() -> sendPrefixed(player, "&cFailed to merge accounts"));
-                return null;
-            });
-    }
-
-    private void updateCachedUser(Player player, PlayerUserData existing, UserResponseDto response) {
-        PlayerUserData updated = new PlayerUserData(
-            response.id() != null ? response.id() : (existing != null ? existing.userId() : null),
-            response.username() != null ? response.username() : (existing != null ? existing.username() : player.getName()),
-            player.getUniqueId(),
-            response.email(),
-            safeInt(response.coins()),
-            safeInt(response.gems()),
-            safeInt(response.experiencePoints()),
-            response.email() != null && !response.email().isBlank(),
-            false,
-            null,
-            existing != null ? existing.gatePassThroughMethodDefault() : GatePassThroughMethod.DEFAULT
-        );
-
-        userManager.updateCachedUser(player.getUniqueId(), updated);
-    }
-
     private void sendPrefixed(CommandSender sender, String message) {
         sender.sendMessage(colorize(config.messages().prefix() + message));
     }
@@ -228,9 +142,5 @@ public class AccountLinkCommand implements CommandExecutor {
 
     private void runSync(Runnable task) {
         Bukkit.getScheduler().runTask(plugin, task);
-    }
-
-    private int safeInt(Integer value) {
-        return value != null ? value : 0;
     }
 }

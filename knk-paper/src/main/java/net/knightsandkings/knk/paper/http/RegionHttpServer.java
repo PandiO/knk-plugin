@@ -23,7 +23,9 @@ import java.util.logging.Logger;
  * - POST /Regions/rename?oldRegionId=...&newRegionId=...[&domainType=...][&parentRegionId=...][&world=...][&replaceRegionId=...]
  *   (domainType/parentRegionId are optional: when given, the renamed region also gets its managed-region parent,
  *   priority and flags - see {@code regions.managed}; replaceRegionId (KNG-103) is the domain's region before its
- *   region step was run again, replaced by the renamed one - see {@code WorldGuardRegionRenamer})
+ *   region step was run again, replaced by the renamed one - see {@code WorldGuardRegionRenamer}; [&subRegionOf=...]
+ *   (KNG-255) is optional too. A {@code fullHeight=true} from an API of PandiO/knk-workspace#34 is ignored: the renamed
+ *   region always keeps its drawn outline and Y range, PandiO/knk-workspace#487)
  * - GET /api/regions/{regionId}/contains-location?x=...&z=...&allowBoundary=false
  * - GET /api/regions/{parentRegionId}/contains-region/{childRegionId}?requireFullContainment=true
  *
@@ -104,6 +106,10 @@ public class RegionHttpServer {
             String world = query.get("world");
             // KNG-103: the domain's previous region, which the renamed one replaces (optional).
             String replaceRegionId = query.get("replaceRegionId");
+            // KNG-255: the domain's main region when the renamed region is one of its sub-regions (optional).
+            String subRegionOf = query.get("subRegionOf");
+            // PandiO/knk-workspace#487: fullHeight (sent by an API of #34 for a lootbox spawn area) is ignored; the
+            // renamed region keeps the Y range it was drawn with.
 
             if (oldRegionId == null || newRegionId == null || oldRegionId.isBlank() || newRegionId.isBlank()) {
                 send(exchange, 400, "oldRegionId and newRegionId are required");
@@ -113,7 +119,7 @@ public class RegionHttpServer {
             // Run rename on main thread to keep WorldGuard safe
             plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
                 boolean result = handler.renameRegion(oldRegionId, newRegionId, domainType, parentRegionId, world,
-                    replaceRegionId);
+                    replaceRegionId, subRegionOf);
                 try {
                     send(exchange, 200, Boolean.toString(result));
                 } catch (IOException e) {

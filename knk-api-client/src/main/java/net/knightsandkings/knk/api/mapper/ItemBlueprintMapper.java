@@ -54,7 +54,9 @@ public final class ItemBlueprintMapper {
                 enchantments.size(),
                 toCore(dto.grade()),
                 tags,
-                origins
+                origins,
+                ItemAppearanceMapper.toShieldBanner(dto.shieldBannerBaseColor(), dto.shieldBannerLayers()),
+                ItemAppearanceMapper.toArmorTrim(dto.armorTrimPattern(), dto.armorTrimMaterial())
         );
     }
 

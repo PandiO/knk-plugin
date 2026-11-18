@@ -32,6 +32,19 @@ class GateBlockScanTaskHandlerTest {
     private Plugin mockPlugin;
     private GateBlockScanTaskHandler handler;
 
+    @Test
+    void openScanOrigin_EmptyOpenDoorAnchor_StartsAtTheAnchor() {
+        // KNG-270: an empty open-door anchor means the opened door stays inside the door box.
+        net.knightsandkings.knk.api.dto.GateDoorDto door = new net.knightsandkings.knk.api.dto.GateDoorDto();
+        door.setAnchorPoint("{\"x\":1398,\"y\":79,\"z\":-548}");
+
+        assertEquals(door.getAnchorPoint(), GateBlockScanTaskHandler.openScanOrigin(door));
+        door.setOpenAnchorPoint(" ");
+        assertEquals(door.getAnchorPoint(), GateBlockScanTaskHandler.openScanOrigin(door));
+        door.setOpenAnchorPoint("{\"x\":1398,\"y\":87,\"z\":-548}");
+        assertEquals("{\"x\":1398,\"y\":87,\"z\":-548}", GateBlockScanTaskHandler.openScanOrigin(door));
+    }
+
     @BeforeEach
     void setUp() {
         mockGateDoorsApi = mock(GateDoorsApi.class);

@@ -29,13 +29,14 @@ class WorldGuardCombatSafezonesTest {
 
     WorldGuardCombatSafezonesTest() {
         when(victim.getLocation()).thenReturn(location);
-        resolver.registerDomain(domain("town_oakhaven", "Town"));
-        resolver.registerDomain(domain("district_market", "District"));
-        resolver.registerDomain(domain("gate_north", "gate"));
+        resolver.registerDomain(domain(1, "town_oakhaven", "Town"));
+        resolver.registerDomain(domain(2, "district_market", "District"));
+        resolver.registerDomain(domain(3, "gate_north", "gate"));
     }
 
-    private static DomainSnapshot domain(String regionId, String type) {
-        return new DomainSnapshot(1, regionId, null, regionId, true, true, type, Set.of(), Set.of(), Set.of(), Set.of());
+    // Distinct ids: snapshots are equal by domain id (KNG-256).
+    private static DomainSnapshot domain(int id, String regionId, String type) {
+        return new DomainSnapshot(id, regionId, null, regionId, true, true, type, Set.of(), Set.of(), Set.of(), Set.of());
     }
 
     private WorldGuardCombatSafezones safezones(RegionsAt regions) {

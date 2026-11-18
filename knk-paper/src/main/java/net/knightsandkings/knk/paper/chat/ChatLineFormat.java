@@ -14,7 +14,9 @@ import net.kyori.adventure.text.format.TextDecoration;
  * testable; PlayerListener.onChat decides the {@link Rank} and supplies the cached summary.
  * <ul>
  *   <li>Owner/staff: {@code [OWNER]-{Title}- Name: msg} in the fixed ColorOptions owner/staff
- *   colors, title bold (as v1).</li>
+ *   colors, title bold (as v1). PandiO/knk-workspace#260: a chat color set by one of the player's
+ *   groups (not the Default group's; {@code chat*ColorGroupId} non-null) replaces the fixed one,
+ *   field by field, so setting the Staff group's chat colors changes staff chat.</li>
  *   <li>Everyone else: {@code -{Noble Title}- Name: msg} — the premium tier name, if any, goes
  *   inside the braces before the title. Brackets use the summary's chatSecondaryColor, title and
  *   name its chatPrimaryColor ("&amp;" codes, so a tier can also be bold or hex-colored; the API
@@ -41,15 +43,15 @@ public final class ChatLineFormat {
         switch (rank) {
             case OWNER -> {
                 tag = "OWNER";
-                bracketStyle = Style.style(ColorOptions.ownerformat);
-                textStyle = Style.style(ColorOptions.ownersubjects);
+                bracketStyle = groupStyle(user, true, Style.style(ColorOptions.ownerformat));
+                textStyle = groupStyle(user, false, Style.style(ColorOptions.ownersubjects));
                 bracedStyle = textStyle.decorate(TextDecoration.BOLD);
                 braced = title;
             }
             case STAFF -> {
                 tag = "STAFF";
-                bracketStyle = Style.style(ColorOptions.staffformat);
-                textStyle = Style.style(ColorOptions.staffsubjects);
+                bracketStyle = groupStyle(user, true, Style.style(ColorOptions.staffformat));
+                textStyle = groupStyle(user, false, Style.style(ColorOptions.staffsubjects));
                 bracedStyle = textStyle.decorate(TextDecoration.BOLD);
                 braced = title;
             }
@@ -78,6 +80,19 @@ public final class ChatLineFormat {
         line.append(Component.text(namePrefix + playerName + ": ", textStyle))
             .append(message.colorIfAbsent(textStyle.color()));
         return line.build();
+    }
+
+    /**
+     * #260: the owner/staff style, unless one of the player's groups (not the Default group) set this chat color:
+     * then that color. {@code bracket} = the secondary (bracket) color, else the primary (title and name).
+     */
+    private static Style groupStyle(UserSummary user, boolean bracket, Style fixed) {
+        if (user == null) {
+            return fixed;
+        }
+        Integer from = bracket ? user.chatSecondaryColorGroupId() : user.chatPrimaryColorGroupId();
+        String codes = bracket ? user.chatSecondaryColor() : user.chatPrimaryColor();
+        return from == null ? fixed : LegacyStyles.parse(codes, fixed);
     }
 
     private static String blankToNull(String value) {

@@ -41,7 +41,9 @@ import net.knightsandkings.knk.core.navigation.NavigationEffect.RerouteStartedEf
 import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteAdoptedEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteKeptEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteReason;
+import net.knightsandkings.knk.core.navigation.JoinPoint;
 import net.knightsandkings.knk.core.navigation.NavigationSession;
+import net.knightsandkings.knk.core.navigation.PolylineCursor;
 import net.knightsandkings.knk.core.navigation.SessionParameters;
 import net.knightsandkings.knk.core.roads.route.AStarRouter;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
@@ -53,6 +55,7 @@ import net.knightsandkings.knk.core.roads.route.Maneuver;
 import net.knightsandkings.knk.core.roads.route.ManeuverBuilder;
 import net.knightsandkings.knk.core.roads.route.RegionClosestPoint;
 import net.knightsandkings.knk.core.roads.route.RegionShape;
+import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.Route;
 import net.knightsandkings.knk.core.roads.route.RouteRequest;
@@ -61,7 +64,9 @@ import net.knightsandkings.knk.core.roads.route.RouterParameters;
 import net.knightsandkings.knk.core.roads.route.SnapPoint;
 import net.knightsandkings.knk.core.roads.route.Snapper;
 import net.knightsandkings.knk.core.roads.walk.WalkGoal;
+import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
 import net.knightsandkings.knk.core.roads.walk.WalkPath;
+import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
 import net.knightsandkings.knk.core.roads.walk.WalkPathfinder;
 import net.knightsandkings.knk.core.roads.walk.WalkRequest;
 import net.knightsandkings.knk.core.roads.walk.WalkResult;
@@ -135,6 +140,46 @@ public final class NavigationService implements SiegeMatchObserver {
         default Set<String> regionsAt(World world, double[] floorPoint) {
             return Set.of();
         }
+
+        /**
+         * PandiO/knk-workspace#360: the policy of a mover that is not (necessarily) a player - an NPC with its own
+         * access subject - judged from the regions the subject stands in. Main thread. Unsupported by default.
+         */
+        default AccessPolicy policyFor(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+                                       RoadNetworkSnapshot snapshot, Set<String> destinationRegions) {
+            throw new UnsupportedOperationException("no access policy for subjects");
+        }
+
+        /**
+         * PandiO/knk-workspace#361: the router's entry rule per region for a subject, judged from the regions the
+         * subject stands in, with the domain cache only (main thread, never blocks). Every region by default.
+         */
+        default Predicate<String> mayEnter(net.knightsandkings.knk.core.npc.nav.AccessSubject subject) {
+            return regionId -> true;
+        }
+
+        /** PandiO/knk-workspace#361: whether this gate door stops the subject now. Main thread. Never by default. */
+        default boolean gateBlocks(net.knightsandkings.knk.core.npc.nav.AccessSubject subject, int doorId) {
+            return false;
+        }
+
+        /**
+         * PandiO/knk-workspace#507: the box of a gate door's blocks, closed and open (what its animation sweeps), so
+         * NPCs keep out of a moving door's way. Main thread. Not known by default.
+         */
+        default java.util.Optional<net.knightsandkings.knk.core.gates.target.GateBox> doorBox(int doorId) {
+            return java.util.Optional.empty();
+        }
+
+        /**
+         * PandiO/knk-workspace#361: whether the subject's policy blocks this one edge now - the question behind
+         * "does the blocking element still block?". Main thread, without reading the rest of the network. Not
+         * blocked by default.
+         */
+        default boolean edgeBlocked(net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+                                    RoadNetworkSnapshot snapshot, RoadEdge edge) {
+            return false;
+        }
     }
 
     /**
@@ -160,6 +205,24 @@ public final class NavigationService implements SiegeMatchObserver {
         /** Capture counters for {@code /knk road status}; empty when there is nothing to say. */
         default String describe() {
             return "";
+        }
+    }
+
+    /**
+     * What a {@link WalkPreparer} may complete with to report its capture's counters (off-road phase 0,
+     * PandiO/knk-workspace#703): the request, plus chunks, cache hits, main-thread µs and wait of the capture. A plain
+     * supplier works as before; its capture counts as unknown.
+     */
+    public record PreparedWalk(Supplier<WalkRequest> request, WalkMeasurements.Capture capture)
+        implements Supplier<WalkRequest> {
+        public PreparedWalk {
+            Objects.requireNonNull(request, "request");
+            capture = capture == null ? WalkMeasurements.Capture.UNKNOWN : capture;
+        }
+
+        @Override
+        public WalkRequest get() {
+            return request.get();
         }
     }
 
@@ -225,6 +288,8 @@ public final class NavigationService implements SiegeMatchObserver {
         net.kyori.adventure.key.Key.key("entity.player.levelup"), net.kyori.adventure.sound.Sound.Source.PLAYER, 0.7f, 1.4f);
 
     private final Deps deps;
+    /** KNG-234: in a minigame match only the match's own destinations may be navigated to; null: no such rule. */
+    private volatile MatchNavigationScope matchScope;
     private final RouterParameters routerParameters;
     /** Snapping a destination: no height weight by default, its last leg is a walk path (finding N15). */
     private final RouterParameters destinationParameters;
@@ -243,6 +308,8 @@ public final class NavigationService implements SiegeMatchObserver {
 
     private final Map<UUID, Active> active = new HashMap<>();
     private final long[] walkCounts = new long[WalkCount.values().length];
+    /** Phase 0 counters per searched walk request (#703); recorded on the walk threads, read on the main thread. */
+    private final WalkMeasurements walkMeasurements = new WalkMeasurements();
     private BukkitTask ticker;
 
     /** Walk request outcomes, for {@code /knk road status}. */
@@ -340,9 +407,60 @@ public final class NavigationService implements SiegeMatchObserver {
          */
         boolean nearRoute;
         CompletableFuture<?> capture;
+        /**
+         * {@code guidance-v2} (phase 6.2, #711, DESIGN § 7.2.3): the player's place on {@link #path} (blocks along it),
+         * followed with continuity ({@link PolylineCursor}); NaN until the first step on the current path.
+         */
+        double cursor = Double.NaN;
+        /** The path the cursor belongs to: a new path starts a new cursor. */
+        private List<double[]> cursorPath;
+        private double[] cursorCumulative;
 
         DirectLeg(double[] target) {
             this.target = target;
+        }
+
+        /**
+         * {@code guidance-v2}: one step of the cursor on the walk path (WALKING only) - a jump of more than
+         * {@link PolylineCursor#PATH_WINDOW} along the path only when the player is really nearer to it, so a player at a
+         * wall's other side does not make the trail jump.
+         */
+        void followCursor(double x, double floorY, double z) {
+            if (path != cursorPath) {
+                cursorPath = path;
+                cursorCumulative = PolylineCursor.cumulative(path);
+                cursor = Double.NaN;
+            }
+            cursor = PolylineCursor.follow(path, cursorCumulative, cursor, x, floorY, z, PolylineCursor.PATH_WINDOW,
+                Double.POSITIVE_INFINITY, PolylineCursor.PATH_NEARER).along();
+        }
+
+        /** {@code guidance-v2}: the cursor on the current path, after a step from this floor position when it has none. */
+        double cursorAt(double x, double floorY, double z) {
+            if (path != cursorPath || Double.isNaN(cursor)) {
+                followCursor(x, floorY, z);
+            }
+            return cursor;
+        }
+
+        /**
+         * {@code guidance-v2}: the remaining distance from the cursor (along the path from it, the gap to it and the
+         * partial path's rest); not walking: straight to the target, as {@link #remainingOf}.
+         */
+        double remainingFromCursor(double x, double floorY, double z) {
+            if (!walking()) {
+                return distance(x, floorY, z, target);
+            }
+            double at = cursorAt(x, floorY, z);
+            double[] p = PolylineCursor.pointAt(path, cursorCumulative, at);
+            double[] end = path.get(path.size() - 1);
+            double rest = partial ? distance(end[0], end[1], end[2], target) : 0;
+            return Math.max(0, cursorCumulative[cursorCumulative.length - 1] - at) + distance(x, floorY, z, p) + rest;
+        }
+
+        /** {@code guidance-v2}: the point {@code ahead} blocks beyond the cursor on the path (the HUD arrow). */
+        double[] aheadOfCursor(double x, double floorY, double z, double ahead) {
+            return PolylineCursor.pointAt(path, cursorCumulative, cursorAt(x, floorY, z) + ahead);
         }
 
         boolean walking() {
@@ -414,8 +532,18 @@ public final class NavigationService implements SiegeMatchObserver {
         endAll(EndReason.STOPPED);
     }
 
+    public void setMatchScope(MatchNavigationScope matchScope) {
+        this.matchScope = matchScope;
+    }
+
     public boolean isNavigating(UUID playerId) {
         return active.containsKey(playerId);
+    }
+
+    /** The display name of the player's current destination, or null without a session. */
+    public String destinationName(UUID playerId) {
+        Active a = active.get(playerId);
+        return a == null ? null : a.destination.name();
     }
 
     public int activeCount() {
@@ -460,6 +588,221 @@ public final class NavigationService implements SiegeMatchObserver {
 
     public EtaEstimator eta() {
         return eta;
+    }
+
+    // ==================== NPC navigation (PandiO/knk-workspace#360) ====================
+
+    /**
+     * The road graph of a world as the router has it now (link B1, PandiO/knk-workspace#670: the NPC navigation
+     * snapshot takes the edges round a route); null or empty when there is none.
+     */
+    public RoadNetworkSnapshot roadNetwork(String world) {
+        return deps.snapshots().apply(world);
+    }
+
+    /** The walk-leg capture, search and executor, or null when walk paths are off ({@code navigation.walk.enabled}). */
+    public Walk walk() {
+        return deps.walk();
+    }
+
+    /**
+     * The road route between two floor points for a mover with its own access subject (an NPC), as the
+     * {@link net.knightsandkings.knk.core.npc.nav.RoadPlanner} port: the same snapping, component handling and router
+     * as a player's route, with the subject's policy - its own regions decide the exit rules, not a player's
+     * position. Needs no chunks. Main thread; routed on the routing executor; completes on the main thread.
+     */
+    public CompletableFuture<net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan> planRoadFor(
+            net.knightsandkings.knk.core.npc.nav.AccessSubject subject,
+            net.knightsandkings.knk.core.navigation.shape.NavPoint fromFloor,
+            net.knightsandkings.knk.core.navigation.shape.NavPoint toFloor) {
+        CompletableFuture<net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan> out = new CompletableFuture<>();
+        String world = fromFloor.world();
+        RoadNetworkSnapshot snapshot = deps.snapshots().apply(world);
+        if (snapshot == null) {
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.NO_NETWORK, "no road network for world " + world));
+            return out;
+        }
+        Optional<SnapPoint> from = snapStart(snapshot, fromFloor.x(), fromFloor.y(), fromFloor.z(), null);
+        Optional<SnapPoint> to = snapStart(snapshot, toFloor.x(), toFloor.y(), toFloor.z(), null);
+        if (from.isEmpty() || to.isEmpty()) {
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.OFF_ROAD,
+                (from.isEmpty() ? "start" : "end") + " too far from a road (limit " + Math.round(startLimit()) + " blocks)"));
+            return out;
+        }
+        // As a player's route (connectedStart / connectedGoals): an end off the road may snap to a stray stretch in
+        // another network component; then snap it to the nearest road in the other end's component instead.
+        SnapPoint start = from.get();
+        SnapPoint end = to.get();
+        if (componentOf(snapshot, start) != componentOf(snapshot, end)) {
+            int startComponent = componentOf(snapshot, start);
+            Optional<SnapPoint> endInStart = snapStart(snapshot, toFloor.x(), toFloor.y(), toFloor.z(),
+                edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == startComponent);
+            if (endInStart.isPresent()) {
+                end = endInStart.get();
+            } else {
+                int endComponent = componentOf(snapshot, end);
+                start = snapStart(snapshot, fromFloor.x(), fromFloor.y(), fromFloor.z(),
+                    edgeIndex -> snapshot.componentOf(snapshot.edgeAt(edgeIndex)) == endComponent).orElse(start);
+            }
+        }
+        RouteRequest request;
+        try {
+            request = RouteRequest.of(start, end, deps.policies().policyFor(subject, snapshot, null), routerParameters);
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.WARNING, "[NPC] road policy failed for " + subject.name(), e);
+            out.complete(net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.ERROR, "policy error: " + e));
+            return out;
+        }
+        deps.routing().execute(() -> {
+            net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan plan;
+            try {
+                RouteResult routed = new AStarRouter(snapshot).routeOrExplain(request);
+                plan = roadPlanOf(world, routed, edge -> asker -> deps.policies().edgeBlocked(asker, snapshot, edge))
+                    .withPlazas(plazaCrossingsOf(world, routed, snapshot));
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[NPC] road routing failed for " + subject.name(), e);
+                plan = net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                    net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.ERROR, "router error: " + e);
+            }
+            var delivered = plan;
+            deps.mainThread().execute(() -> out.complete(delivered));
+        });
+        return out;
+    }
+
+    /** A router result as the NPC port's plan, without a way to ask whether a blocking element still blocks. */
+    static net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan roadPlanOf(String world, RouteResult result) {
+        return roadPlanOf(world, result, edge -> null);
+    }
+
+    /**
+     * A router result as the NPC port's plan: the polyline as floor points and the gate doors it passes; for BLOCKED
+     * the partial route, what blocks (PandiO/knk-workspace#361) and the check whether it still does.
+     *
+     * @param stillBlocked for the blocked edge: whether a subject's policy blocks it now (main thread), or null
+     */
+    static net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan roadPlanOf(String world, RouteResult result,
+            Function<RoadEdge, Predicate<net.knightsandkings.knk.core.npc.nav.AccessSubject>> stillBlocked) {
+        List<net.knightsandkings.knk.core.navigation.shape.NavPoint> line = new ArrayList<>();
+        List<net.knightsandkings.knk.core.npc.nav.RoadPlanner.GateCrossing> gates = new ArrayList<>();
+        result.routeToGuide().ifPresent(route -> {
+            route.polyline().forEach(p -> line.add(new net.knightsandkings.knk.core.navigation.shape.NavPoint(world, p[0], p[1], p[2])));
+            // a step's distances are road lengths; the polyline may be a little longer or shorter
+            double scale = route.length() <= 0 ? 1 : route.polylineLength() / route.length();
+            for (Route.Step step : route.steps()) {
+                if (step.edge().gateDoorIds().isEmpty()) {
+                    continue;
+                }
+                double[] end = route.pointAt((step.startDistance() + step.length()) * scale);
+                for (int doorId : step.edge().gateDoorIds()) {
+                    gates.add(new net.knightsandkings.knk.core.npc.nav.RoadPlanner.GateCrossing(doorId,
+                        new net.knightsandkings.knk.core.navigation.shape.NavPoint(world, end[0], end[1], end[2])));
+                }
+            }
+        });
+        return switch (result.status()) {
+            case FOUND -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.found(line, gates);
+            case BLOCKED -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.blocked(line,
+                result.explanation().verdict().message(), blockingElementOf(result.explanation()), gates,
+                stillBlocked.apply(result.explanation().blockedEdge()));
+            case DIFFERENT_COMPONENTS -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.DIFFERENT_COMPONENTS,
+                "start and goal are on road networks that do not connect");
+            case NO_ROUTE -> net.knightsandkings.knk.core.npc.nav.RoadPlanner.RoadPlan.none(
+                net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.NO_ROUTE, "no route on the road network");
+        };
+    }
+
+    /**
+     * The junctions a route passes that may be plazas (implementation plan 4c.3 decision 6, link M5): a designed
+     * plaza's centre with its radius, and every other junction with radius 0, whose open floor the NPC side measures
+     * (the road data does not mark automatic plazas). Empty without a route.
+     */
+    static List<net.knightsandkings.knk.core.navigation.shape.PlazaCrossing> plazaCrossingsOf(String world,
+            RouteResult result, RoadNetworkSnapshot snapshot) {
+        List<net.knightsandkings.knk.core.navigation.shape.PlazaCrossing> out = new ArrayList<>();
+        result.routeToGuide().ifPresent(route -> plazaNodesOf(route, snapshot).forEach(node ->
+            out.add(new net.knightsandkings.knk.core.navigation.shape.PlazaCrossing(
+                new net.knightsandkings.knk.core.navigation.shape.NavPoint(world, node.x(), node.y(), node.z()),
+                node.plazaRadius())))); // as the polyline gives the node: its floor block
+        return out;
+    }
+
+    /** The nodes of a route that may be plazas: designed plaza centres and junctions, in route order. */
+    static List<net.knightsandkings.knk.core.domain.roads.RoadNode> plazaNodesOf(
+            net.knightsandkings.knk.core.roads.route.Route route, RoadNetworkSnapshot snapshot) {
+        List<net.knightsandkings.knk.core.domain.roads.RoadNode> out = new ArrayList<>();
+        for (int id : route.nodeIds()) {
+            snapshot.node(id).ifPresent(node -> {
+                if (node.isPlazaCentre() || node.kind() == RoadNodeKind.JUNCTION) {
+                    out.add(node);
+                }
+            });
+        }
+        return out;
+    }
+
+    /** The router's explanation as the element NPC behavior hears about: the cause, with the blocked edge's gates and regions. */
+    static net.knightsandkings.knk.core.npc.nav.BlockingElement blockingElementOf(BlockedExplainer.Explanation why) {
+        EdgeVerdict.Cause cause = why.cause();
+        RoadEdge edge = why.blockedEdge();
+        net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind kind = switch (cause.type()) {
+            case GATE -> net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind.GATE;
+            case DOMAIN -> net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind.DOMAIN;
+            case FLAG -> net.knightsandkings.knk.core.npc.nav.BlockingElement.Kind.ROAD;
+        };
+        return new net.knightsandkings.knk.core.npc.nav.BlockingElement(kind, cause.id(), cause.name(),
+            new java.util.HashSet<>(edge.gateDoorIds()), new java.util.HashSet<>(edge.regionIds()));
+    }
+
+    /**
+     * PandiO/knk-workspace#361: the access rules as they are now, for NPCs that are walking - the same policy code
+     * as the router's, answered from caches on the main thread.
+     */
+    public net.knightsandkings.knk.core.npc.nav.AccessRules accessRules() {
+        return new net.knightsandkings.knk.core.npc.nav.AccessRules() {
+            @Override
+            public Predicate<String> mayEnter(net.knightsandkings.knk.core.npc.nav.AccessSubject subject) {
+                return deps.policies().mayEnter(subject);
+            }
+
+            @Override
+            public boolean gateBlocks(net.knightsandkings.knk.core.npc.nav.AccessSubject subject, int doorId) {
+                return deps.policies().gateBlocks(subject, doorId);
+            }
+
+            @Override
+            public java.util.Optional<net.knightsandkings.knk.core.gates.target.GateBox> doorBox(int doorId) {
+                return deps.policies().doorBox(doorId);
+            }
+        };
+    }
+
+    private final List<net.knightsandkings.knk.core.npc.nav.RuleChangeListener> ruleListeners =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /**
+     * PandiO/knk-workspace#361, the listener port for NPC navigation: {@code listener} hears what this service
+     * re-checks its own routes on - {@link #onGateChanged} and {@link #onAvailabilityChanged} - on the thread the
+     * change arrives on. Returns the unsubscribe. Nothing is called while nobody listens.
+     */
+    public Runnable addRuleChangeListener(net.knightsandkings.knk.core.npc.nav.RuleChangeListener listener) {
+        Objects.requireNonNull(listener, "listener");
+        ruleListeners.add(listener);
+        return () -> ruleListeners.remove(listener);
+    }
+
+    private void notifyRuleListeners(Consumer<net.knightsandkings.knk.core.npc.nav.RuleChangeListener> what) {
+        for (net.knightsandkings.knk.core.npc.nav.RuleChangeListener listener : ruleListeners) {
+            try {
+                what.accept(listener);
+            } catch (RuntimeException e) {
+                deps.logger().log(Level.WARNING, "[NPC] rule change listener failed", e);
+            }
+        }
     }
 
     // ==================== commands ====================
@@ -514,6 +857,16 @@ public final class NavigationService implements SiegeMatchObserver {
             });
             return;
         }
+        MatchNavigationScope scope = matchScope;
+        if (scope != null) {
+            var inMatch = scope.destinationsOf(player);
+            if (inMatch.isPresent() && inMatch.get().stream().noneMatch(d -> d.destination().sameAs(destination))) {
+                List<String> labels = inMatch.get().stream().map(MatchNavigationScope.MatchDestination::label).toList();
+                player.sendMessage(labels.isEmpty() ? CompassMessages.noMatchDestinations()
+                    : CompassMessages.matchOnly(destination.name(), labels));
+                return;
+            }
+        }
         String world = player.getWorld().getName();
         if (!destination.world().equalsIgnoreCase(world)) {
             player.sendMessage(NavigationMessages.otherWorld(destination.name()));
@@ -555,7 +908,8 @@ public final class NavigationService implements SiegeMatchObserver {
             startDirect(a);
             return;
         }
-        a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now);
+        a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now,
+                    deps.config().cursorParameters());
         apply(a, a.session.start());
     }
 
@@ -855,14 +1209,19 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         double remaining = leg.remainingOf(x, floorY, z);
         leg.best = Math.min(leg.best, remaining);
+        boolean v2 = deps.config().guidanceV2();
+        if (v2 && leg.walking()) {
+            leg.followCursor(x, floorY, z); // phase 6.2 (#711): the trail, the HUD distance and the arrow from the cursor
+            remaining = leg.remainingFromCursor(x, floorY, z);
+        }
         if ((now - a.startedTick) % deps.trail().periodTicks() == 0) {
             drawLeg(a, leg);
         }
         if ((now - a.startedTick) % HUD_TICKS == 0) {
             deps.hud().update(a.player, a.destination.name(), remaining, 1 - Math.min(1, remaining / leg.total));
-            double[] towards = leg.walking()
-                ? TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD)
-                : leg.target;
+            double[] towards = !leg.walking() ? leg.target
+                : v2 ? leg.aheadOfCursor(x, floorY, z, WALK_ARROW_AHEAD)
+                : TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD);
             deps.hud().arrowTowards(a.player, towards[0], towards[2]);
         }
     }
@@ -870,7 +1229,7 @@ public final class NavigationService implements SiegeMatchObserver {
     /** The leg's trail: the walk path when there is one, nothing when there is no way, else the straight line. */
     private void drawLeg(Active a, DirectLeg leg) {
         if (leg.walking()) {
-            deps.trail().drawPath(a.player, leg.path);
+            drawWalkPath(a, leg);
         } else if (leg.status != DirectLeg.Status.NO_PATH) {
             deps.trail().drawDirect(a.player, leg.target);
         }
@@ -898,6 +1257,10 @@ public final class NavigationService implements SiegeMatchObserver {
                 leg.best = distance(x, floorY, z, leg.target);
                 requestWalk(a, leg, now);
             }
+            return;
+        }
+        if (deps.config().guidanceV2() && leg.walking()) {
+            recheckWalkingLegV2(a, leg, now, x, floorY, z);
             return;
         }
         double d = leg.remainingOf(x, floorY, z);
@@ -971,6 +1334,8 @@ public final class NavigationService implements SiegeMatchObserver {
         int generation = ++leg.generation;
         walkCounts[WalkCount.REQUESTED.ordinal()]++;
         Walk walk = deps.walk();
+        // phase 6.1 (#710): with guidance-v2 a path to draw is shaped on the walk thread (the check near the road draws none)
+        boolean shape = deps.config().guidanceV2() && !leg.nearRoute;
         Location feet = a.player.getLocation();
         double[] target = leg.target;
         CompletableFuture<Supplier<WalkRequest>> capture;
@@ -997,21 +1362,49 @@ public final class NavigationService implements SiegeMatchObserver {
                 return;
             }
             try {
+                long queuedAt = System.nanoTime();
                 walk.searches().execute(() -> {
+                    long queueNanos = System.nanoTime() - queuedAt;
                     WalkResult result;
+                    WalkRequest searched = null;
                     try {
-                        result = walk.pathfinder().find(request.get());
+                        searched = request.get();
+                        result = walk.pathfinder().find(searched);
                     } catch (RuntimeException e) {
                         deps.logger().log(Level.WARNING, "[Navigation] Walk search failed for " + a.player.getName(), e);
                         result = null; // FALLBACK (decision L3-8)
                     }
+                    measureWalk(searched, result, request, queueNanos);
                     WalkResult delivered = result;
-                    deps.mainThread().execute(() -> walkDelivered(a, leg, generation, delivered, null));
+                    List<double[]> trail = shape ? shapeWalk(a, searched, result) : null;
+                    deps.mainThread().execute(() -> walkDelivered(a, leg, generation, delivered, null, trail));
                 });
             } catch (java.util.concurrent.RejectedExecutionException e) {
                 walkDelivered(a, leg, generation, null, WalkCount.FAILED); // shutting down
             }
         });
+    }
+
+    /**
+     * Walk thread: records a searched request's counters (#703). Measuring only - a failure here is logged and
+     * changes nothing for the player.
+     */
+    private void measureWalk(WalkRequest searched, WalkResult result, Supplier<WalkRequest> request, long queueNanos) {
+        if (searched == null || result == null) {
+            return;
+        }
+        try {
+            WalkMeasurements.Capture capture = request instanceof PreparedWalk prepared ? prepared.capture()
+                : WalkMeasurements.Capture.UNKNOWN;
+            double pathLength = result.path().or(result::partialPath).map(WalkPath::length).orElse(0.0);
+            WalkMeasurements.Sample sample = walkMeasurements.record(result.status(), result.stats(), capture, queueNanos,
+                searched.straightDistance(), pathLength);
+            if (deps.logger().isLoggable(Level.FINE)) {
+                deps.logger().fine("[Navigation] Walk search " + sample.describe());
+            }
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.FINE, "[Navigation] Walk measurement skipped", e);
+        }
     }
 
     /** A region is reached at its edge (arrival is WorldGuard containment) or within arrive-distance of the target. */
@@ -1037,6 +1430,15 @@ public final class NavigationService implements SiegeMatchObserver {
      * passages). No result → FALLBACK, today's straight line.
      */
     private void walkDelivered(Active a, DirectLeg leg, int generation, WalkResult result, WalkCount failure) {
+        walkDelivered(a, leg, generation, result, failure, null);
+    }
+
+    /**
+     * As above, with the shaped trail of the result's path (phase 6.1, {@code guidance-v2}; null: the path's cells, as
+     * before).
+     */
+    private void walkDelivered(Active a, DirectLeg leg, int generation, WalkResult result, WalkCount failure,
+                               List<double[]> shaped) {
         if (!walkCurrent(a, leg, generation)) {
             return;
         }
@@ -1060,11 +1462,101 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         if (result != null && !result.isFound() && !a.roadsTried && leg == a.leg) {
             a.roadsTried = true;
-            if (tryRoadsInstead(a, leg, generation, () -> adoptWalkResult(a, leg, result, partial))) {
+            if (tryRoadsInstead(a, leg, generation, () -> adoptWalkResult(a, leg, result, partial, shaped))) {
                 return; // the straight line stays until the road route is known
             }
         }
-        adoptWalkResult(a, leg, result, partial);
+        adoptWalkResult(a, leg, result, partial, shaped);
+    }
+
+    // ==================== shaped walk trails (off-road phase 6.1, #710) ====================
+
+    /** Shapes walk paths; stateless, shared by the walk threads. */
+    private static final WalkPathShaper SHAPER = new WalkPathShaper();
+    /** Walk paths shaped, and the time it took (walk threads; read by {@link #walkStatus}). */
+    private final java.util.concurrent.atomic.AtomicLong shapedPaths = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong shapingNanos = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong shapingFailures = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * Walk thread: the trail of a found or partial walk path shaped over the request's own captured terrain
+     * ({@link WalkPathShaper}, DESIGN § 7.1); null when there is no path, or when shaping fails (logged; the cells are
+     * drawn as before).
+     */
+    private List<double[]> shapeWalk(Active a, WalkRequest searched, WalkResult result) {
+        if (searched == null || result == null) {
+            return null;
+        }
+        Optional<WalkPath> path = result.isFound() ? result.path() : result.partialPath();
+        if (path.isEmpty()) {
+            return null;
+        }
+        try {
+            WalkPathShaper.Shaped shaped = SHAPER.shape(path.get(), searched.terrain(), searched.profile(),
+                searched.access(), deps.config().walk().shaping());
+            if (shaped.trail().isEmpty()) {
+                return null; // nothing to draw from: the cells, as before
+            }
+            shapedPaths.incrementAndGet();
+            shapingNanos.addAndGet(shaped.nanos());
+            return shaped.trail();
+        } catch (RuntimeException e) {
+            shapingFailures.incrementAndGet();
+            deps.logger().log(Level.WARNING, "[Navigation] Walk path shaping failed for " + a.player.getName()
+                + "; drawing the cells", e);
+            return null;
+        }
+    }
+
+    /** {@code /knk road status}: shaped walk paths and their mean time, with {@code guidance-v2}; empty otherwise. */
+    String shapingStatus() {
+        if (!deps.config().guidanceV2()) {
+            return "";
+        }
+        long n = shapedPaths.get();
+        double meanMs = n == 0 ? 0 : shapingNanos.get() / 1e6 / n;
+        return "shaped " + n + String.format(java.util.Locale.ROOT, " (mean %.2f ms)", meanMs)
+            + (shapingFailures.get() > 0 ? ", shaping failed " + shapingFailures.get() : "");
+    }
+
+    // ==================== anchored walk trails and winding back (off-road phase 6.2, #711) ====================
+
+    /**
+     * A walking leg's trail: with {@code guidance-v2} on fixed anchors from the leg's cursor (DESIGN § 7.2,
+     * {@link TrailRenderer#drawPath(Player, List, double)}); otherwise from the player's projection, as before.
+     */
+    private void drawWalkPath(Active a, DirectLeg leg) {
+        if (deps.config().guidanceV2()) {
+            Location feet = a.player.getLocation();
+            deps.trail().drawPath(a.player, leg.path, leg.cursorAt(feet.getX(), feet.getY() - 1, feet.getZ()));
+        } else {
+            deps.trail().drawPath(a.player, leg.path);
+        }
+    }
+
+    /**
+     * {@code guidance-v2} (DESIGN § 7.5.5, A21): the direct re-check of a walking leg. {@code DirectLeg.best} and
+     * "heading away" are replaced by the player's distance to the leg's path: within {@code recompute-distance} the leg
+     * stays (and the window is drawn from its cursor; the usual re-check still renews a stale or old path); beyond it the
+     * leg is recomputed from the player's position, with the target re-derived from there (a region's closest point, a
+     * street's nearest point), at most once per {@code reroute-min-interval}. The old path stays drawn until the new one
+     * arrives; the walk search's own messages (rev. 9, the partial path, N17) are kept.
+     */
+    private void recheckWalkingLegV2(Active a, DirectLeg leg, long now, double x, double floorY, double z) {
+        double off = TrailRenderer.project(leg.path, new double[] {x, floorY, z})[1];
+        if (off <= deps.config().walk().recomputeDistance()) {
+            recheckWalk(a, leg, now, x, floorY, z);
+            return;
+        }
+        if (leg.lastRecalcTick != Long.MIN_VALUE && now - leg.lastRecalcTick < sessionParameters.rerouteMinIntervalTicks()) {
+            return;
+        }
+        leg.lastRecalcTick = now;
+        leg.cancelWalk();
+        leg.target = directTarget(a, leg, x, floorY, z);
+        if (walkEnabled()) {
+            requestWalk(a, leg, now);
+        }
     }
 
     /**
@@ -1119,7 +1611,8 @@ public final class NavigationService implements SiegeMatchObserver {
                 a.goals = to;
                 a.target = leg.target;
                 long now = deps.tick().getAsLong();
-                a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now);
+                a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now,
+                    deps.config().cursorParameters());
                 a.session.start(); // its first computation is this one: the result is fed in below
                 apply(a, a.session.onRouteResult(delivered, now));
             });
@@ -1131,7 +1624,8 @@ public final class NavigationService implements SiegeMatchObserver {
      * The walk result on the leg: the path, the partial path, or "no conventional path" (N8). The start leg
      * (KNG-75) says "to the road" - or, out of budget, that it has trouble (live test S3) - and redraws with the route.
      */
-    private void adoptWalkResult(Active a, DirectLeg leg, WalkResult result, Optional<WalkPath> partial) {
+    private void adoptWalkResult(Active a, DirectLeg leg, WalkResult result, Optional<WalkPath> partial,
+                                 List<double[]> shaped) {
         if (leg.nearRoute) {
             adoptNearRouteResult(a, leg, result);
             return;
@@ -1157,7 +1651,8 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         if (result != null) {
             leg.partial = !result.isFound();
-            leg.path = result.isFound() ? result.path().orElseThrow().points() : partial.get().points();
+            leg.path = shaped != null ? shaped
+                : result.isFound() ? result.path().orElseThrow().points() : partial.get().points();
             leg.status = DirectLeg.Status.WALKING;
             Location feet = a.player.getLocation();
             double remaining = leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
@@ -1168,7 +1663,7 @@ public final class NavigationService implements SiegeMatchObserver {
             if (startLeg) {
                 a.route().ifPresent(route -> drawStartLeg(a, leg, route));
             } else {
-                deps.trail().drawPath(a.player, leg.path);
+                drawWalkPath(a, leg);
             }
             return;
         }
@@ -1250,7 +1745,27 @@ public final class NavigationService implements SiegeMatchObserver {
             + ", not captured " + walkCounts[WalkCount.NOT_CAPTURED.ordinal()] + ", failed " + walkCounts[WalkCount.FAILED.ordinal()]
             + "; partial " + walkCounts[WalkCount.PARTIAL.ordinal()];
         String capture = deps.walk().preparer().describe();
-        return "on; " + walking + " walking, " + inFlight + " computing; " + counts + (capture.isEmpty() ? "" : "; " + capture);
+        String shaping = shapingStatus();
+        return "on; " + walking + " walking, " + inFlight + " computing; " + counts + (capture.isEmpty() ? "" : "; " + capture)
+            + (shaping.isEmpty() ? "" : "; " + shaping);
+    }
+
+    /**
+     * The walk-search measurement lines for {@code /knk road status} (#703): aggregates over the recent searches, then
+     * the {@code recent} newest requests. Empty when walk paths are off.
+     */
+    public List<String> walkMeasurementLines(int recent) {
+        return walkEnabled() ? walkMeasurements.describe(recent) : List.of();
+    }
+
+    /** Forgets the walk-search measurements ({@code /knk road status reset}): one scene at a time. */
+    public void resetWalkMeasurements() {
+        walkMeasurements.reset();
+    }
+
+    /** The recorder itself, for tests. */
+    WalkMeasurements walkMeasurements() {
+        return walkMeasurements;
     }
 
     /** The direct-mode target for a player at this floor position. */
@@ -1263,6 +1778,38 @@ public final class NavigationService implements SiegeMatchObserver {
             }
             default -> leg.target;
         };
+    }
+
+    // ==================== plaza-line preview (off-road phase 7 step 1, #712) ====================
+
+    /**
+     * The player's route for the plaza-line preview ({@code /knk road plazaline}): its world, its polyline (floor
+     * points) and the nodes it passes that may be plazas, or empty without a route. Reads only; the session, the trail
+     * and the route are not touched. Main thread.
+     */
+    public Optional<RoutePlazas> routePlazas(Player player) {
+        Active a = active.get(player.getUniqueId());
+        if (a == null || a.session == null || a.snapshot == null) {
+            return Optional.empty();
+        }
+        RoadNetworkSnapshot snapshot = a.snapshot;
+        return a.session.route().filter(route -> route.polyline().size() >= 2)
+            .map(route -> new RoutePlazas(snapshot.world(), route.polyline(), plazaNodesOf(route, snapshot)));
+    }
+
+    /**
+     * A route for the plaza-line preview.
+     *
+     * @param world    the world
+     * @param polyline the route polyline, floor points
+     * @param nodes    the nodes it passes that may be plazas, in route order
+     */
+    public record RoutePlazas(String world, List<double[]> polyline,
+                              List<net.knightsandkings.knk.core.domain.roads.RoadNode> nodes) {
+        public RoutePlazas {
+            polyline = List.copyOf(polyline);
+            nodes = List.copyOf(nodes);
+        }
     }
 
     // ==================== ticking ====================
@@ -1455,7 +2002,9 @@ public final class NavigationService implements SiegeMatchObserver {
             dropStartLeg(a);
             return;
         }
-        double[] start = near ? nearest.point() : route.start().point();
+        double[] start = near ? nearest.point()
+            : deps.config().guidanceV2() ? JoinPoint.choose(route.polyline(), x, floorY, z, startLimit()).point() // § 7.5.4
+            : route.start().point();
         if (a.startLeg != null && a.startLeg.nearRoute == near
             && distance(start[0], start[1], start[2], a.startLeg.target) <= 1) {
             a.startLegClosestToRoute = Math.min(a.startLegClosestToRoute, toRoute);
@@ -1503,11 +2052,22 @@ public final class NavigationService implements SiegeMatchObserver {
             return false;
         }
         double remaining = leg.remainingOf(x, floorY, z);
-        // heading away: farther along the leg AND farther from the route. Either alone misleads - past a partial
-        // path's end the leg's measure grows while the player still nears the road (live test S3: down a spiral
-        // stair), and a walk path may first lead away from the road (out through a back door).
-        if (remaining > leg.best + sessionParameters.rerouteDistance()
+        boolean v2 = deps.config().guidanceV2() && leg.walking();
+        if (v2) {
+            // phase 6.2 (#711, DESIGN § 7.5.5): N16's "heading away" is replaced by the distance to the leg's path. Beyond
+            // recompute-distance the leg ends; the session (off the route) re-routes from the player, at most once per
+            // reroute-min-interval, and the new route's start leg goes to its join point
+            if (TrailRenderer.project(leg.path, new double[] {x, floorY, z})[1] > deps.config().walk().recomputeDistance()) {
+                dropStartLeg(a);
+                return false;
+            }
+            leg.followCursor(x, floorY, z);
+            remaining = leg.remainingFromCursor(x, floorY, z);
+        } else if (remaining > leg.best + sessionParameters.rerouteDistance()
             && toRoute > a.startLegClosestToRoute + sessionParameters.rerouteDistance()) {
+            // heading away: farther along the leg AND farther from the route. Either alone misleads - past a partial
+            // path's end the leg's measure grows while the player still nears the road (live test S3: down a spiral
+            // stair), and a walk path may first lead away from the road (out through a back door).
             dropStartLeg(a);
             return false;
         }
@@ -1519,9 +2079,9 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         if (since % HUD_TICKS == 0) {
             deps.hud().update(a.player, a.destination.name(), remaining + route.length(), 0);
-            double[] towards = leg.walking()
-                ? TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD)
-                : leg.target;
+            double[] towards = !leg.walking() ? leg.target
+                : v2 ? leg.aheadOfCursor(x, floorY, z, WALK_ARROW_AHEAD)
+                : TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD);
             deps.hud().arrowTowards(a.player, towards[0], towards[2]);
         }
         return true;
@@ -1533,7 +2093,7 @@ public final class NavigationService implements SiegeMatchObserver {
      */
     private void drawStartLeg(Active a, DirectLeg leg, Route route) {
         if (leg.walking()) {
-            deps.trail().drawPath(a.player, leg.path);
+            drawWalkPath(a, leg);
         }
         boolean straight = !leg.walking() && leg.status != DirectLeg.Status.NO_PATH;
         deps.trail().drawRoute(a.player, route, 0, trailTarget(a), straight);
@@ -1677,7 +2237,8 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         AccessPolicy policy = deps.policies().policyFor(a.player, a.snapshot,
             destinationRegions(a.player, a.destination, a.goals, a.target));
-        double travelled = a.session.along();
+        // walked already: behind the player's place on the route (with guidance-v2 the cursor, which winds back; else the progress)
+        double travelled = a.session.cursor();
         double stepStart = 0;
         for (int i = 0; i < route.steps().size(); i++) {
             Route.Step step = route.steps().get(i);
@@ -1710,6 +2271,7 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /** A gate changed state (R4 listener, hopped to the main thread by the caller). */
     public void onGateChanged(int doorId) {
+        notifyRuleListeners(listener -> listener.gateChanged(doorId));
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (a.direct()) {
@@ -1735,6 +2297,7 @@ public final class NavigationService implements SiegeMatchObserver {
 
     /** Something may have opened anywhere (domain cache refresh, siege lockdown change): every session re-checks. */
     public void onAvailabilityChanged() {
+        notifyRuleListeners(net.knightsandkings.knk.core.npc.nav.RuleChangeListener::availabilityChanged);
         long now = deps.tick().getAsLong();
         for (Active a : new ArrayList<>(active.values())) {
             if (a.direct()) {
@@ -1812,6 +2375,11 @@ public final class NavigationService implements SiegeMatchObserver {
 
     @Override
     public void lobbyChanged(SiegeLobbyRuntime lobby) {
+        // KNG-234: a member of a running match navigates with the compass; every lobby change in the middle of a
+        // match (a vote, someone leaving) must not end their route. The eligibility re-check ends it once the match is over.
+        if (lobby.phase() == net.knightsandkings.knk.core.siege.SiegePhase.IN_PROGRESS) {
+            return;
+        }
         for (Active a : new ArrayList<>(active.values())) {
             if (lobby.isMember(a.player.getUniqueId())) {
                 end(a, EndReason.SIEGE);
@@ -1926,15 +2494,20 @@ public final class NavigationService implements SiegeMatchObserver {
 
     private double remaining(Active a) {
         if (a.direct()) {
-            Location feet = a.player.getLocation();
-            return a.leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
+            return legRemaining(a.leg, a.player.getLocation());
         }
         double road = a.session == null ? 0 : a.session.remainingBlocks();
         if (a.startLeg != null && !a.startLeg.nearRoute) {
-            Location feet = a.player.getLocation();
-            return road + a.startLeg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
+            return road + legRemaining(a.startLeg, a.player.getLocation());
         }
         return road;
+    }
+
+    /** A leg's remaining distance: from its cursor with {@code guidance-v2} (phase 6.2), else as before. */
+    private double legRemaining(DirectLeg leg, Location feet) {
+        return deps.config().guidanceV2()
+            ? leg.remainingFromCursor(feet.getX(), feet.getY() - 1, feet.getZ())
+            : leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
     }
 
     static double distance(double x, double y, double z, double[] p) {

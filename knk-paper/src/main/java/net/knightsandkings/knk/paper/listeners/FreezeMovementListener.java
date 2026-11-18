@@ -7,6 +7,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 public class FreezeMovementListener implements Listener {
     private final FrozenPlayerTracker frozenPlayerTracker;
@@ -44,5 +45,14 @@ public class FreezeMovementListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDeath(EntityDeathEvent event) {
         frozenPlayerTracker.unfreeze(event.getEntity().getUniqueId());
+    }
+
+    /**
+     * Leaving ends a freeze (PandiO/knk-workspace#155): the flight allowed for the freeze is handed back before the
+     * player is saved, and a rejoin within the few seconds of a freeze doesn't find the player held without it.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onQuit(PlayerQuitEvent event) {
+        frozenPlayerTracker.unfreeze(event.getPlayer().getUniqueId());
     }
 }

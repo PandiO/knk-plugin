@@ -21,11 +21,13 @@ import java.util.Optional;
  * @param motd                 server-list MOTD ({@code &}-coded, up to two lines); null = server.properties
  * @param groupOverrides       per-group overrides in precedence order (KNG-52); never null
  * @param hub                  the hub (hub DESIGN §16 Phase 4); never null, {@link KnkHubSettings#none()} without one
+ * @param chatTokens           chat hashtag token limits (PandiO/knk-workspace#233); never null, off without them
  */
 public record KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnReference, String joinAnnouncement,
                               String leaveAnnouncement, KnkRespawnPolicy defaultRespawnPolicy,
                               List<KnkWorldSettings> worldSettings, String updatedAt, String motd,
-                              List<KnkGroupOverride> groupOverrides, KnkHubSettings hub) {
+                              List<KnkGroupOverride> groupOverrides, KnkHubSettings hub,
+                              KnkChatTokenSettings chatTokens) {
 
     public static final String WORLD_SPAWN = "WorldSpawn";
     public static final String CUSTOM_REFERENCE = "CustomReference";
@@ -38,6 +40,16 @@ public record KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnR
             : groupOverrides.stream().filter(Objects::nonNull)
                 .sorted(Comparator.comparingInt(KnkGroupOverride::precedence)).toList();
         hub = hub != null ? hub : KnkHubSettings.none();
+        chatTokens = chatTokens != null ? chatTokens : KnkChatTokenSettings.off();
+    }
+
+    /** Without chat-token limits (hub shape). */
+    public KnkGameSettings(String joinSpawnMode, KnkSpawnReference joinSpawnReference, String joinAnnouncement,
+                           String leaveAnnouncement, KnkRespawnPolicy defaultRespawnPolicy,
+                           List<KnkWorldSettings> worldSettings, String updatedAt, String motd,
+                           List<KnkGroupOverride> groupOverrides, KnkHubSettings hub) {
+        this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
+            updatedAt, motd, groupOverrides, hub, KnkChatTokenSettings.off());
     }
 
     /** Without a hub (KNG-52 shape). */

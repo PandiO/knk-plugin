@@ -17,7 +17,11 @@ import java.util.Map;
  */
 public final class SiegeMenuBridge implements SiegeMatchObserver, SiegeService.MenuHooks {
 
+    private static final java.util.logging.Logger LOGGER = java.util.logging.Logger.getLogger(SiegeMenuBridge.class.getName());
+
     private final MenuService menus;
+    /** Keys whose unavailability was already logged (logged again once they recover and fail anew). */
+    private final java.util.Set<String> reported = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public SiegeMenuBridge(MenuService menus) {
         this.menus = menus;
@@ -50,7 +54,19 @@ public final class SiegeMenuBridge implements SiegeMatchObserver, SiegeService.M
     }
 
     private boolean open(Player player, String key, MenuContextParams context) {
-        if (player == null || !menus.isMenuAvailable(key)) return false;
+        if (player == null) return false;
+        if (!menus.isMenuAvailable(key)) {
+            // Playtest 2026-10-24: the chat fallback alone hid why. Say it once per key and have the menu
+            // validated now, so a startup hiccup (API not up yet) costs one chat fallback, not a restart.
+            boolean validating = menus.requestValidation(key);
+            if (reported.add(key)) {
+                LOGGER.warning("[Siege] Menu '" + key + "' is unavailable (" + menus.unavailableReason(key).orElse("?")
+                        + ")" + (validating ? "; validating it now, the chat fallback is used this time" : "")
+                        + ". /knk menu broken lists blocked menus.");
+            }
+            return false;
+        }
+        reported.remove(key);
         menus.openMenu(player, key, context);
         return true;
     }

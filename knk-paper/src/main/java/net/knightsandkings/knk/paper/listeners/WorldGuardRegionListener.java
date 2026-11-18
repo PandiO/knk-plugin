@@ -83,6 +83,11 @@ public class WorldGuardRegionListener implements Listener {
     }
 
     private void handle(Player player, Location from, Location to) {
+        if (net.knightsandkings.knk.paper.npc.nav.NpcEntities.isNpc(player)) {
+            // NAV-08: player-shaped NPCs are Players; their moves would resolve regions (an API call each) and show
+            // entry messages to nobody. 200 walking NPCs made ~10 region lookups per second (#244).
+            return;
+        }
         RegionTransitionDecision decision = tracker.handleMove(player, from, to);
         if (decision == null) {
             return;

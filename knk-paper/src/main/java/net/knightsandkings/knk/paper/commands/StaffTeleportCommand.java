@@ -22,6 +22,7 @@ import org.bukkit.entity.Player;
 import net.knightsandkings.knk.core.teleport.TeleportOutcome;
 import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
+import net.knightsandkings.knk.paper.teleport.TeleportExemptions;
 import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 import net.knightsandkings.knk.paper.teleport.TeleportPlan;
 import net.knightsandkings.knk.paper.teleport.TeleportService;
@@ -34,16 +35,21 @@ import net.knightsandkings.knk.paper.teleport.VisibleTargetResolver;
  *   <li>{@code /tp <player>} - you to them ({@value TeleportNodes#STAFF}, or the older
  *       {@value TeleportNodes#LEGACY_ADMIN_TP}; also reachable as {@code /knk tp <player>}).</li>
  *   <li>{@code /tp <player> <target>} - one player to another ({@value TeleportNodes#STAFF_OTHERS};
- *       you must outrank both). Console allowed.</li>
+ *       your rank or lower, both - PandiO/knk-workspace#171). Console allowed.</li>
  *   <li>{@code /tp <x> <y> <z> [world] [yaw pitch]} - you to coordinates, {@code ~} relative
  *       ({@value TeleportNodes#STAFF}).</li>
  *   <li>{@code /tphere <player>} - them to you ({@value TeleportNodes#STAFF_OTHERS}, rank-checked).</li>
+ *   <li>{@code /tp all <player>} - every eligible player to that player ({@code knk.teleport.all.tp});
+ *       {@code /tphere all} - every eligible player to you ({@code knk.teleport.all.tphere}). Eligible: online,
+ *       your rank or lower, not exempt, not in staff/owner mode ({@link TeleportExemptions},
+ *       PandiO/knk-workspace#171).</li>
  *   <li>{@code -s} (or v1's {@code silent}/{@code s} as the last argument) - no message to the moved
  *       or visited player ({@value TeleportNodes#STAFF_SILENT}). Always silent while you're vanished.</li>
  * </ul>
  * Every form is rank-checked against each other player involved ({@link TargetRankCheck}: your
- * highest group weight must be above theirs; the console and {@code knk.admin.user.manage.all}
- * pass), resolves names vanish-aware ({@link VisibleTargetResolver}), and runs through
+ * highest group weight must be at least theirs - same rank or lower since PandiO/knk-workspace#171; the console
+ * and {@code knk.admin.user.manage.all} pass), a moved player exempt from the type
+ * ({@code knk.teleport.exempt.tp|tphere}, staff/owner mode) is refused unless you override, resolves names vanish-aware ({@link VisibleTargetResolver}), and runs through
  * {@link TeleportService} - instant, no cost/cooldown/safety check, but the freeze, region and siege
  * guards apply, and the teleport fires with cause {@code COMMAND}. Permissions resolve through
  * {@code KnkPermissible}, hence no {@code permission:} on the plugin.yml entries.
@@ -63,6 +69,8 @@ public class StaffTeleportCommand implements TabExecutor {
     private final Predicate<Player> isVanished;
     private final Function<String, World> worldByName;
     private final Supplier<List<String>> worldNames;
+    /** Exempt players and the {@code all} forms (#171); null = nobody exempt, no {@code all}. */
+    private volatile TeleportExemptions exemptions;
 
     public StaffTeleportCommand(Form form, PlayerCommandSupport support, TargetRankCheck rankCheck,
                                 VisibleTargetResolver targets, TeleportService teleportService,
@@ -80,7 +88,15 @@ public class StaffTeleportCommand implements TabExecutor {
 
     /** The same command in its other form ({@code /tp} ↔ {@code /tphere}), sharing everything else. */
     public StaffTeleportCommand withForm(Form other) {
-        return new StaffTeleportCommand(other, support, rankCheck, targets, teleportService, isVanished, worldByName, worldNames);
+        StaffTeleportCommand copy = new StaffTeleportCommand(other, support, rankCheck, targets, teleportService, isVanished,
+            worldByName, worldNames);
+        copy.exemptions = exemptions;
+        return copy;
+    }
+
+    /** Exempt players and the {@code all} forms (PandiO/knk-workspace#171); set before {@link #withForm}. */
+    public void setExemptions(TeleportExemptions exemptions) {
+        this.exemptions = exemptions;
     }
 
     @Override
@@ -88,7 +104,12 @@ public class StaffTeleportCommand implements TabExecutor {
         Parsed parsed = Parsed.of(args);
         if (form == Form.TPHERE) {
             if (parsed.args().size() != 1) {
-                sender.sendMessage(ChatColor.YELLOW + "Usage: /tphere <player> [-s]");
+                sender.sendMessage(ChatColor.YELLOW + "Usage: /tphere <player> [-s]"
+                    + (exemptions != null ? " | /tphere all [-s]" : ""));
+                return true;
+            }
+            if (isAll(parsed.args().get(0))) {
+                hereAll(sender, parsed.silent());
                 return true;
             }
             Player target = findVisible(sender, parsed.args().get(0));
@@ -99,7 +120,13 @@ public class StaffTeleportCommand implements TabExecutor {
         }
 
         List<String> a = parsed.args();
-        if (a.size() >= 3 && isCoordinate(a.get(0)) && isCoordinate(a.get(1)) && isCoordinate(a.get(2))) {
+        if (!a.isEmpty() && isAll(a.get(0))) {
+            if (a.size() == 2) {
+                allToPlayer(sender, a.get(1), parsed.silent());
+            } else {
+                sender.sendMessage(ChatColor.YELLOW + "Usage: /tp all <player> [-s]");
+            }
+        } else if (a.size() >= 3 && isCoordinate(a.get(0)) && isCoordinate(a.get(1)) && isCoordinate(a.get(2))) {
             selfToCoordinates(sender, a);
         } else if (a.size() == 1) {
             selfToPlayer(sender, a.get(0), parsed.silent(), false);
@@ -177,14 +204,14 @@ public class StaffTeleportCommand implements TabExecutor {
             return;
         }
         support.whenAllowed(sender, TeleportNodes.STAFF_OTHERS, () -> withSilent(sender, silentRequested, silent ->
-            rankChecked(sender, List.of(subject, visited), () ->
+            rankChecked(sender, List.of(subject, visited), () -> notExempt(sender, subject, TeleportExemptions.Type.TP, () ->
                 launch(sender, TeleportPlan.staffToPlayer(sender, subject, visited, silent), () -> {
                     sender.sendMessage(ChatColor.GREEN + "Teleported " + subject.getName() + " to " + visited.getName() + ".");
                     if (!silent) {
                         tell(subject, sender.getName() + " teleported you to " + visited.getName() + ".");
                         tell(visited, subject.getName() + " was teleported to you.");
                     }
-                }))));
+                })))));
     }
 
     private void here(CommandSender sender, Player subject, boolean silentRequested) {
@@ -198,13 +225,79 @@ public class StaffTeleportCommand implements TabExecutor {
             return;
         }
         support.whenAllowed(sender, TeleportNodes.STAFF_OTHERS, () -> withSilent(sender, silentRequested, silent ->
-            rankChecked(sender, List.of(subject), () ->
+            rankChecked(sender, List.of(subject), () -> notExempt(sender, subject, TeleportExemptions.Type.TPHERE, () ->
                 launch(sender, TeleportPlan.staffToPlayer(sender, subject, actor, silent), () -> {
                     sender.sendMessage(ChatColor.GREEN + "Teleported " + subject.getName() + " to you.");
                     if (!silent) {
                         tell(subject, actor.getName() + " teleported you to them.");
                     }
+                })))));
+    }
+
+    // ----- all (PandiO/knk-workspace#171) -----
+
+    /** {@code /tp all <player>}: every eligible player to {@code targetName} (who stays where they are). */
+    private void allToPlayer(CommandSender sender, String targetName, boolean silentRequested) {
+        TeleportExemptions rules = exemptions;
+        if (rules == null) {
+            sender.sendMessage(ChatColor.RED + "/tp all isn't available right now.");
+            return;
+        }
+        Player visited = findVisible(sender, targetName);
+        if (visited == null) {
+            return;
+        }
+        support.whenAllowed(sender, TeleportExemptions.Type.TP.allNode(), () -> withSilent(sender, silentRequested, silent ->
+            rankChecked(sender, List.of(visited), () ->
+                rules.forAll(sender, TeleportExemptions.Type.TP, Set.of(visited.getUniqueId()), players ->
+                    TeleportExemptions.runAll(sender, players, "to " + visited.getName(), subject -> {
+                        TeleportPlan plan = TeleportPlan.staffToPlayer(sender, subject, visited, silent);
+                        return teleportService.start(plan).thenApply(outcome -> {
+                            if (outcome.isTeleported() && !silent) {
+                                tell(subject, sender.getName() + " teleported you to " + visited.getName() + ".");
+                            }
+                            return outcome;
+                        });
+                    })))));
+    }
+
+    /** {@code /tphere all}: every eligible player to you. */
+    private void hereAll(CommandSender sender, boolean silentRequested) {
+        TeleportExemptions rules = exemptions;
+        if (rules == null) {
+            sender.sendMessage(ChatColor.RED + "/tphere all isn't available right now.");
+            return;
+        }
+        Player actor = support.requirePlayer(sender);
+        if (actor == null) {
+            sender.sendMessage(ChatColor.YELLOW + "Usage from the console: /tp all <player>");
+            return;
+        }
+        support.whenAllowed(sender, TeleportExemptions.Type.TPHERE.allNode(), () -> withSilent(sender, silentRequested, silent ->
+            rules.forAll(sender, TeleportExemptions.Type.TPHERE, Set.of(), players ->
+                TeleportExemptions.runAll(sender, players, "to you", subject -> {
+                    TeleportPlan plan = TeleportPlan.staffToPlayer(sender, subject, actor, silent);
+                    return teleportService.start(plan).thenApply(outcome -> {
+                        if (outcome.isTeleported() && !silent) {
+                            tell(subject, actor.getName() + " teleported you to them.");
+                        }
+                        return outcome;
+                    });
                 }))));
+    }
+
+    private boolean isAll(String arg) {
+        return exemptions != null && TeleportExemptions.ALL_ARGUMENT.equalsIgnoreCase(arg);
+    }
+
+    /** Refuses an exempt {@code subject} (unless the sender overrides); no rules set = nobody exempt. */
+    private void notExempt(CommandSender sender, Player subject, TeleportExemptions.Type type, Runnable next) {
+        TeleportExemptions rules = exemptions;
+        if (rules == null) {
+            next.run();
+        } else {
+            rules.whenNotExempt(sender, subject, type, next);
+        }
     }
 
     private void selfToCoordinates(CommandSender sender, List<String> a) {
@@ -256,7 +349,7 @@ public class StaffTeleportCommand implements TabExecutor {
         }
     }
 
-    /** Runs {@code onAllowed} once the sender outranks every player in {@code players} (themselves excepted). */
+    /** Runs {@code onAllowed} once the sender may move every player (same rank or lower) in {@code players} (themselves excepted). */
     private void rankChecked(CommandSender sender, List<Player> players, Runnable onAllowed) {
         if (players.isEmpty()) {
             onAllowed.run();
@@ -286,7 +379,8 @@ public class StaffTeleportCommand implements TabExecutor {
     }
 
     private void sendTpUsage(CommandSender sender) {
-        sender.sendMessage(ChatColor.YELLOW + "Usage: /tp <player> [-s] | /tp <player> <target> [-s] | /tp <x> <y> <z> [world] [yaw pitch]");
+        sender.sendMessage(ChatColor.YELLOW + "Usage: /tp <player> [-s] | /tp <player> <target> [-s] | /tp <x> <y> <z> [world] [yaw pitch]"
+            + (exemptions != null ? " | /tp all <player> [-s]" : ""));
     }
 
     /** {@code x y z [world] [yaw pitch]} relative to {@code base}; null (after telling the sender) when invalid. */
@@ -360,13 +454,31 @@ public class StaffTeleportCommand implements TabExecutor {
         // KNG-107: only what the sender can run (cached check; running it checks for real).
         boolean self = support.holdsAny(sender, List.of(TeleportNodes.STAFF, TeleportNodes.LEGACY_ADMIN_TP));
         boolean others = support.holds(sender, TeleportNodes.STAFF_OTHERS);
-        boolean silent = (self || others) && support.holds(sender, TeleportNodes.STAFF_SILENT);
+        TeleportExemptions rules = exemptions;
+        boolean all = rules != null && support.holds(sender, (form == Form.TPHERE ? TeleportExemptions.Type.TPHERE
+            : TeleportExemptions.Type.TP).allNode());
+        boolean silent = (self || others || all) && support.holds(sender, TeleportNodes.STAFF_SILENT);
         String last = args[args.length - 1];
         if (form == Form.TPHERE) {
-            if (!others) {
-                return Collections.emptyList();
+            if (args.length == 1) {
+                List<String> options = new ArrayList<>(others ? targets.complete(sender, last) : List.of());
+                if (all && TeleportExemptions.ALL_ARGUMENT.startsWith(last.toLowerCase(Locale.ROOT))) {
+                    options.add(TeleportExemptions.ALL_ARGUMENT);
+                }
+                return options;
             }
-            return args.length == 1 ? targets.complete(sender, last) : silentFlag(silent, last);
+            return others || all ? silentFlag(silent, last) : Collections.emptyList();
+        }
+        if (args.length == 1 && all && TeleportExemptions.ALL_ARGUMENT.startsWith(last.toLowerCase(Locale.ROOT))) {
+            List<String> options = new ArrayList<>(self || others ? targets.complete(sender, last) : List.of());
+            options.add(TeleportExemptions.ALL_ARGUMENT);
+            return options;
+        }
+        if (args.length >= 2 && all && TeleportExemptions.ALL_ARGUMENT.equalsIgnoreCase(args[0])) {
+            if (args.length == 2) {
+                return targets.complete(sender, last);
+            }
+            return args.length == 3 ? silentFlag(silent, last) : Collections.emptyList();
         }
         if (args.length == 1) {
             return self || others ? targets.complete(sender, last) : Collections.emptyList();

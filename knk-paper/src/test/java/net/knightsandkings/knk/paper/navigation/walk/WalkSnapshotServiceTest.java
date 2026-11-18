@@ -160,6 +160,78 @@ class WalkSnapshotServiceTest {
     }
 
     @Test
+    void aRaisedChunkLimitAdmitsALargerBox() {
+        // off-road phase 0 (#703): navigation.walk.max-chunks-per-request lets the dev server measure long legs
+        NavigationConfig.WalkConfig d = NavigationConfig.WalkConfig.defaults();
+        assertEquals(WalkSnapshotService.MAX_CHUNKS_PER_REQUEST, d.maxChunksPerRequest(), "the default stays 64");
+        NavigationConfig.WalkConfig raised = new NavigationConfig.WalkConfig(d.enabled(), d.maxExpansions(),
+            d.maxLengthFactor(), d.maxLength(), d.detourAllowance(), d.climbAllowance(), d.maxDrop(), d.dropPenalty(),
+            d.captureMargin(), d.chunkTtlSeconds(), d.recomputeDistance(), d.maxConcurrentSearches(), d.climbables(),
+            d.wallCost(), 100);
+        WalkSnapshotService wide = new WalkSnapshotService(WalkCaptureTest.rules(), raised, new TickBudget(() -> tps[0]),
+            () -> now[0]);
+        WalkBox nineByNine = new WalkBox("world", 0, 60, 0, 16 * 9 - 1, 70, 16 * 9 - 1);
+
+        assertEquals(WalkSnapshotService.Status.TOO_LARGE, service.capture(chunks, GateCells.NONE, nineByNine).join().status());
+        CompletableFuture<WalkSnapshotService.WalkCapture> admitted = wide.capture(chunks, GateCells.NONE, nineByNine);
+        assertFalse(admitted.isDone(), "81 chunks are queued, not refused");
+        for (int i = 0; i < 100 && !admitted.isDone(); i++) {
+            wide.tick();
+        }
+        assertTrue(admitted.join().ready());
+        assertEquals(81, admitted.join().stats().chunks());
+    }
+
+    @Test
+    void eachCaptureReportsItsChunksCacheHitsTimeAndWait() {
+        // off-road phase 0 (#703): the counters a walk request carries to /knk road status
+        CompletableFuture<WalkSnapshotService.WalkCapture> first = service.capture(chunks, GateCells.NONE, box());
+        now[0] += 50; // the request waits for the next tick
+        service.tick();
+
+        WalkMeasurementsCapture stats = WalkMeasurementsCapture.of(first.join());
+        assertEquals(4, stats.chunks());
+        assertEquals(0, stats.cacheHits());
+        assertTrue(stats.captureNanos() > 0, "four chunks were extracted on the main thread");
+        assertEquals(50L, stats.waitMillis());
+
+        WalkMeasurementsCapture cached = WalkMeasurementsCapture.of(service.capture(chunks, GateCells.NONE, box()).join());
+        assertEquals(4, cached.chunks());
+        assertEquals(4, cached.cacheHits(), "all four from the cache");
+        assertEquals(0L, cached.captureNanos(), "no capture work for this request");
+        assertEquals(0L, cached.waitMillis());
+    }
+
+    @Test
+    void aChunkTwoRequestsWaitForCountsForBoth() {
+        CompletableFuture<WalkSnapshotService.WalkCapture> a = service.capture(chunks, GateCells.NONE, box());
+        CompletableFuture<WalkSnapshotService.WalkCapture> b = service.capture(chunks, GateCells.NONE, box());
+        tickUntilDone(a);
+        tickUntilDone(b);
+
+        assertEquals(a.join().stats().captureNanos(), b.join().stats().captureNanos());
+        assertEquals(service.stats().captureNanos(), a.join().stats().captureNanos(), "the same four extractions");
+    }
+
+    @Test
+    void aCaptureThatIsNotReadyHasNoCounters() {
+        chunks.unloaded.add(WalkChunk.key(1, 1));
+        WalkSnapshotService.WalkCapture capture = service.capture(chunks, GateCells.NONE, box()).join();
+
+        assertEquals(WalkSnapshotService.Status.UNLOADED, capture.status());
+        assertFalse(capture.stats().known());
+    }
+
+    /** Shorthand for the capture's counters. */
+    private record WalkMeasurementsCapture(int chunks, int cacheHits, long captureNanos, long waitMillis) {
+        static WalkMeasurementsCapture of(WalkSnapshotService.WalkCapture capture) {
+            assertTrue(capture.ready());
+            var s = capture.stats();
+            return new WalkMeasurementsCapture(s.chunks(), s.cacheHits(), s.captureNanos(), s.waitMillis());
+        }
+    }
+
+    @Test
     void freshChunksAreSharedAcrossRequestsAndStaleOnesRecaptured() {
         tickUntilDone(service.capture(chunks, GateCells.NONE, box()));
         assertEquals(4, chunks.captured.size());

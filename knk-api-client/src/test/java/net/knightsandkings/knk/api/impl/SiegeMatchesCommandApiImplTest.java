@@ -175,6 +175,30 @@ class SiegeMatchesCommandApiImplTest {
     }
 
     @Test
+    void complete_sendsGateDamageAndActivity_andMapsTheNewRewardFigures() throws Exception {
+        responseByPath.put("/api/siege-matches/44/complete", """
+                {"matchId":44,"status":"Completed","alreadyCompleted":false,"rewards":[
+                  {"userId":7,"presentAtEnd":true,"won":false,"holdingCount":0,"captureCount":0,"coins":55,"baseCoins":55,
+                   "experience":6,"gems":0,"gateDamage":312,"gateDamageSteps":3,"participation":true,
+                   "activeSeconds":540,"matchSeconds":600}]}""");
+        Completion completion = new Completion(SiegeEndReason.TIME_EXPIRED, null,
+                List.of(new ParticipantResult(7, 202, 0, 0, 0, 0).withContribution(312.5, 540, 600)), List.of());
+
+        RewardSummary summary = await(api.completeMatch(44, completion));
+
+        JsonNode p = json.readTree(bodies.get("/api/siege-matches/44/complete")).get("participants").get(0);
+        assertEquals(312.5, p.get("gateDamage").asDouble());
+        assertEquals(540, p.get("activeSeconds").asLong());
+        assertEquals(600, p.get("matchSeconds").asLong());
+        ParticipantReward r = summary.rewards().get(0);
+        assertEquals(312, r.gateDamage());
+        assertEquals(3, r.gateDamageSteps());
+        assertTrue(r.participation());
+        assertEquals(540, r.activeSeconds());
+        assertEquals(600, r.matchSeconds());
+    }
+
+    @Test
     void httpErrors_surfaceAsApiExceptionWithTheStatus() {
         statusByPath.put("/api/siege-matches/42/complete", 409);
         responseByPath.put("/api/siege-matches/42/complete", "{\"code\":\"BusinessRuleViolation\"}");

@@ -217,4 +217,96 @@ class WalkAccessFactoryTest {
             new WalkBox("world", 0, 0, 0, 1, 1, 1), null, List.of());
         assertThrows(IllegalArgumentException.class, () -> factory().prepare(player, world, GateCells.NONE, unloaded, 2));
     }
+
+    // ==================== access subjects (PandiO/knk-workspace#360) ====================
+
+    private WalkAccessFactory subjectFactory(List<String> subjectGateQueries) {
+        return factory().subjectGates((subject, ids) -> {
+            subjectGateQueries.add(subject.name());
+            return new GateAvailability(id -> Optional.ofNullable(gateViews.get(id)), id -> false);
+        });
+    }
+
+    @Test
+    void aPlayerSubjectGetsTheSameAccessAsThePlayer() {
+        net.knightsandkings.knk.paper.navigation.NavigationAccess navigation =
+            mock(net.knightsandkings.knk.paper.navigation.NavigationAccess.class);
+        org.mockito.Mockito.when(navigation.regionsAt(player)).thenReturn(Set.of("yard"));
+        org.mockito.Mockito.when(player.getName()).thenReturn("Steve");
+        var subject = new net.knightsandkings.knk.paper.navigation.PlayerAccessSubject(player, navigation);
+        regions = Map.of("yard", RegionShape.cuboid(0, 0, 0, 3, 100, 3), "house", RegionShape.cuboid(4, 0, 4, 8, 100, 8));
+        playerRegions = Set.of("yard");
+        domains.put("yard", domain(3, "Yard", "yard", false, false));
+        domains.put("house", domain(1, "House", "house", false, true));
+        doorsAllowed = false;
+        WalkSnapshotService.WalkCapture capture = capture();
+
+        WalkAccessFactory.WalkAccess asPlayer = factory().prepare(player, world, fake.gates(), capture, 2);
+        int playerDoorChecks = doorChecks.size();
+        WalkAccessFactory.WalkAccess asSubject = subjectFactory(new ArrayList<>()).prepare(subject, world, fake.gates(),
+            capture, 2, null);
+
+        assertEquals(playerDoorChecks * 2, doorChecks.size(), "the player's doors are still WorldGuard's answer");
+        assertEquals(asPlayer.doors().deniedDoorBlocks(), asSubject.doors().deniedDoorBlocks());
+        assertEquals(asPlayer.regions(), asSubject.regions());
+        assertEquals(asPlayer.bypass(), asSubject.bypass());
+        assertTrue(asSubject.subjectDenied().isEmpty());
+        CellAccess player = asPlayer.resolve();
+        CellAccess viaSubject = asSubject.resolve();
+        WalkBox box = capture.box();
+        for (int x = box.minX(); x <= box.maxX(); x++) {
+            for (int z = box.minZ(); z <= box.maxZ(); z++) {
+                assertEquals(player.extraCost(x, 65, z), viaSubject.extraCost(x, 65, z), "cell " + x + " 65 " + z);
+                assertEquals(player.denyReason(x, 65, z), viaSubject.denyReason(x, 65, z));
+            }
+        }
+    }
+
+    @Test
+    void anNpcAnswersForItsOwnDoorsAndItsListsComeBeforeTheDomainRules() {
+        regions = Map.of("house", RegionShape.cuboid(4, 0, 4, 8, 100, 8), "garden", RegionShape.cuboid(10, 0, 0, 13, 100, 3));
+        domains.put("house", domain(1, "House", "house", false, true));
+        domains.put("garden", domain(2, "Garden", "garden", true, true));
+        var profile = new net.knightsandkings.knk.core.npc.nav.NpcAccessProfile("guard", false, false,
+            Set.of("house"), Set.of("garden"));
+        var npc = new net.knightsandkings.knk.core.npc.nav.NpcAccessSubject("guard-1", profile, "world", Set.of());
+        List<String> gateQueries = new ArrayList<>();
+
+        WalkAccessFactory.WalkAccess access = subjectFactory(gateQueries).prepare(npc, world, fake.gates(), capture(), 2,
+            null);
+        CellAccess resolved = access.resolve();
+
+        assertTrue(doorChecks.isEmpty(), "WorldGuard's door check is for players");
+        assertEquals(3, access.doors().deniedDoorBlocks().size(), "the profile keeps doors shut");
+        assertTrue(access.regions().isEmpty(), "the allowed house is left out of the domain rules");
+        assertEquals(0.0, resolved.extraCost(6, 65, 6), "allowed in the house although its domain denies entry");
+        assertEquals(CellAccess.BLOCKED, resolved.extraCost(11, 65, 1), "never in the garden although its domain allows it");
+        assertEquals(Optional.of("not allowed in garden"), resolved.denyReason(11, 65, 1));
+        assertEquals(0.0, resolved.extraCost(2, 65, 2));
+    }
+
+    @Test
+    void anNpcsDenyListHoldsWithTheBypassAndNotForARegionItStandsIn() {
+        regions = Map.of("garden", RegionShape.cuboid(10, 0, 0, 13, 100, 3));
+        var profile = new net.knightsandkings.knk.core.npc.nav.NpcAccessProfile("staff", true, true, Set.of(),
+            Set.of("garden"));
+
+        CellAccess outside = subjectFactory(new ArrayList<>()).prepare(
+            new net.knightsandkings.knk.core.npc.nav.NpcAccessSubject("n", profile, "world", Set.of()), world,
+            fake.gates(), capture(), 2, null).resolve();
+        CellAccess inside = subjectFactory(new ArrayList<>()).prepare(
+            new net.knightsandkings.knk.core.npc.nav.NpcAccessSubject("n", profile, "world", Set.of("garden")), world,
+            fake.gates(), capture(), 2, null).resolve();
+
+        assertEquals(CellAccess.BLOCKED, outside.extraCost(11, 65, 1));
+        assertEquals(0.0, inside.extraCost(11, 65, 1), "it may walk out of a denied region it is in");
+    }
+
+    @Test
+    void subjectsNeedTheirGateRule() {
+        var npc = new net.knightsandkings.knk.core.npc.nav.NpcAccessSubject("n",
+            net.knightsandkings.knk.core.npc.nav.NpcAccessProfile.DEFAULT, "world", Set.of());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+            () -> factory().prepare(npc, world, fake.gates(), capture(), 2, null));
+    }
 }

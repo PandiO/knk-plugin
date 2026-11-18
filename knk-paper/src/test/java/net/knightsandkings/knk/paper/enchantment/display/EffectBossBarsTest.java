@@ -1,0 +1,350 @@
+package net.knightsandkings.knk.paper.enchantment.display;
+
+import net.kyori.adventure.bossbar.BossBar;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
+import org.bukkit.entity.Player;
+import org.bukkit.entity.Zombie;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.potion.PotionEffect;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+/**
+ * PandiO/knk-workspace#170: one boss bar per timed custom-enchantment debuff, counting down and following the real
+ * effect; a static "Frozen" bar for a staff freeze; gone on end, death and quit.
+ */
+class EffectBossBarsTest {
+
+    private final AtomicLong now = new AtomicLong(0L);
+    private final Map<UUID, Player> online = new HashMap<>();
+    private final List<BossBar> shown = new ArrayList<>();
+    // PotionEffectType is registry-backed (no server in tests): the bars read the potion through these instead.
+    private final Map<String, PotionEffect> potions = new HashMap<>();
+    private final Function<Player, PotionEffect> poisonType = p -> potions.get("poison");
+    private final Function<Player, PotionEffect> nauseaType = p -> potions.get("nausea");
+    private final long[] freezeRemaining = {0L};
+    private EffectBossBars bars;
+    private Player player;
+
+    @BeforeEach
+    void setUp() {
+        bars = new EffectBossBars(null, online::get, now::get);
+        bars.remainingFrom("freeze", id -> freezeRemaining[0]);
+        player = mock(Player.class);
+        UUID id = UUID.randomUUID();
+        when(player.getUniqueId()).thenReturn(id);
+        doAnswer(inv -> shown.add(inv.getArgument(0))).when(player).showBossBar(any(BossBar.class));
+        doAnswer(inv -> shown.remove(inv.<BossBar>getArgument(0))).when(player).hideBossBar(any(BossBar.class));
+        online.put(id, player);
+    }
+
+    @Test
+    void oneBarPerDebuff_CountingDown() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        freezeRemaining[0] = 2_000L;
+        bars.debuff(player, "freeze", "Frozen", (Function<Player, PotionEffect>) null, 40);
+
+        assertEquals(List.of("Poison · 4s", "Frozen · 2s"), texts());
+
+        now.set(1_000L);
+        potions.put("poison", effect(60));
+        freezeRemaining[0] = 1_000L;
+        bars.tick();
+        assertEquals(List.of("Poison · 3s", "Frozen · 1s"), texts());
+        assertEquals(0.75f, shown.get(0).progress(), 0.0001f);
+    }
+
+    @Test
+    void theSameDebuffAgainRestartsItsBarInsteadOfAddingOne() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        now.set(2_000L);
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+
+        assertEquals(1, shown.size());
+        assertEquals("Poison · 4s", texts().get(0));
+        assertEquals(1.0f, shown.get(0).progress(), 0.0001f);
+    }
+
+    @Test
+    void aBarEndsWithItsEffect_MilkOrAnEarlyUnfreeze() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        freezeRemaining[0] = 2_000L;
+        bars.debuff(player, "freeze", "Frozen", (Function<Player, PotionEffect>) null, 40);
+
+        potions.clear();          // milk
+        freezeRemaining[0] = 0L;  // unfrozen
+        now.set(500L);
+        bars.tick();
+
+        assertTrue(shown.isEmpty());
+        assertFalse(bars.has(player.getUniqueId(), "poison"));
+    }
+
+    @Test
+    void aBarRunsOutOnTime() {
+        bars.debuff(player, "nausea", "Nausea", (Function<Player, PotionEffect>) null, 20);
+        now.set(1_000L);
+        bars.tick();
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void staffFreezeIsAStaticFrozenBar_ThatDeathKeepsAndQuitClears() {
+        bars.staffFrozen(player.getUniqueId(), true);
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        assertEquals(List.of("Frozen by staff", "Poison · 4s"), texts());
+        assertEquals(1.0f, shown.get(0).progress(), 0.0001f);
+
+        now.set(3_600_000L);
+        potions.put("poison", effect(80)); // still there, a later copy
+        PlayerDeathEvent death = mock(PlayerDeathEvent.class);
+        when(death.getEntity()).thenReturn(player);
+        bars.onDeath(death);
+        assertEquals(List.of("Frozen by staff"), texts());
+
+        PlayerQuitEvent quit = mock(PlayerQuitEvent.class);
+        when(quit.getPlayer()).thenReturn(player);
+        bars.onQuit(quit);
+        assertTrue(shown.isEmpty());
+        assertFalse(bars.has(player.getUniqueId(), EffectBossBars.STAFF_FREEZE));
+    }
+
+    /** #170 round 2: the staff freeze bar is red and names the freezer and the reason. */
+    @Test
+    void staffFreezeBarIsRedAndNamesWhoFrozeAndWhy() {
+        bars.staffFrozen(player.getUniqueId(), true, EffectBossBars.staffFreezeLabel("Admin", "griefing"));
+
+        assertEquals(List.of("Frozen by Admin for: griefing"), texts());
+        assertEquals(BossBar.Color.RED, shown.get(0).color());
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.RED, shown.get(0).name().color());
+        // The enchantment freeze keeps its own blue bar.
+        assertEquals(BossBar.Color.BLUE, EffectBossBars.barColor("freeze"));
+    }
+
+    @Test
+    void staffFreezeLabel_UnknownFreezerIsStaff_NoReasonDropsTheForPart_LongReasonIsCut() {
+        assertEquals("Frozen by staff for: spam", EffectBossBars.staffFreezeLabel(null, "spam"));
+        assertEquals("Frozen by staff for: spam", EffectBossBars.staffFreezeLabel("  ", " spam "));
+        assertEquals("Frozen by Admin", EffectBossBars.staffFreezeLabel("Admin", null));
+        assertEquals("Frozen by staff", EffectBossBars.staffFreezeLabel(null, "   "));
+        String cut = EffectBossBars.staffFreezeLabel("Admin", "x".repeat(200));
+        assertEquals("Frozen by Admin for: " + "x".repeat(EffectBossBars.MAX_REASON_LENGTH - 1) + "…", cut);
+        // The two-argument call (no freezer known, no reason) still shows a bar.
+        bars.staffFrozen(player.getUniqueId(), true);
+        assertEquals(List.of("Frozen by staff"), texts());
+    }
+
+    /** #169 round 2: the invisibility ability reaches the invoker's name-tag hiding; creatures don't. */
+    @Test
+    void invisibleIsForwardedForPlayersOnly() {
+        org.bukkit.scoreboard.Scoreboard shared = FakeBoards.board();
+        org.bukkit.scoreboard.Team rank = shared.registerNewTeam("default");
+        rank.setCanSeeFriendlyInvisibles(true);
+        when(player.getName()).thenReturn("Sneaky");
+        bars.invisible(player, 200); // no InvisibleNameTag set yet: nothing happens
+        assertTrue(rank.canSeeFriendlyInvisibles());
+
+        bars.setInvisibleNameTag(new InvisibleNameTag(() -> shared));
+        bars.invisible(mock(Zombie.class), 200);
+        bars.invisible(player, 0);
+        assertTrue(rank.canSeeFriendlyInvisibles());
+        bars.invisible(player, 200);
+        assertTrue(rank.canSeeFriendlyInvisibles(), "Sneaky is on no team yet");
+
+        rank.addEntry("Sneaky");
+        bars.invisible(player, 200);
+        assertFalse(rank.canSeeFriendlyInvisibles());
+    }
+
+    /** #211: the invisibility ability also reaches the equipment mask; creatures and zero durations don't. */
+    @Test
+    void invisibleHidesTheEquipmentForPlayersOnly() {
+        InvisibleEquipment equipment = org.mockito.Mockito.mock(InvisibleEquipment.class);
+        bars.setInvisibleEquipment(equipment);
+
+        bars.invisible(mock(Zombie.class), 200);
+        bars.invisible(player, 0);
+        org.mockito.Mockito.verify(equipment, org.mockito.Mockito.never()).hide(org.mockito.ArgumentMatchers.any());
+
+        bars.invisible(player, 200);
+        org.mockito.Mockito.verify(equipment).hide(player);
+    }
+
+    @Test
+    void unfreezingByStaffHidesTheFrozenBar() {
+        bars.staffFrozen(player.getUniqueId(), true);
+        bars.staffFrozen(player.getUniqueId(), false);
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void aLongerRunningCopyOfThePotionKeepsItsTimeOnTheBar() {
+        potions.put("nausea", effect(250));
+        bars.debuff(player, "nausea", "Nausea", nauseaType, 60);
+        assertEquals("Nausea · 13s", texts().get(0));
+    }
+
+    @Test
+    void creaturesGetNoBar() {
+        Zombie zombie = mock(Zombie.class);
+        bars.debuff(zombie, "poison", "Poison", poisonType, 80);
+        verifyNoInteractions(zombie);
+    }
+
+    @Test
+    void hideAllOnDisable() {
+        bars.debuff(player, "poison", "Poison", (Function<Player, PotionEffect>) null, 80);
+        bars.staffFrozen(player.getUniqueId(), true);
+        bars.hideAll();
+        assertTrue(shown.isEmpty());
+    }
+
+    // PandiO/knk-workspace#202: ability cooldown bars.
+
+    @Test
+    void reshowBelowMovesTheBarsUnderABarShownLater_InBoardOrder() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        BossBar navigation = BossBar.bossBar(Component.text("→ Merchantstreet"), 0f, BossBar.Color.YELLOW,
+                BossBar.Overlay.PROGRESS);
+        player.showBossBar(navigation);
+
+        bars.reshowBelow(player);
+
+        assertEquals(navigation, shown.get(0));
+        assertEquals(List.of("→ Merchantstreet", "Poison · 4s", "Chaos cooldown · 1:30"), texts());
+    }
+
+    @Test
+    void reshowBelowWithoutBarsDoesNothing() {
+        bars.reshowBelow(player);
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void cooldownBarCountsDownNextToTheDebuffBars_InGrey() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.cooldown(player.getUniqueId(), "flash_chaos", "Flash Chaos cooldown", 90_000L);
+
+        assertEquals(List.of("Poison · 4s", "Flash Chaos cooldown · 1:30"), texts());
+        assertEquals(BossBar.Color.WHITE, shown.get(1).color());
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.GRAY, shown.get(1).name().color());
+        assertTrue(bars.has(player.getUniqueId(), "cooldown:flash_chaos"));
+
+        now.set(2_000L);
+        potions.put("poison", effect(40));
+        bars.tick();
+        assertEquals(List.of("Poison · 2s", "Flash Chaos cooldown · 1:28"), texts());
+
+        now.set(90_000L);
+        potions.remove("poison");
+        bars.tick();
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void cooldownBarFollowsTheCooldownStore_ClearedEndsIt() {
+        long[] remaining = {20_000L};
+        bars.cooldownsFrom((id, ability) -> "freeze".equals(ability) ? remaining[0] : 0L);
+        bars.cooldown(player.getUniqueId(), "freeze", "Freeze cooldown", 20_000L);
+        assertEquals(List.of("Freeze cooldown · 20s"), texts());
+
+        remaining[0] = 5_000L;
+        bars.tick();
+        assertEquals(List.of("Freeze cooldown · 5s"), texts());
+
+        remaining[0] = 0L; // /ce cooldown clear, or the store forgot it
+        bars.tick();
+        assertTrue(shown.isEmpty());
+    }
+
+    @Test
+    void clearCooldownsRemovesOnlyTheCooldownBars() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.staffFrozen(player.getUniqueId(), true);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        bars.cooldown(player.getUniqueId(), "cleaving", "Cleaving strike cooldown", 60_000L);
+        assertEquals(4, shown.size());
+
+        bars.clearCooldowns(player.getUniqueId());
+        assertEquals(List.of("Poison · 4s", "Frozen by staff"), texts());
+    }
+
+    @Test
+    void cooldownBarsStayThroughDeath_AndGoOnQuit() {
+        potions.put("poison", effect(80));
+        bars.debuff(player, "poison", "Poison", poisonType, 80);
+        bars.cooldown(player.getUniqueId(), "resistance", "Resistance cooldown", 120_000L);
+
+        PlayerDeathEvent death = mock(PlayerDeathEvent.class);
+        when(death.getEntity()).thenReturn(player);
+        bars.onDeath(death);
+        assertEquals(List.of("Resistance cooldown · 2:00"), texts());
+
+        PlayerQuitEvent quit = mock(PlayerQuitEvent.class);
+        when(quit.getPlayer()).thenReturn(player);
+        bars.onQuit(quit);
+        assertTrue(shown.isEmpty());
+        assertFalse(bars.has(player.getUniqueId(), "cooldown:resistance"));
+    }
+
+    @Test
+    void theSameAbilityAgainRestartsItsCooldownBar() {
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        now.set(30_000L);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 90_000L);
+        assertEquals(List.of("Chaos cooldown · 1:30"), texts());
+        assertEquals(1.0f, shown.get(0).progress(), 0.0001f);
+    }
+
+    @Test
+    void noCooldownBarForAnOfflinePlayerOrZeroLength() {
+        bars.cooldown(UUID.randomUUID(), "chaos", "Chaos cooldown", 90_000L);
+        bars.cooldown(player.getUniqueId(), "chaos", "Chaos cooldown", 0L);
+        assertTrue(shown.isEmpty());
+        assertFalse(bars.has(player.getUniqueId(), "cooldown:chaos"));
+    }
+
+    private static PotionEffect effect(int ticks) {
+        PotionEffect effect = mock(PotionEffect.class);
+        when(effect.getDuration()).thenReturn(ticks);
+        when(effect.isInfinite()).thenReturn(false);
+        return effect;
+    }
+
+    private List<String> texts() {
+        List<String> texts = new ArrayList<>();
+        for (BossBar bar : shown) {
+            Component name = bar.name();
+            texts.add(((TextComponent) name).content());
+        }
+        return texts;
+    }
+}

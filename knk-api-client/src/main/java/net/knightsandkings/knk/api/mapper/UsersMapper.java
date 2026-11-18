@@ -42,7 +42,10 @@ public class UsersMapper {
             dto.permissionGroups() == null ? java.util.List.of() : dto.permissionGroups().stream()
                 .filter(java.util.Objects::nonNull)
                 .map(g -> new net.knightsandkings.knk.core.domain.users.PermissionGroupRef(g.id(), g.name()))
-                .toList()
+                .toList(),
+            dto.nameColorGroupId(),
+            dto.chatPrimaryColorGroupId(),
+            dto.chatSecondaryColorGroupId()
         );
     }
 
@@ -72,7 +75,10 @@ public class UsersMapper {
             domain.nameColor(),
             domain.permissionGroups().stream()
                 .map(g -> new net.knightsandkings.knk.api.dto.PermissionGroupRefDto(g.id(), g.name()))
-                .toList()
+                .toList(),
+            domain.nameColorGroupId(),
+            domain.chatPrimaryColorGroupId(),
+            domain.chatSecondaryColorGroupId()
         );
     }
 
@@ -175,7 +181,10 @@ public class UsersMapper {
             dto.id(), dto.userId(), dto.uuid(), dto.username(), dto.type(), mapTitleChange(dto.titleChange()),
             CurrencyMapper.mapPaymentNotice(dto.payment()), CurrencyMapper.mapAlertNotice(dto.currencyAlert()),
             LootboxMapper.toCore(dto.lootboxWorldChanged()),
-            net.knightsandkings.knk.api.impl.LocationRetentionApiImpl.mapDigest(dto.locationOrphanDigest())
+            net.knightsandkings.knk.api.impl.LocationRetentionApiImpl.mapDigest(dto.locationOrphanDigest()),
+            dto.accountLinked() == null ? null
+                : new net.knightsandkings.knk.core.domain.users.AccountLinkedNotice(dto.accountLinked().maskedEmail(),
+                    dto.accountLinked().via())
         );
     }
 

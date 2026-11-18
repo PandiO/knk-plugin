@@ -17,6 +17,7 @@ import java.util.Optional;
  * @param townWgRegionId     the town's WorldGuard region id, or null
  * @param minTitleBracketId  minimum title bracket to join, or null for none
  * @param minTitleExperience that bracket's MinExperience, so entry can be checked without a lookup
+ * @param navigationItem   the scenario's choice on giving the navigation compass at the hub (KNG-234); the lobby's wins over it
  * @param areaGateStructureIds the other gate structures in the scenario area (its districts, or the
  *                           town's), which a match forces open and invincible (Phase 7, DESIGN §8.1)
  */
@@ -41,7 +42,8 @@ public record KnkSiegeScenario(
         List<KnkSiegeTeam> teams,
         List<KnkSiegeObjective> objectives,
         List<KnkSiegeGate> gates,
-        List<Integer> areaGateStructureIds
+        List<Integer> areaGateStructureIds,
+        SiegeNavigationItemMode navigationItem
 ) {
     private static final Comparator<KnkSiegeTeam> TEAM_ORDER =
             Comparator.comparingInt(KnkSiegeTeam::sortOrder).thenComparingInt(KnkSiegeTeam::id);
@@ -57,6 +59,19 @@ public record KnkSiegeScenario(
                 : areaGateStructureIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
         if (matchLength == null) matchLength = KnkSiegeMatchLength.DEFAULT;
         if (rewards == null) rewards = KnkSiegeRewards.NONE;
+        if (navigationItem == null) navigationItem = SiegeNavigationItemMode.INHERIT;
+    }
+
+    /** A scenario that leaves the navigation compass to the lobby and the global setting (everything before KNG-234). */
+    public KnkSiegeScenario(int id, String name, String description, int townId, String townName, String townWgRegionId,
+                            List<KnkSiegeDistrict> districts, KnkLocation hubLocation, int playersMin, int playersMax,
+                            Integer minTitleBracketId, Integer minTitleExperience, KnkSiegeMatchLength matchLength,
+                            KnkSiegeRewards rewards, boolean lockdownScenarioArea, boolean allowRecapture,
+                            boolean enchantDropsEnabled, List<KnkSiegeTeam> teams, List<KnkSiegeObjective> objectives,
+                            List<KnkSiegeGate> gates, List<Integer> areaGateStructureIds) {
+        this(id, name, description, townId, townName, townWgRegionId, districts, hubLocation, playersMin, playersMax,
+                minTitleBracketId, minTitleExperience, matchLength, rewards, lockdownScenarioArea, allowRecapture,
+                enchantDropsEnabled, teams, objectives, gates, areaGateStructureIds, SiegeNavigationItemMode.INHERIT);
     }
 
     public Optional<KnkSiegeTeam> team(int teamId) {

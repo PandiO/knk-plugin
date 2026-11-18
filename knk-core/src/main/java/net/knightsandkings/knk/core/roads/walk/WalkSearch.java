@@ -6,7 +6,9 @@ import net.knightsandkings.knk.core.util.BlockKey;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Objects;
 import java.util.PriorityQueue;
+import java.util.function.LongSupplier;
 
 import static net.knightsandkings.knk.core.roads.walk.WalkGrid.DX;
 import static net.knightsandkings.knk.core.roads.walk.WalkGrid.DZ;
@@ -37,7 +39,10 @@ import static net.knightsandkings.knk.core.roads.walk.WalkGrid.NO_LINK;
  * <p><b>Cost</b> of entering a cell = move cost (× water factor) + door cost (door cells; blocked if
  * the profile opens no doors) + wall cost (a standing cell with a wall among its 8 neighbours, so
  * paths round corners a block wide where there is room) + the {@link CellAccess} verdict
- * ({@code +∞} = never entered). The start cell is exempt from access (the mover is already there).
+ * ({@code +∞} = never entered). The start cell is exempt from access (the mover is already there). With a
+ * {@link MovementProfile#clearanceCost() clearance cost} above 0 (off-road phase 6.1, PandiO/knk-workspace#710,
+ * {@code navigation.guidance-v2}) the wall cost is replaced by that cost per block of {@link WalkClearance clearance}
+ * a standing cell lacks to {@link MovementProfile#wallClearance()}; at 0 the search is exactly the one before.
  *
  * <p><b>Search.</b> Start = the nearest cell within {@code startSnap} of the feet; a target with no
  * cell within {@code goalSnap} → NO_PATH. Heuristic = {@code max(horizontal distance, |Δfloor y|)} to
@@ -48,6 +53,11 @@ import static net.knightsandkings.knk.core.roads.walk.WalkGrid.NO_LINK;
  * without arriving → NO_PATH. Either may carry a {@link WalkResult#partialPath() partial path} (§11-5,
  * revised 2026-10-07): to the expanded cell closest to the target (3D, ties to the cheaper), when it
  * is at least {@link #MIN_PARTIAL_GAIN} blocks closer than the start cell.
+ *
+ * <p><b>Counters</b> (off-road navigation phase 0, PandiO/knk-workspace#703): every result carries
+ * {@link WalkResult#stats()} - expansions, cells touched, the wall time of {@link #find} and the cap that ended
+ * the search. They cost two clock reads per search and nothing in the loop (the expansion count already exists,
+ * the cell count is the node map's size); the search never reads them, so they change no result.
  */
 public final class WalkSearch implements WalkPathfinder {
 
@@ -57,9 +67,26 @@ public final class WalkSearch implements WalkPathfinder {
     private static final double SQRT2 = Math.sqrt(2.0);
     private static final double EPS = 1e-9;
 
+    private final LongSupplier nanoClock;
+
+    /** The search, timed by {@link System#nanoTime()}. */
+    public WalkSearch() {
+        this(System::nanoTime);
+    }
+
+    /** @param nanoClock the clock {@link WalkSearchStats#searchNanos()} is read from (tests: a fake) */
+    public WalkSearch(LongSupplier nanoClock) {
+        this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+    }
+
     @Override
     public WalkResult find(WalkRequest request) {
-        return new Run(request).run();
+        long start = nanoClock.getAsLong();
+        Run run = new Run(request);
+        WalkResult result = run.run();
+        long elapsed = Math.max(0L, nanoClock.getAsLong() - start);
+        return result.withStats(new WalkSearchStats(result.expansions(), run.nodes.size(), elapsed, run.endedBy,
+            run.lengthCapped));
     }
 
     /**
@@ -70,7 +97,7 @@ public final class WalkSearch implements WalkPathfinder {
         return gridFor(terrain.surface(), terrain.cells(), terrain, profile);
     }
 
-    private static WalkGrid gridFor(SurfaceGrid surface, WalkCells cells, WalkTerrain terrain, MovementProfile profile) {
+    static WalkGrid gridFor(SurfaceGrid surface, WalkCells cells, WalkTerrain terrain, MovementProfile profile) {
         return new WalkGrid(surface, terrain.gates(), cells, profile.headroom(),
             (grid, x, y, z) -> !cells.isClimbable(x, y, z) && !cells.isDoor(x, y, z)
                 && PassabilityRules.isWalkFloor(grid.floorMaterial(x, y, z)));
@@ -100,6 +127,8 @@ public final class WalkSearch implements WalkPathfinder {
         private final MovementProfile profile;
         private final CellAccess access;
         private final WalkGrid grid;
+        /** The clearance map of the clearance cost (phase 6.1); null without one. */
+        private final WalkClearance clearance;
         private final LongMap<Node> nodes = new LongMap<>(1024);
         private final PriorityQueue<Entry> open = new PriorityQueue<>((a, b) -> {
             int c = Double.compare(a.f, b.f);
@@ -112,6 +141,7 @@ public final class WalkSearch implements WalkPathfinder {
         private long seq;
         private int expansions;
         private boolean lengthCapped;
+        private WalkSearchStats.Cap endedBy = WalkSearchStats.Cap.NONE;
         private double cap;
         private Node closest;
         private double closestDistance = Double.POSITIVE_INFINITY;
@@ -125,6 +155,9 @@ public final class WalkSearch implements WalkPathfinder {
             this.profile = request.profile();
             this.access = request.access();
             this.grid = gridFor(surface, cells, request.terrain(), profile);
+            this.clearance = profile.usesClearance()
+                ? new WalkClearance((x, y, z) -> isStanding(x, y, z) && access.allows(x, y + 1, z), profile.wallClearance())
+                : null;
         }
 
         WalkResult run() {
@@ -153,6 +186,7 @@ public final class WalkSearch implements WalkPathfinder {
                 }
                 noteClosest(u);
                 if (expansions >= budget.maxExpansions()) {
+                    endedBy = WalkSearchStats.Cap.MAX_EXPANSIONS;
                     return WalkResult.fallback("expansion budget", expansions, partial());
                 }
                 expansions++;
@@ -162,9 +196,11 @@ public final class WalkSearch implements WalkPathfinder {
                     expandStanding(u);
                 }
             }
-            return lengthCapped
-                ? WalkResult.fallback("length cap", expansions, partial())
-                : WalkResult.noPath("target unreachable", expansions, partial());
+            if (lengthCapped) {
+                endedBy = WalkSearchStats.Cap.MAX_LENGTH;
+                return WalkResult.fallback("length cap", expansions, partial());
+            }
+            return WalkResult.noPath("target unreachable", expansions, partial());
         }
 
         // ===== partial path (§11-5) =====
@@ -411,7 +447,9 @@ public final class WalkSearch implements WalkPathfinder {
                 }
                 cost += profile.doorCost();
             }
-            if (profile.wallCost() > 0 && besideWall(x, y, z)) {
+            if (clearance != null) {
+                cost += profile.clearanceCost() * clearance.lack(x, y, z, profile.wallClearance());
+            } else if (profile.wallCost() > 0 && besideWall(x, y, z)) {
                 cost += profile.wallCost();
             }
             relax(u, BlockKey.pack(x, y, z), false, cost + accessCost, stepLength);

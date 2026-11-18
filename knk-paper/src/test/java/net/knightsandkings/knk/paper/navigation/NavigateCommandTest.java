@@ -157,4 +157,108 @@ class NavigateCommandTest {
         assertEquals(List.of(), disabled.onTabComplete(player, command, "navigate", new String[] {"K"}));
         verify(destinations, never()).resolve(anyString(), anyString());
     }
+
+    // ==================== in a minigame match (KNG-234) ====================
+
+    private static MatchNavigationScope.MatchDestination keep() {
+        return new MatchNavigationScope.MatchDestination("objective:1", "Keep Gate", "defend",
+            Destination.point("Keep Gate", "world", 10, 64, 5));
+    }
+
+    private static MatchNavigationScope.MatchDestination wall() {
+        return new MatchNavigationScope.MatchDestination("objective:2", "Keep Wall", "defend",
+            Destination.point("Keep Wall", "world", 20, 64, 5));
+    }
+
+    private static MatchNavigationScope.MatchDestination camp() {
+        return new MatchNavigationScope.MatchDestination("spawn:1", "Raiders camp", "your spawn",
+            Destination.point("Raiders camp", "world", 30, 64, 5));
+    }
+
+    private void inMatch(MatchNavigationScope.MatchDestination... destinations) {
+        MatchNavigationScope scope = player -> java.util.Optional.of(List.of(destinations));
+        navigate.setMatchScope(() -> scope);
+    }
+
+    @Test
+    void inAMatchOnlyTheMatchDestinationsAreAccepted() {
+        inMatch(keep(), camp());
+
+        navigate.onCommand(player, command, "navigate", new String[] {"Kardenna"});
+
+        verify(service, never()).navigate(any(), any());
+        verify(destinations, never()).resolve(anyString(), anyString());
+        String message = lastMessage();
+        assertTrue(message.contains("\"Kardenna\" is not part of this match"), message);
+        assertTrue(message.contains("Keep Gate") && message.contains("Raiders camp"), message);
+    }
+
+    @Test
+    void inAMatchAMatchDestinationIsNavigatedToByName() {
+        inMatch(keep(), camp());
+
+        navigate.onCommand(player, command, "navigate", new String[] {"keep", "gate"});
+
+        ArgumentCaptor<Destination> captor = ArgumentCaptor.forClass(Destination.class);
+        verify(service).navigate(org.mockito.ArgumentMatchers.eq(player), captor.capture());
+        assertEquals("Keep Gate", captor.getValue().name());
+    }
+
+    @Test
+    void inAMatchAUniquePrefixIsEnoughButAnAmbiguousOneIsNot() {
+        inMatch(keep(), wall(), camp());
+
+        navigate.onCommand(player, command, "navigate", new String[] {"raid"});
+        verify(service).navigate(any(), any());
+
+        org.mockito.Mockito.clearInvocations(service, player);
+        navigate.onCommand(player, command, "navigate", new String[] {"keep"});
+        verify(service, never()).navigate(any(), any());
+        String message = lastMessage();
+        assertTrue(message.contains("Several destinations start with") && message.contains("Keep Gate") && message.contains("Keep Wall"), message);
+    }
+
+    @Test
+    void inAMatchStopAndStatusStillWork() {
+        inMatch(keep());
+        when(service.stop(player)).thenReturn(true);
+
+        navigate.onCommand(player, command, "navigate", new String[] {"stop"});
+        verify(service).stop(player);
+
+        navigate.onCommand(player, command, "navigate", new String[0]);
+        verify(service).status(player);
+    }
+
+    @Test
+    void aMatchWithoutDestinationsOffersNothing() {
+        inMatch();
+
+        navigate.onCommand(player, command, "navigate", new String[] {"Keep"});
+
+        verify(service, never()).navigate(any(), any());
+        assertTrue(lastMessage().contains("no destinations"), lastMessage());
+    }
+
+    @Test
+    void outsideAMatchTheCatalogueStillApplies() {
+        MatchNavigationScope scope = p -> java.util.Optional.empty();
+        navigate.setMatchScope(() -> scope);
+        when(destinations.resolve(anyString(), anyString())).thenReturn(new Resolution(null, List.of(), List.of()));
+
+        navigate.onCommand(player, command, "navigate", new String[] {"Kardenna"});
+
+        verify(destinations).resolve("Kardenna", "world");
+    }
+
+    @Test
+    void tabCompletionInAMatchOffersOnlyMatchDestinationsFromTheWordBeingTyped() {
+        List<MatchNavigationScope.MatchDestination> offered = List.of(keep(), wall(), camp());
+
+        assertEquals(List.of("Keep", "Raiders"), NavigateCommand.completeInMatch(new String[] {""}, offered).stream()
+            .filter(c -> !c.equals("stop")).map(c -> c.split(" ")[0]).distinct().toList());
+        assertEquals(List.of("Gate", "Wall"), NavigateCommand.completeInMatch(new String[] {"Keep", ""}, offered));
+        assertEquals(List.of("stop"), NavigateCommand.completeInMatch(new String[] {"st"}, offered));
+        assertEquals(List.of(), NavigateCommand.completeInMatch(new String[] {"Kard"}, offered));
+    }
 }

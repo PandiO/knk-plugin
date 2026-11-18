@@ -168,6 +168,10 @@ class SiegeMapperTest {
         assertEquals(1.5, c.headshotMultiplier());
         assertEquals(List.of("/siege", "/msg", "/r", "/staffchat", "/menu"), c.allowedCommands());
         assertEquals(20, c.spawnPickerDelayTicks());
+        assertEquals(60, c.playerSkipMatchmakingSeconds());
+        assertEquals(31, c.adminSkipMatchmakingSeconds());
+        // PandiO/knk-workspace#198: the fixture (an API before the setting) has no postMatchSeconds: the API default.
+        assertEquals(KnkSiegeConfiguration.DEFAULT_POST_MATCH_SECONDS, c.postMatchSeconds());
         assertEquals(30, c.enchantDropChancePerMille());
         assertEquals(17, c.allowedEnchantmentKeys().size());
         assertTrue(c.allowedEnchantmentKeys().contains("minecraft:sharpness"));
@@ -175,6 +179,37 @@ class SiegeMapperTest {
         assertEquals(2, c.enchantLevelMax());
         assertEquals(10, c.maxBooksAlive());
         assertEquals(SiegeNonMemberGateView.PRE_LOCKDOWN_VIEW, c.nonMemberGateView());
+    }
+
+    @Test
+    void mapsTheNavigationItemChoiceOfEveryLevel() throws IOException {
+        String json = """
+                {
+                  "configuration": { "giveNavigationItem": true },
+                  "lobbies": [
+                    { "id": 1, "name": "A", "key": "a", "navigationItem": "DoNotGive",
+                      "rotation": [ { "weight": 1, "scenario": { "id": 4, "name": "S", "navigationItem": "Give" } },
+                                    { "weight": 1, "scenario": { "id": 5, "name": "T" } } ] }
+                  ]
+                }
+                """;
+
+        KnkSiegeRuntimeConfig config = SiegeMapper.toCore(objectMapper.readValue(json, RuntimeConfigDto.class));
+
+        assertTrue(config.configuration().giveNavigationItem());
+        var lobby = config.lobbies().get(0);
+        assertEquals(net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode.DO_NOT_GIVE, lobby.navigationItem());
+        assertEquals(net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode.GIVE, lobby.rotation().get(0).scenario().navigationItem());
+        assertEquals(net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode.INHERIT, lobby.rotation().get(1).scenario().navigationItem());
+    }
+
+    @Test
+    void theNavigationItemIsOffAndInheritedWhenTheApiDoesNotSayAnything() throws IOException {
+        KnkSiegeRuntimeConfig config = SiegeMapper.toCore(objectMapper.readValue(
+                "{\"configuration\":{},\"lobbies\":[{\"id\":1,\"name\":\"A\",\"key\":\"a\"}]}", RuntimeConfigDto.class));
+
+        assertFalse(config.configuration().giveNavigationItem());
+        assertEquals(net.knightsandkings.knk.core.domain.siege.SiegeNavigationItemMode.INHERIT, config.lobbies().get(0).navigationItem());
     }
 
     @Test
@@ -256,6 +291,15 @@ class SiegeMapperTest {
         assertEquals("SPATIAL_CHECKS_UNAVAILABLE", readiness.warnings().get(0).code());
         assertNull(readiness.warnings().get(0).entityId());
         assertNull(SiegeMapper.toCore((ReadinessDto) null));
+    }
+
+    /** PandiO/knk-workspace#198: the configured post-match wait reaches the core configuration; 0 is kept. */
+    @Test
+    void mapsThePostMatchSeconds() throws IOException {
+        String json = "{\"configuration\":{\"postMatchSeconds\":45},\"lobbies\":[]}";
+        assertEquals(45, SiegeMapper.toCore(objectMapper.readValue(json, RuntimeConfigDto.class)).configuration().postMatchSeconds());
+        String off = "{\"configuration\":{\"postMatchSeconds\":0},\"lobbies\":[]}";
+        assertEquals(0, SiegeMapper.toCore(objectMapper.readValue(off, RuntimeConfigDto.class)).configuration().postMatchSeconds());
     }
 
     private RuntimeConfigDto readFixture() throws IOException {

@@ -284,12 +284,27 @@ public final class LootboxDelivery {
             Map<Integer, KnkEnchantmentDefinition> fetched,
             List<String> skipped
     ) {
-        KnkItemBlueprint graded = withClaimGrade(blueprint, claim);
+        KnkItemBlueprint graded = withClaimLook(withClaimGrade(blueprint, claim), claim);
         Requests requests = requests(graded, claim, fetched);
         BlueprintItemAssembler.Result assembled = assembler.assemble(graded, materialKey, requests.defaults(), requests.rolled(),
                 BlueprintItemAssembler.Options.DEFAULTS.withVanillaRules(true).withMetaStamp(instanceStamp(claim)), claim.quantity());
         skipped.addAll(assembled.skipped());
         return assembled.itemStack();
+    }
+
+    /**
+     * #232: the claim's look (the instance's frozen shield banner / armour trim, else the blueprint's as the API
+     * read it) replaces what the plugin's possibly cached blueprint carries, so a shield is given the way its
+     * instance was minted. A claim from an API without the fields leaves the blueprint alone.
+     */
+    static KnkItemBlueprint withClaimLook(KnkItemBlueprint blueprint, KnkLootboxClaimResult claim) {
+        if (!claim.hasLook()) {
+            return blueprint;
+        }
+        if (Objects.equals(blueprint.shieldBanner(), claim.shieldBanner()) && Objects.equals(blueprint.armorTrim(), claim.armorTrim())) {
+            return blueprint;
+        }
+        return blueprint.withLook(claim.shieldBanner(), claim.armorTrim());
     }
 
     /** The last assembly step: the instance id for a non-stackable item, nothing for a stackable one. */

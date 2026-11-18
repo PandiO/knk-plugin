@@ -93,6 +93,15 @@ public final class SiegePlayerVault {
      * be written: the caller must then not take the player into the match.
      */
     public boolean snapshot(Player player, int lobbyId, String matchToken) {
+        return snapshot(player, lobbyId, matchToken, null);
+    }
+
+    /**
+     * {@link #snapshot(Player, int, String)} with the return location given ({@code null}: where the player
+     * stands now). A member who rejoins a round (PandiO/knk-workspace#150) keeps the location from before
+     * the siege, not the spot in the arena where they logged back in.
+     */
+    public boolean snapshot(Player player, int lobbyId, String matchToken, Location returnLocation) {
         Snapshot snapshot = new Snapshot(
                 player.getUniqueId(),
                 lobbyId,
@@ -106,7 +115,7 @@ public final class SiegePlayerVault {
                 player.getSaturation(),
                 List.copyOf(player.getActivePotionEffects()),
                 player.getGameMode(),
-                player.getLocation().clone(),
+                returnLocation != null ? returnLocation.clone() : player.getLocation().clone(),
                 false);
         try {
             write(snapshot);
@@ -118,6 +127,37 @@ public final class SiegePlayerVault {
         }
         snapshots.put(player.getUniqueId(), snapshot);
         return true;
+    }
+
+    /**
+     * Account erasure (PandiO/knk-workspace#184): forgets the player's saved state (inventory, position, effects) in
+     * memory and on disk without restoring it; the account no longer exists. Main thread. An online player got their
+     * vault back before the kick ({@code SiegeService.returnVaultBeforeErasure}, decision 2026-11-06 on LR1-8), so this
+     * finds nothing for them; it is what removes an offline player's vault.
+     *
+     * @return 1 when there was anything, else 0
+     */
+    public int discard(UUID playerId) {
+        if (playerId == null) {
+            return 0;
+        }
+        boolean had = has(playerId) || pendingRespawn.containsKey(playerId);
+        pendingRespawn.remove(playerId);
+        forget(playerId);
+        return had ? 1 : 0;
+    }
+
+    /**
+     * Account erasure of an online player (PandiO/knk-workspace#184, developer decision 2026-11-06 on LR1-8): how many
+     * item stacks a {@link #restore} would give back now, read before {@code SiegeService.returnVaultBeforeErasure}
+     * restores. 0 when there is no vault, its inventory was already given back on quit, or its file is unreadable (not
+     * logged here: the erasure logs counts only, and the discard step removes the file).
+     */
+    public int heldItemStacks(UUID playerId) {
+        if (playerId == null) {
+            return 0;
+        }
+        return load(playerId, false).filter(s -> !s.inventoryRestored()).map(s -> countStacks(s.contents())).orElse(0);
     }
 
     public boolean has(UUID playerId) {
@@ -185,6 +225,16 @@ public final class SiegePlayerVault {
         return restore(player);
     }
 
+    /**
+     * The return location of a vault whose inventory was already given back on quit (the file waits only
+     * for the teleport home). Empty when there is no such file - none at all, or one whose inventory still
+     * has to be restored (a crash leftover). A rejoin (PandiO/knk-workspace#150) takes this location over.
+     */
+    public Optional<Location> restoredReturnLocation(UUID playerId) {
+        return load(playerId).filter(Snapshot::inventoryRestored)
+                .map(s -> s.returnLocation() == null ? null : s.returnLocation().clone());
+    }
+
     /** Where a member who died before the end must respawn (consumed). */
     public Optional<Location> takePendingRespawn(UUID playerId) {
         return Optional.ofNullable(pendingRespawn.remove(playerId));
@@ -242,6 +292,10 @@ public final class SiegePlayerVault {
     }
 
     private Optional<Snapshot> load(UUID playerId) {
+        return load(playerId, true);
+    }
+
+    private Optional<Snapshot> load(UUID playerId, boolean logUnreadable) {
         Snapshot inMemory = snapshots.get(playerId);
         if (inMemory != null) return Optional.of(inMemory);
         File file = file(playerId);
@@ -249,9 +303,26 @@ public final class SiegePlayerVault {
         try {
             return Optional.of(read(playerId, file));
         } catch (RuntimeException e) {
-            logger.log(Level.SEVERE, "[Siege] Vault file " + file.getName() + " is unreadable; left in place for a manual restore", e);
+            if (logUnreadable) {
+                logger.log(Level.SEVERE, "[Siege] Vault file " + file.getName() + " is unreadable; left in place for a manual restore", e);
+            }
             return Optional.empty();
         }
+    }
+
+    /** Tests: a snapshot held in memory only (writing the file needs a running server's item serializer). */
+    void holdForTest(Snapshot snapshot) {
+        snapshots.put(snapshot.playerId(), snapshot);
+    }
+
+    private static int countStacks(ItemStack[] contents) {
+        int count = 0;
+        if (contents != null) {
+            for (ItemStack item : contents) {
+                if (item != null && !item.isEmpty()) count++;
+            }
+        }
+        return count;
     }
 
     private void write(Snapshot s) throws IOException {

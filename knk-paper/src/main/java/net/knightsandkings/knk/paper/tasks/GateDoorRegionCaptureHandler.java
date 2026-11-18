@@ -13,7 +13,6 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -44,7 +43,8 @@ public class GateDoorRegionCaptureHandler {
     private final Plugin plugin;
     private final GateDoorsApi gateDoorsApi;
 
-    private final Map<Player, CaptureContext> activeCaptures = new HashMap<>();
+    // #180: read from the async chat thread (WorldTaskChatListener), so a concurrent map.
+    private final Map<Player, CaptureContext> activeCaptures = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** @param worldName the door's world (KNG-113): the region is drawn and saved there only */
     private record CaptureContext(int gateDoorId, String gateDoorName, boolean isOpenedRegion, String worldName) {

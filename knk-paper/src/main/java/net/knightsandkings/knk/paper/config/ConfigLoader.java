@@ -414,7 +414,8 @@ public class ConfigLoader {
             section.getInt("trail-length", trailDefaults.length()),
             section.getInt("trail-period-ticks", trailDefaults.periodTicks()),
             section.getString("trail-particle", trailDefaults.particle()),
-            section.getString("trail-color", trailDefaults.color()));
+            section.getString("trail-color", trailDefaults.color()),
+            section.getDouble("trail-leg-spacing", trailDefaults.legSpacing()));
 
         NavigationConfig.SurveyConfig surveyDefaults = defaults.survey();
         ConfigurationSection survey = section.getConfigurationSection("survey");
@@ -457,7 +458,11 @@ public class ConfigLoader {
                 walk.getDouble("recompute-distance", walkDefaults.recomputeDistance()),
                 walk.getInt("max-concurrent-searches", walkDefaults.maxConcurrentSearches()),
                 walk.contains("climbables") ? walk.getStringList("climbables") : walkDefaults.climbables(),
-                walk.getDouble("wall-cost", walkDefaults.wallCost()));
+                walk.getDouble("wall-cost", walkDefaults.wallCost()),
+                walk.getInt("max-chunks-per-request", walkDefaults.maxChunksPerRequest()),
+                walk.getDouble("clearance-cost", walkDefaults.clearanceCost()),
+                walk.getDouble("wall-clearance", walkDefaults.wallClearance()),
+                walk.getBoolean("curve", walkDefaults.curve()));
 
         return new NavigationConfig(
             section.getBoolean("enabled", defaults.enabled()),
@@ -478,7 +483,13 @@ public class ConfigLoader {
             section.getDouble("sprint-speed", defaults.sprintSpeed()),
             surveyConfig,
             builderConfig,
-            walkConfig);
+            walkConfig,
+            section.getBoolean("guidance-v2", defaults.guidanceV2()),
+            section.getDouble("cursor-jump", defaults.cursorJump()),
+            new NavigationConfig.PlazaLinesConfig(
+                section.getBoolean("plaza-lines", defaults.plazaLines().enabled()),
+                section.getDouble("plaza-pull", defaults.plazaLines().pull()),
+                section.getDouble("plaza-guide-cost", defaults.plazaLines().guideCost())));
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */

@@ -88,6 +88,16 @@ public class PlayerListener implements Listener {
 		this.hubAdmitted = hubAdmitted != null ? hubAdmitted : uuid -> false;
 	}
 
+	/**
+	 * PandiO/knk-workspace#486: runs at pre-login before the account is looked up or created (async thread, may block
+	 * briefly): waits until the erasure catch-up of this run has applied what the feed holds. None without the hub.
+	 */
+	private java.util.function.Consumer<UUID> beforeAccountLookup = uuid -> { };
+
+	public void setBeforeAccountLookup(java.util.function.Consumer<UUID> beforeAccountLookup) {
+		this.beforeAccountLookup = beforeAccountLookup != null ? beforeAccountLookup : uuid -> { };
+	}
+
 	public PlayerListener(
 			UsersDataAccess usersDataAccess,
 			GameSettingsManager gameSettings,
@@ -114,8 +124,19 @@ public class PlayerListener implements Listener {
 
 	@EventHandler
 	public void onValidateLogin(AsyncPlayerPreLoginEvent e) {
+		// Invitations (KNG-214): the admission gate (LOWEST) may already have turned this player away; a denied
+		// connection must not create an account, or every stranger would fill the users table.
+		if (e.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
+			return;
+		}
 		UUID uuid = e.getUniqueId();
 		String username = e.getName();
+
+		try {
+			beforeAccountLookup.accept(uuid);
+		} catch (RuntimeException ex) {
+			LOGGER.log(Level.WARNING, "Erasure catch-up before the account lookup failed", ex);
+		}
 
 		try {
 			// API first, so a relog always picks up changes made since the cache was filled (a premium
@@ -144,9 +165,15 @@ public class PlayerListener implements Listener {
 				UserDetail newUser = new UserDetail(null, username, uuid, null, -1, new Date(), true);
 				FetchResult<UserSummary> created = usersDataAccess.getOrCreateAsync(uuid, true, newUser).join();
 				if (created.isSuccess()) {
+					// #486: noted for the join's first-join decision (UserAccountListener), which doesn't read the cache.
+					if (newPlayers != null && created.value().map(UserSummary::isNewUser).orElse(false)) {
+						newPlayers.accountCreated(uuid);
+					}
 					LOGGER.info("Created and cached new user " + username + " (UUID: " + uuid + ")");
 					preloadPermissions(uuid);
 				} else if (created.status() == FetchStatus.ERROR) {
+					// Under the API's Registration:Mode=Invite this is a 403 NotAdmitted for a UUID without an admitted
+					// account - an operator who bypassed the admission gate. The join goes on without an account.
 					LOGGER.warning("Failed to create user " + uuid + ": " + created.error().map(Throwable::getMessage).orElse("unknown error"));
 				}
 				return;
@@ -245,35 +272,21 @@ public class PlayerListener implements Listener {
 		ScoreboardUtil.setScoreboard(Arrays.asList(player), knkPermissible, user);
 
 		// Salary is paid by SalaryPayoutScheduler (its own join handler plus an hourly check).
-		if (user != null) {
-			// docs/specs/kits/DESIGN.md §4.4: unifies starter-kit granting into the general Kit
-			// system - a brand-new account, not a real "if (user.isNewUser())" branch that
-			// predates this (none existed here; UserAccountListener's welcome message doesn't
-			// distinguish new/returning either - verified by reading both listeners directly).
-			if (user.isNewUser()) {
-				if (newPlayers != null) {
-					newPlayers.markFirstJoin(player.getUniqueId());
-				}
-				LOGGER.info("First-join kits: " + player.getName() + " (user " + user.id() + ") is a new account, asking the API to grant them");
-				triggerBackgroundFirstJoinKits(player, user.id());
-			}
-		} else {
-			// KNG-81: without a cached summary nothing here can tell a new account, so no first-join kits.
-			LOGGER.info("First-join kits: no cached user for " + player.getName() + " at join, skipped");
-		}
+		// The first join (welcome, starter kits, quiet discovery minutes) is decided by UserAccountListener once the
+		// join's account sync knows the account (PandiO/knk-workspace#486): the cached summary read above is empty
+		// right after an erasure or for a website account without a UUID yet, and then nothing here could decide it.
 	}
 
 	/**
 	 * Grants every GrantOnFirstJoin kit the account is gated to receive (docs/specs/kits/
-	 * DESIGN.md §4.4). Runs off the main thread and never blocks or delays the join; a failure
-	 * here is logged and otherwise invisible to the player.
+	 * DESIGN.md §4.4), for the first join UserAccountListener decided (#486). Runs off the main thread and never
+	 * blocks or delays the join; a failure here is logged and otherwise invisible to the player.
 	 */
-	private void triggerBackgroundFirstJoinKits(Player player, int userId) {
+	public void requestFirstJoinKits(UUID uuid, int userId) {
 		if (kitsCommandApi == null) {
 			LOGGER.warning("First-join kits: the kits API is not available, nothing granted to user " + userId);
 			return;
 		}
-		UUID uuid = player.getUniqueId();
 		kitsCommandApi.grantFirstJoinKitsAsync(userId)
 			.thenCompose(claimResults -> {
 				// The API grants once per player (KNG-81): an empty answer means already granted, or no kit
@@ -393,8 +406,10 @@ public class PlayerListener implements Listener {
 		ChatLineFormat.Rank rank = knkPermissible.hasPermission(player, ModeService.OWNER_NODE) ? ChatLineFormat.Rank.OWNER
 				: knkPermissible.hasPermission(player, ModeService.STAFF_NODE) ? ChatLineFormat.Rank.STAFF
 				: ChatLineFormat.Rank.MEMBER;
-		Component finalMessage = ChatLineFormat.render(rank, dn, user, messageComponent);
-		e.renderer((source, sourceDisplayName, message, viewer) -> finalMessage);
+		// The renderer uses the event's final message, so ChatTokenListener (HIGH) can swap #hand, #kills, ...
+		// for hoverable values after this (PandiO/knk-workspace#233).
+		e.message(messageComponent);
+		e.renderer((source, sourceDisplayName, message, viewer) -> ChatLineFormat.render(rank, dn, user, message));
 
 		/**
 		 * Player mention

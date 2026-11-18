@@ -113,4 +113,13 @@ class SiegeCommandFilterTest {
         assertFalse(SiegeCommandFilter.isAllowed("/tell Bob", LEGACY, label -> null));
         assertTrue(SiegeCommandFilter.isAllowed("/msg Bob", LEGACY, null));
     }
+
+    @Test
+    void navigateAndItsAliasAreAlwaysAllowedInAMatch() {
+        // KNG-234: in a match /navigate only accepts the match's own destinations
+        assertTrue(SiegeCommandFilter.isAllowed("/navigate Keep", List.of()));
+        assertTrue(SiegeCommandFilter.isAllowed("/nav stop", List.of()));
+        assertTrue(SiegeCommandFilter.isAllowed("/knk:navigate Keep", List.of()));
+        assertTrue(SiegeCommandFilter.isAllowed("/n", List.of(), label -> label.equals("n") ? "navigate" : label));
+    }
 }

@@ -4,6 +4,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.bukkit.entity.Player;
@@ -44,6 +45,13 @@ public class UserManager {
     
     // Thread-safe cache of player data indexed by UUID
     private final ConcurrentHashMap<UUID, PlayerUserData> userCache = new ConcurrentHashMap<>();
+
+    /** PandiO/knk-workspace#486: told when the join's sync created the player's account (the first-join decision). */
+    private volatile java.util.function.Consumer<UUID> accountCreated = uuid -> { };
+
+    public void setAccountCreatedListener(java.util.function.Consumer<UUID> accountCreated) {
+        this.accountCreated = accountCreated != null ? accountCreated : uuid -> { };
+    }
     
     public UserManager(
         KnKPlugin plugin,
@@ -126,8 +134,9 @@ public class UserManager {
                 return userData;
             })
             .exceptionally(ex -> {
-                logger.severe("Failed to sync user data for " + username + " (" + uuid + "): " + ex.getMessage());
-                ex.printStackTrace();
+                // The exception goes with the log record, not to System.err: printStackTrace() lines arrive
+                // separately and can end up next to another thread's entry (PandiO/knk-workspace#586).
+                logger.log(Level.SEVERE, "Failed to sync user data for " + username + " (" + uuid + "): " + ex.getMessage(), ex);
 
                 // Create fallback minimal entry
                 PlayerUserData fallback = PlayerUserData.minimal(uuid, username, null);
@@ -227,6 +236,7 @@ public class UserManager {
                     // Update legacy cache for PlayerListener compatibility
                     legacyUserCache.put(newUserSummary);
                     logger.info("Updated legacy cache for new user " + username + " with isNewUser=true");
+                    accountCreated.accept(uuid);
 
                     // Map to PlayerUserData (mark as new user since we just created it)
                     return mapToPlayerUserData(response, uuid, true); // NEW user - just created

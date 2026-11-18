@@ -13,12 +13,15 @@ import net.knightsandkings.knk.core.ports.api.SiegeGatesCommandApi;
 import net.knightsandkings.knk.core.siege.AllianceResolver;
 import net.knightsandkings.knk.core.siege.ObjectiveState.CaptureEvent;
 import net.knightsandkings.knk.core.siege.SiegeGatePlan;
+import net.knightsandkings.knk.core.siege.SiegeDefenderPassThrough;
+import net.knightsandkings.knk.core.siege.SiegeDefenderPassThrough.OpenGateClick;
 import net.knightsandkings.knk.core.siege.SiegeGatePlan.Control;
 import net.knightsandkings.knk.paper.gates.GatePassThroughService;
 import net.knightsandkings.knk.paper.gates.HealthSystem;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -77,6 +80,12 @@ public final class SiegeGateController implements SiegeMatchObserver {
     private final Map<Integer, Lockdown> byLobby = new HashMap<>();
     private final Map<Integer, Lockdown> byGate = new HashMap<>();
     private GatePassThroughService passThrough;
+    /** #154: defenders pass through (open, then close by itself) instead of toggling. */
+    private boolean defenderPassThrough = true;
+    /** #154: hold time of a defender pass-through; 0 = the gate's own PassThroughDurationSeconds. */
+    private int defenderPassThroughSeconds;
+    /** #154: gate structure -> the scheduled close of its defender pass-through. */
+    private final Map<Integer, BukkitTask> passThroughCloses = new HashMap<>();
 
     /**
      * Phase 7b: one door of an applied lockdown with its pre-lockdown state - the non-member view
@@ -93,6 +102,19 @@ public final class SiegeGateController implements SiegeMatchObserver {
         this.api = api;
     }
 
+    /**
+     * Alpha run 1 (PandiO/knk-workspace#154): {@code gates.siege.defender-pass-through} and
+     * {@code gates.siege.defender-pass-through-seconds} (0: the gate's own pass-through time).
+     */
+    public void setDefenderPassThrough(boolean enabled, int holdSeconds) {
+        this.defenderPassThrough = enabled;
+        this.defenderPassThroughSeconds = Math.max(0, holdSeconds);
+    }
+
+    public boolean isDefenderPassThrough() {
+        return defenderPassThrough;
+    }
+
     /** Phase 7b: the temporary TELEPORT pass-through for non-members (DESIGN §8.5). */
     public void setPassThrough(GatePassThroughService passThrough) {
         this.passThrough = passThrough;
@@ -100,20 +122,59 @@ public final class SiegeGateController implements SiegeMatchObserver {
 
     // ==================== Startup recovery (DESIGN §8.4) ====================
 
+    /** #31: the stale-gate restore got through once. */
+    private volatile boolean recovered;
+    private CompletableFuture<Boolean> recoveryInFlight;
+    /** #182: runs on the main thread once a round's gates were restored (their API restore answered). */
+    private Runnable afterRelease = () -> { };
+
     /** Restores gates a crash left locked down (nothing runs yet), then reloads the gate cache. */
-    public void recoverOnStartup() {
+    public synchronized CompletableFuture<Boolean> recoverOnStartup() {
+        CompletableFuture<Boolean> done = new CompletableFuture<>();
+        recoveryInFlight = done;
         api.restoreStale().whenComplete((result, error) -> {
             if (error != null) {
                 logger.log(Level.WARNING, "[Siege] Gate recovery (restore-stale-gates) failed; gates a crash left "
-                        + "locked down stay so until the next start", error);
+                        + "locked down stay so until it is retried when the API is back (or the next start)", error);
+                done.complete(false);
                 return;
             }
+            recovered = true;
+            done.complete(true);
             if (result == null || result.isEmpty()) return;
             logger.warning("[Siege] Gate recovery restored " + result.restored().size() + " gate structure(s) and cleared "
                     + result.clearedGateStructureIds().size() + " stale siege marker(s); reloading gates");
             runOnMain(() -> gateManager.reloadGates().whenComplete((ignored, reloadError) -> {
                 if (reloadError != null) logger.log(Level.WARNING, "[Siege] Gate reload after recovery failed", reloadError);
             }));
+        });
+        return done;
+    }
+
+    /**
+     * PandiO/knk-workspace#31 / #182: the stale-gate restore again when it failed at startup, as a pending startup step
+     * run when the API is back (connectivity UP, a fallback retry or the realtime reconnect). Waits (stays pending) while
+     * a lockdown of this run holds gates.
+     */
+    public synchronized CompletableFuture<Boolean> retryRecovery() {
+        if (recovered) return CompletableFuture.completedFuture(true);
+        if (recoveryInFlight != null && !recoveryInFlight.isDone()) return recoveryInFlight;
+        if (!byLobby.isEmpty()) return CompletableFuture.completedFuture(false);
+        return recoverOnStartup();
+    }
+
+    /** #182: called on the main thread after a round's gates were restored (gate edits made during the match apply then). */
+    public void setAfterRelease(Runnable afterRelease) {
+        this.afterRelease = afterRelease == null ? () -> { } : afterRelease;
+    }
+
+    private void releasedOnMain() {
+        runOnMain(() -> {
+            try {
+                afterRelease.run();
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "[Siege] After-release hook failed", e);
+            }
         });
     }
 
@@ -177,6 +238,7 @@ public final class SiegeGateController implements SiegeMatchObserver {
         if (lockdown == null) return;
         lockdown.plan.onCapture(capture.objectiveId(), capture.newHolderTeamId()).ifPresent(transfer -> {
             if (!lockdown.snapshots.containsKey(transfer.gateStructureId())) return;
+            cancelPassThroughClose(transfer.gateStructureId()); // the capture sets the state now
             setOpen(transfer.gateStructureId(), transfer.open());
             logger.info("[Siege] Lobby " + lobby.key() + ": gate " + transfer.gateStructureId() + " now belongs to team "
                     + transfer.newOwnerTeamId() + " (" + (transfer.open() ? "opened" : "closed") + " on capture)");
@@ -188,6 +250,7 @@ public final class SiegeGateController implements SiegeMatchObserver {
         Lockdown lockdown = byLobby.remove(lobby.id());
         if (lockdown == null) return;
         lockdown.snapshots.keySet().forEach(id -> byGate.remove(id, lockdown));
+        lockdown.snapshots.keySet().forEach(this::cancelPassThroughClose);
 
         Long matchId = lockdown.matchId;
         if (matchId == null) {
@@ -212,7 +275,10 @@ public final class SiegeGateController implements SiegeMatchObserver {
                     logger.log(Level.WARNING, "[Siege] Restoring the persisted gate lockdown of match " + id
                             + " failed; the next start's recovery restores it", error);
                 }
+                if (plugin.isEnabled()) releasedOnMain();
             });
+        } else if (plugin.isEnabled()) {
+            releasedOnMain();
         }
     }
 
@@ -221,6 +287,27 @@ public final class SiegeGateController implements SiegeMatchObserver {
     /** True when a running lockdown owns this gate structure. */
     public boolean isLocked(int gateStructureId) {
         return byGate.containsKey(gateStructureId);
+    }
+
+    /**
+     * Whether the player is a member of the lobby whose lockdown holds this gate (KNG-234): navigation reads a
+     * locked gate differently for members (they are never "carried through"; their own team's gates they can open).
+     * False for unlocked gates.
+     */
+    public boolean isLockdownMember(Player player, int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        return lockdown != null && player != null && lockdown.runtime.isMember(player.getUniqueId());
+    }
+
+    /**
+     * Whether this match member may open and close the locked gate - their alliance owns it (an objective
+     * gate changes owner when it is captured). Read-only, for navigation (KNG-234). False for non-members and
+     * unlocked gates.
+     */
+    public boolean mayControl(Player player, int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return false;
+        return lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances) == Control.ALLOWED;
     }
 
     /**
@@ -233,9 +320,60 @@ public final class SiegeGateController implements SiegeMatchObserver {
         if (lockdown == null) return Control.NOT_IN_PLAN;
         Control decision = lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances);
         if (decision == Control.ALLOWED) {
+            cancelPassThroughClose(gateStructureId);
             setOpen(gateStructureId, open);
         }
         return decision;
+    }
+
+    /**
+     * A member right-clicked the closed locked gate (#154). With defender pass-through on, a member allowed
+     * to control it opens it (animated) and it closes by itself after the hold time; with it off the gate
+     * opens and stays open (the MVP toggle). Returns why it was refused, as {@link #control}.
+     */
+    public Control openClosedGate(Player player, int gateStructureId) {
+        if (!defenderPassThrough) return control(player, gateStructureId, true);
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return Control.NOT_IN_PLAN;
+        Control decision = lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances);
+        if (decision == Control.ALLOWED) {
+            setOpen(gateStructureId, true);
+            schedulePassThroughClose(gateStructureId);
+        }
+        return decision;
+    }
+
+    /**
+     * A member right-clicked the open locked gate (#154): a defender pass-through holding it open is extended,
+     * any other open gate is closed (as before) - both only for a member allowed to control it.
+     */
+    public Control clickOpenGate(Player player, int gateStructureId) {
+        OpenGateClick click = SiegeDefenderPassThrough.onOpenGateClick(defenderPassThrough,
+                passThroughCloses.containsKey(gateStructureId));
+        if (click == OpenGateClick.CLOSE) return control(player, gateStructureId, false);
+        Lockdown lockdown = byGate.get(gateStructureId);
+        if (lockdown == null) return Control.NOT_IN_PLAN;
+        Control decision = lockdown.plan.canControl(gateStructureId, teamOf(lockdown, player), lockdown.alliances);
+        if (decision == Control.ALLOWED) schedulePassThroughClose(gateStructureId);
+        return decision;
+    }
+
+    /** (Re)schedules the close of a defender pass-through. */
+    private void schedulePassThroughClose(int gateStructureId) {
+        cancelPassThroughClose(gateStructureId);
+        int seconds = SiegeDefenderPassThrough.holdSeconds(defenderPassThroughSeconds,
+                gateManager.getDoorsForStructure(gateStructureId).stream()
+                        .mapToInt(CachedGateDoor::getEffectivePassThroughDurationSeconds));
+        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            passThroughCloses.remove(gateStructureId);
+            if (isLocked(gateStructureId)) setOpen(gateStructureId, false);
+        }, seconds * 20L);
+        passThroughCloses.put(gateStructureId, task);
+    }
+
+    private void cancelPassThroughClose(int gateStructureId) {
+        BukkitTask task = passThroughCloses.remove(gateStructureId);
+        if (task != null) task.cancel();
     }
 
     /** May this player (null: no attributable player) damage the locked gate? True for unlocked gates. */
@@ -316,6 +454,12 @@ public final class SiegeGateController implements SiegeMatchObserver {
         StructureSnapshot snapshot = lockdown.snapshots.get(door.getGateStructureId());
         if (snapshot == null) return false;
         return snapshot.doors().stream().anyMatch(d -> d.gateDoorId() == door.getId() && d.opened() && !d.destroyed());
+    }
+
+    /** The runtime id of the lobby whose lockdown holds this gate structure; null when none does (#165). */
+    public Integer lobbyIdOf(int gateStructureId) {
+        Lockdown lockdown = byGate.get(gateStructureId);
+        return lockdown == null ? null : lockdown.runtime.id();
     }
 
     /** The lobby display name holding a locked gate, for messages. */

@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import org.bukkit.entity.Player;
@@ -31,6 +32,7 @@ public final class NavigationHud {
     private final EtaEstimator eta;
     private final Map<UUID, BossBar> bars = new ConcurrentHashMap<>();
     private volatile Predicate<UUID> actionBarHeld = id -> false;
+    private volatile Consumer<Player> afterBarShown = player -> { };
 
     public NavigationHud(EtaEstimator eta) {
         this.eta = Objects.requireNonNull(eta, "eta");
@@ -39,6 +41,14 @@ public final class NavigationHud {
     /** Keep off a player's action bar while {@code held} is true for them (e.g. a fresh refusal message). */
     public void yieldActionBarWhile(Predicate<UUID> held) {
         this.actionBarHeld = held != null ? held : id -> false;
+    }
+
+    /**
+     * Run after this HUD's boss bar is first shown to a player, e.g. to move other boss bars below it so the
+     * navigation bar stays on top (#202).
+     */
+    public void afterBarShown(Consumer<Player> action) {
+        this.afterBarShown = action != null ? action : player -> { };
     }
 
     /**
@@ -53,6 +63,7 @@ public final class NavigationHud {
             bar = BossBar.bossBar(text, clamped, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS);
             bars.put(player.getUniqueId(), bar);
             player.showBossBar(bar);
+            afterBarShown.accept(player);
         } else {
             bar.name(text);
             bar.progress(clamped);

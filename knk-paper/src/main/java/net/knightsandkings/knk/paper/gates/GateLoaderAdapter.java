@@ -614,12 +614,55 @@ public class GateLoaderAdapter {
     /**
      * Mechanism 2 (ROTATION_GAP_FILL_DESIGN.md): load the door's optional manually-scanned open
      * state (empty/no-op when it has none) and pair each closed block to its open-state
-     * counterpart - by SortOrder position for VERTICAL/LATERAL (both scans walk the same
-     * deterministic loop from their own anchor), or by nearest 3D world-space distance for
-     * ROTATION (Decision 2: greedy, ship v1; see GateBlockPairing).
+     * counterpart - along the slide for VERTICAL/LATERAL (KNG-271), or by nearest 3D world-space
+     * distance for ROTATION (see GateBlockPairing).
      */
+    /**
+     * KNG-270: an open scan stores each block's world position; read from another anchor than the
+     * one it was scanned from (the open-door anchor moved, was cleared, or its location was edited
+     * in place), it would put the opened door somewhere else. Rows without world coordinates (all
+     * zero) are not checked. Package-private and static so it can be tested without a world.
+     *
+     * @return why the scan doesn't fit the anchor, or null when it fits
+     */
+    static String openScanAnchorMismatch(Vector openAnchor, List<GateBlockSnapshotDto> openedSnapshotDtos) {
+        if (openAnchor == null) {
+            return "the door has no anchor to read it from.";
+        }
+        for (GateBlockSnapshotDto dto : openedSnapshotDtos) {
+            if (dto.worldX() == null || dto.worldY() == null || dto.worldZ() == null
+                || (dto.worldX() == 0 && dto.worldY() == 0 && dto.worldZ() == 0)) {
+                continue;
+            }
+            int scannedFromX = dto.worldX() - (dto.relativeX() != null ? dto.relativeX() : 0);
+            int scannedFromY = dto.worldY() - (dto.relativeY() != null ? dto.relativeY() : 0);
+            int scannedFromZ = dto.worldZ() - (dto.relativeZ() != null ? dto.relativeZ() : 0);
+            if (scannedFromX != openAnchor.getBlockX() || scannedFromY != openAnchor.getBlockY()
+                || scannedFromZ != openAnchor.getBlockZ()) {
+                return "it was scanned from (" + scannedFromX + ", " + scannedFromY + ", " + scannedFromZ
+                    + "), but the open-door anchor (or, when empty, the anchor) is (" + openAnchor.getBlockX() + ", "
+                    + openAnchor.getBlockY() + ", " + openAnchor.getBlockZ() + ").";
+            }
+            return null;
+        }
+        return null;
+    }
+
     private void loadOpenBlockSnapshots(CachedGateDoor gate, List<GateBlockSnapshotDto> openedSnapshotDtos) {
         if (openedSnapshotDtos == null || openedSnapshotDtos.isEmpty()) {
+            return;
+        }
+
+        // KNG-270: an empty open-door anchor means the opened door stays inside the door box, so
+        // the open scan starts at the anchor (GateBlockScanTaskHandler does the same).
+        if (gate.getOpenAnchorPoint() == null && gate.getAnchorPoint() != null) {
+            gate.setOpenAnchorPoint(gate.getAnchorPoint().clone());
+        }
+        String staleReason = openScanAnchorMismatch(gate.getOpenAnchorPoint(), openedSnapshotDtos);
+        if (staleReason != null) {
+            LOGGER.warning("Gate door " + gate.getName() + " (ID: " + gate.getId() + "): its open-door scan is ignored - "
+                + staleReason + " Scan the open door again.");
+            gate.setOpenAnchorPoint(null);
             return;
         }
 
@@ -637,35 +680,29 @@ public class GateLoaderAdapter {
         List<BlockSnapshot> closedBlocks = gate.getBlocks();
         List<BlockSnapshot> openBlocks = gate.getOpenBlocks();
 
+        List<Vector> closedWorldPositions = new ArrayList<>();
+        for (BlockSnapshot block : closedBlocks) {
+            closedWorldPositions.add(gate.getAnchorPoint().clone().add(block.getRelativePosition()));
+        }
+        List<Vector> openWorldPositions = new ArrayList<>();
+        for (BlockSnapshot block : openBlocks) {
+            openWorldPositions.add(gate.getOpenAnchorPoint().clone().add(block.getRelativePosition()));
+        }
+
         Map<Integer, BlockSnapshot> pairing = new HashMap<>();
+        Map<Integer, Integer> indexPairing = "ROTATION".equals(gate.getMotionType())
+            ? GateBlockPairing.pairNearestNeighbor(closedWorldPositions, openWorldPositions)
+            // KNG-271: VERTICAL/LATERAL pair along the slide (each closed block with the open block
+            // the motion vector puts it on), not by list position - that drifted across columns
+            // once air was dropped from two scans with air in different cells. Item 6.10's rigid
+            // transform stays ROTATION-specific (Decision 7): a slide's lerp is already straight.
+            : GateBlockPairing.pairAlongTranslation(closedWorldPositions, openWorldPositions, gate.getMotionVector());
+        for (Map.Entry<Integer, Integer> entry : indexPairing.entrySet()) {
+            pairing.put(closedBlocks.get(entry.getKey()).getId(), openBlocks.get(entry.getValue()));
+        }
+
         if ("ROTATION".equals(gate.getMotionType())) {
-            List<Vector> closedWorldPositions = new ArrayList<>();
-            for (BlockSnapshot block : closedBlocks) {
-                closedWorldPositions.add(gate.getAnchorPoint().clone().add(block.getRelativePosition()));
-            }
-            List<Vector> openWorldPositions = new ArrayList<>();
-            for (BlockSnapshot block : openBlocks) {
-                openWorldPositions.add(gate.getOpenAnchorPoint().clone().add(block.getRelativePosition()));
-            }
-
-            Map<Integer, Integer> indexPairing = GateBlockPairing.pairNearestNeighbor(closedWorldPositions, openWorldPositions);
-            for (Map.Entry<Integer, Integer> entry : indexPairing.entrySet()) {
-                pairing.put(closedBlocks.get(entry.getKey()).getId(), openBlocks.get(entry.getValue()));
-            }
-
             fitRigidTransform(gate, closedBlocks, openBlocks, indexPairing, closedWorldPositions, openWorldPositions);
-        } else {
-            // VERTICAL/LATERAL: both scans walk the same deterministic (i,j,k) loop from their
-            // respective anchors, so index position IS the correspondence (DUAL_SCAN_ANIMATION_
-            // DESIGN.md's original design) - a block with no counterpart at the same index (the
-            // open scan has fewer/more blocks) is simply left unpaired. Item 6.10's uniform
-            // rigid-transform fix is ROTATION-specific (Decision 7) - VERTICAL/LATERAL's plain
-            // lerp is already a straight line and was never the source of the reported non-rigid
-            // motion, so no transform is fit here.
-            int pairCount = Math.min(closedBlocks.size(), openBlocks.size());
-            for (int i = 0; i < pairCount; i++) {
-                pairing.put(closedBlocks.get(i).getId(), openBlocks.get(i));
-            }
         }
 
         gate.setOpenBlockPairing(pairing);

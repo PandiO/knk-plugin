@@ -59,6 +59,16 @@ public record Destination(String name, Kind kind, String world, double[] point, 
         return new Destination(name, Kind.NODE, world, feet, null, -1, nodeId);
     }
 
+    /**
+     * Whether this is the same place as {@code other}: the kind, name, world and coordinates or ids (the record's own
+     * {@code equals} compares the point array by reference).
+     */
+    public boolean sameAs(Destination other) {
+        return other != null && kind == other.kind && name.equals(other.name) && world.equalsIgnoreCase(other.world)
+            && java.util.Arrays.equals(point, other.point) && streetId == other.streetId && nodeId == other.nodeId
+            && Objects.equals(regionId, other.regionId);
+    }
+
     @Override
     public String toString() {
         return kind + " " + name + " in " + world;

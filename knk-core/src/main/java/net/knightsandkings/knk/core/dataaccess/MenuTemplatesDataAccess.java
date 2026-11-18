@@ -77,6 +77,22 @@ public class MenuTemplatesDataAccess {
         );
     }
 
+    /**
+     * Puts {@code template} into the cache as if knk-web-api had just sent it (PandiO/knk-workspace#540: a scenario's
+     * fake menu, opened through the live menu runtime without an API). It answers its key until the TTL ends or
+     * {@link #evict} drops it.
+     */
+    public void prime(KnkMenuTemplate template) {
+        Objects.requireNonNull(template, "template must not be null");
+        Objects.requireNonNull(template.key(), "template.key must not be null");
+        cache.put(template);
+    }
+
+    /** Drops the cached template with this key; the next read asks the API. */
+    public void evict(String key) {
+        cache.invalidate(key);
+    }
+
     public CompletableFuture<FetchResult<KnkMenuTemplate>> getByKeyAsync(String key) {
         return getByKeyAsync(key, null);
     }

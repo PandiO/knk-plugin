@@ -1,0 +1,92 @@
+# Creates a release tag and a GitHub release on the default branch.
+# Started by hand or by an agent session (GitHub "run workflow"), because cloud agent sessions
+# cannot push tags themselves (PandiO/knk-workspace#327). The tag ruleset on v* still blocks
+# deleting or moving a tag once it exists. The job runs in the `release` environment, which requires the
+# developer's approval (Settings > Environments > release > Required reviewers), so a release always waits
+# for the developer's click (developer decision 2026-11-13).
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.2 or v0.2.1"
+        required: true
+        type: string
+      sha:
+        description: "Full 40-character commit SHA on the default branch to release"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# One group per tag: runs for different tags all queue (a single shared group keeps only one pending run, so a
+# third dispatch would replace the second), and two runs for the same tag run one after the other.
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Only the workflow on the default branch may release: a run started on another branch (whose copy of this file
+    # could differ) is skipped. The `release` environment should also allow only the default branch
+    # (Settings > Environments > release > Deployment branches and tags).
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the inputs
+        env:
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ inputs.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::Tag '$TAG' must look like v0.2 or v0.2.1"; exit 1; }
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::SHA must be the full 40-character commit hash"; exit 1; }
+          git cat-file -e "$SHA^{commit}" || { echo "::error::Commit $SHA does not exist in this repository"; exit 1; }
+          git merge-base --is-ancestor "$SHA" "origin/$DEFAULT_BRANCH" || { echo "::error::Commit $SHA is not on $DEFAULT_BRANCH"; exit 1; }
+
+      - name: Create the tag and the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          # The commit an existing tag points at (annotated tags are followed to their commit), or nothing.
+          tag_commit() {
+            local ref type obj
+            ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" 2>/dev/null) || return 0
+            type=$(jq -r '.object.type' <<<"$ref")
+            obj=$(jq -r '.object.sha' <<<"$ref")
+            if [ "$type" = tag ]; then
+              obj=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$obj" --jq '.object.sha')
+            fi
+            echo "$obj"
+          }
+
+          # Create-only: the API refuses (422) when the tag already exists, so a tag is never moved. An existing tag
+          # (from an earlier run that stopped before the release, or a concurrent one) is reused only when it points at
+          # exactly the requested commit and has no release yet (PandiO/knk-workspace#426).
+          if create_error=$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" 2>&1 >/dev/null); then
+            echo "Created tag $TAG at $SHA."
+          else
+            existing=$(tag_commit)
+            if [ -z "$existing" ]; then
+              echo "::error::Could not create tag $TAG at $SHA, and no such tag exists: $create_error"; exit 1
+            fi
+            if [ "$existing" != "$SHA" ]; then
+              echo "::error::Tag $TAG already exists at $existing, not at $SHA"; exit 1
+            fi
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::error::Tag $TAG at $SHA already has a release"; exit 1
+            fi
+            echo "Tag $TAG already exists at $SHA without a release; creating the release."
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --generate-notes
+          echo "Released $TAG at $SHA: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

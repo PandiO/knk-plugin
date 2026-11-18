@@ -33,6 +33,8 @@ public class StaffChatCommand implements CommandExecutor {
     private final Executor mainThread;
     private final Supplier<Collection<? extends Player>> onlinePlayers;
     private final Consumer<Player> chime;
+    /** Chat hashtag tokens in staff chat (PandiO/knk-workspace#233); null = plain text only. */
+    private volatile net.knightsandkings.knk.paper.chat.tokens.ChatTokenExpander tokenExpander;
 
     /** Bukkit-only audience (no in-house permission model). */
     public StaffChatCommand() {
@@ -55,6 +57,11 @@ public class StaffChatCommand implements CommandExecutor {
         this.chime = chime;
     }
 
+    /** Chat hashtag tokens (PandiO/knk-workspace#233): {@code #hand}, {@code #kills}, … in staff chat. */
+    public void setTokenExpander(net.knightsandkings.knk.paper.chat.tokens.ChatTokenExpander expander) {
+        this.tokenExpander = expander;
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
@@ -63,9 +70,30 @@ public class StaffChatCommand implements CommandExecutor {
         }
         String message = String.join(" ", args);
         String senderName = sender instanceof Player ? sender.getName() : "CONSOLE";
+        var expander = tokenExpander;
+        if (expander != null && sender instanceof Player player) {
+            // Chat tokens: null = held for the share prompt, which runs this command again.
+            expander.expand(player, message, () -> onCommand(sender, command, label, args))
+                    .exceptionally(ex -> net.kyori.adventure.text.Component.text(message))
+                    .thenAccept(body -> {
+                        if (body != null) {
+                            mainThread.execute(() -> broadcast(sender, recipient -> recipient.sendMessage(
+                                    net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection()
+                                            .deserialize(ChatColor.LIGHT_PURPLE + "[Staff] " + ChatColor.WHITE + senderName
+                                                    + ChatColor.GRAY + ": ")
+                                            .append(body.colorIfAbsent(net.kyori.adventure.text.format.NamedTextColor.WHITE)))));
+                        }
+                    });
+            return true;
+        }
         String formatted = ChatColor.LIGHT_PURPLE + "[Staff] " + ChatColor.WHITE + senderName + ChatColor.GRAY + ": " + ChatColor.WHITE + message;
+        broadcast(sender, recipient -> recipient.sendMessage(formatted));
+        return true;
+    }
 
-        deliver(sender, formatted);
+    /** {@code send} to the sender and every online holder of {@link #NODE}, each with the chime. */
+    private void broadcast(CommandSender sender, Consumer<CommandSender> send) {
+        deliver(sender, send);
         for (Player online : onlinePlayers.get()) {
             if (online.equals(sender)) {
                 continue;
@@ -76,17 +104,16 @@ public class StaffChatCommand implements CommandExecutor {
                         if (Boolean.TRUE.equals(allowed)) {
                             mainThread.execute(() -> {
                                 if (online.isOnline()) {
-                                    deliver(online, formatted);
+                                    deliver(online, send);
                                 }
                             });
                         }
                     });
         }
-        return true;
     }
 
-    private void deliver(CommandSender recipient, String formatted) {
-        recipient.sendMessage(formatted);
+    private void deliver(CommandSender recipient, Consumer<CommandSender> send) {
+        send.accept(recipient);
         if (recipient instanceof Player player) {
             chime.accept(player);
         }

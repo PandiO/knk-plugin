@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -22,6 +23,7 @@ import net.knightsandkings.knk.core.teleport.TeleportOutcome;
 import net.knightsandkings.knk.paper.commands.support.PlayerCommandSupport;
 import net.knightsandkings.knk.paper.commands.support.TargetRankCheck;
 import net.knightsandkings.knk.paper.teleport.TeleportCharges;
+import net.knightsandkings.knk.paper.teleport.TeleportExemptions;
 import net.knightsandkings.knk.paper.teleport.TeleportNodes;
 import net.knightsandkings.knk.paper.teleport.TeleportPlan;
 import net.knightsandkings.knk.paper.teleport.TeleportService;
@@ -35,9 +37,12 @@ import net.knightsandkings.knk.paper.teleport.VisibleTargetResolver;
  *   <li>{@code /hub} - you to the hub. Any player (no node). A {@code HUB} teleport: warmup, its own cooldown, combat
  *       tag, safe-spot check and every engine guard (siege, freeze, outage, domain access). The groups' spawn price
  *       and cooldown apply (KNG-41), {@value TeleportNodes#BYPASS_COST} makes it free.</li>
- *   <li>{@code /hub <player> [-s]} - send someone to the hub ({@value TeleportNodes#STAFF_OTHERS}; you must outrank
- *       them), like {@code /spawn <player>}. A staff teleport: instant, audited. Console allowed. {@code -s} needs
- *       {@value TeleportNodes#STAFF_SILENT}; always silent while you're vanished.</li>
+ *   <li>{@code /hub <player> [-s]} - send someone to the hub ({@value TeleportNodes#STAFF_OTHERS}; your rank or lower
+ *       since PandiO/knk-workspace#171), like {@code /spawn <player>}. A staff teleport: instant, audited. Console allowed. {@code -s} needs
+ *       {@value TeleportNodes#STAFF_SILENT}; always silent while you're vanished. Same rank or lower, and not a
+ *       player exempt from it ({@code knk.teleport.exempt.hub}, staff/owner mode) unless you override
+ *       (PandiO/knk-workspace#171).</li>
+ *   <li>{@code /hub all [-s]} - every eligible player to the hub ({@code knk.teleport.all.hub}, #171).</li>
  * </ul>
  * Without a usable hub (none selected, its world not loaded, its spawn unresolved) nobody is moved, and never to
  * another world instead (KNG-114).
@@ -57,6 +62,8 @@ public class HubTeleportCommand {
     private final Predicate<Player> isVanished;
     private volatile Consumer<Player> settleInWorld = player -> { };
     private volatile TeleportCharges charges;
+    /** Exempt players and {@code /hub all} (#171); null = nobody exempt, no {@code all}. */
+    private volatile TeleportExemptions exemptions;
 
     /**
      * @param hubSpawn       the hub spawn now, empty while no hub can take players; read again when the warmup ends
@@ -82,6 +89,11 @@ public class HubTeleportCommand {
         this.charges = charges;
     }
 
+    /** Exempt players and {@code /hub all} (PandiO/knk-workspace#171). */
+    public void setExemptions(TeleportExemptions exemptions) {
+        this.exemptions = exemptions;
+    }
+
     /** What happens to a player the teleport brought into another world: its game mode, as for the other hub entries. */
     public void setSettleInWorld(Consumer<Player> settleInWorld) {
         this.settleInWorld = settleInWorld != null ? settleInWorld : player -> { };
@@ -92,10 +104,13 @@ public class HubTeleportCommand {
         StaffTeleportCommand.Parsed parsed = StaffTeleportCommand.Parsed.of(args);
         if (parsed.args().isEmpty() && !parsed.silent()) {
             self(sender);
+        } else if (parsed.args().size() == 1 && exemptions != null
+                && TeleportExemptions.ALL_ARGUMENT.equalsIgnoreCase(parsed.args().get(0))) {
+            all(sender, parsed.silent());
         } else if (parsed.args().size() == 1) {
             other(sender, parsed.args().get(0), parsed.silent());
         } else {
-            sender.sendMessage(ChatColor.YELLOW + "Usage: /hub | /hub <player> [-s]");
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /hub | /hub <player> [-s]" + (exemptions != null ? " | /hub all [-s]" : ""));
         }
     }
 
@@ -136,7 +151,7 @@ public class HubTeleportCommand {
             return;
         }
         support.whenAllowed(sender, TeleportNodes.STAFF_OTHERS, () -> withSilent(sender, silentRequested, silent ->
-            rankCheck.whenOutranks(sender, target.getName(), summary -> {
+            rankCheck.whenOutranks(sender, target.getName(), summary -> notExempt(sender, target, () -> {
                 Location destination = spawn();
                 if (destination == null) {
                     sender.sendMessage(ChatColor.RED + UNAVAILABLE
@@ -152,7 +167,45 @@ public class HubTeleportCommand {
                         target.sendMessage(ChatColor.GRAY + sender.getName() + " sent you to the hub.");
                     }
                 }));
-            })));
+            }))));
+    }
+
+    /** {@code /hub all}: every eligible player to the hub (PandiO/knk-workspace#171). */
+    private void all(CommandSender sender, boolean silentRequested) {
+        TeleportExemptions rules = exemptions;
+        support.whenAllowed(sender, TeleportExemptions.Type.HUB.allNode(), () -> withSilent(sender, silentRequested, silent -> {
+            if (spawn() == null) {
+                sender.sendMessage(ChatColor.RED + UNAVAILABLE + whyUnavailable().map(why -> " (" + why + ")").orElse(""));
+                return;
+            }
+            rules.forAll(sender, TeleportExemptions.Type.HUB, Set.of(), players ->
+                TeleportExemptions.runAll(sender, players, "to the hub", target -> {
+                    Location destination = spawn();
+                    if (destination == null) {
+                        return java.util.concurrent.CompletableFuture.completedFuture(TeleportOutcome.failed(UNAVAILABLE));
+                    }
+                    World from = target.getWorld();
+                    TeleportPlan plan = TeleportPlan.staffToLocation(sender, target, destination, LABEL, silent);
+                    return teleportService.start(plan).thenApply(outcome -> {
+                        if (outcome.isTeleported()) {
+                            settle(target, from);
+                            if (!silent && target.isOnline()) {
+                                target.sendMessage(ChatColor.GRAY + sender.getName() + " sent you to the hub.");
+                            }
+                        }
+                        return outcome;
+                    });
+                }));
+        }));
+    }
+
+    private void notExempt(CommandSender sender, Player target, Runnable next) {
+        TeleportExemptions rules = exemptions;
+        if (rules == null) {
+            next.run();
+        } else {
+            rules.whenNotExempt(sender, target, TeleportExemptions.Type.HUB, next);
+        }
     }
 
     /** The hub spawn now, or null; never throws. */
@@ -209,11 +262,25 @@ public class HubTeleportCommand {
 
     /** The {@code <player>} form and its {@code -s}, only for staff holding their nodes (KNG-107, cached check). */
     public List<String> onTabComplete(CommandSender sender, String[] args) {
+        TeleportExemptions rules = exemptions;
+        boolean all = rules != null && args.length >= 1 && rules.offersAll(sender, TeleportExemptions.Type.HUB, args[0]);
         if (!support.holds(sender, TeleportNodes.STAFF_OTHERS)) {
+            if (args.length == 1 && all) {
+                return new ArrayList<>(List.of(TeleportExemptions.ALL_ARGUMENT));
+            }
+            if (args.length == 2 && rules != null && TeleportExemptions.ALL_ARGUMENT.equalsIgnoreCase(args[0])
+                    && support.holds(sender, TeleportExemptions.Type.HUB.allNode())
+                    && "-s".startsWith(args[1].toLowerCase(Locale.ROOT)) && support.holds(sender, TeleportNodes.STAFF_SILENT)) {
+                return List.of("-s");
+            }
             return Collections.emptyList();
         }
         if (args.length == 1) {
-            return new ArrayList<>(targets.complete(sender, args[0]));
+            List<String> options = new ArrayList<>(targets.complete(sender, args[0]));
+            if (all) {
+                options.add(TeleportExemptions.ALL_ARGUMENT);
+            }
+            return options;
         }
         if (args.length == 2 && "-s".startsWith(args[1].toLowerCase(Locale.ROOT))
                 && support.holds(sender, TeleportNodes.STAFF_SILENT)) {
