@@ -49,20 +49,36 @@ public final class WalkLegPreparer implements NavigationService.WalkPreparer {
      */
     public WalkLegPreparer(WalkSnapshotService snapshots, WalkAccessFactory access, NavigationConfig.WalkConfig config,
                            Function<String, GateCells> gatesOf, Function<World, WalkSnapshotService.WorldChunks> chunksOf) {
+        this(snapshots, access, config, false, gatesOf, chunksOf);
+    }
+
+    /**
+     * As above; with {@code guidanceV2} ({@code navigation.guidance-v2}, phase 6.1) the requests carry the profile with
+     * the clearance cost ({@link NavigationConfig.WalkConfig#profile(boolean)}); off, today's profile exactly.
+     */
+    public WalkLegPreparer(WalkSnapshotService snapshots, WalkAccessFactory access, NavigationConfig.WalkConfig config,
+                           boolean guidanceV2, Function<String, GateCells> gatesOf,
+                           Function<World, WalkSnapshotService.WorldChunks> chunksOf) {
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
         this.access = Objects.requireNonNull(access, "access");
         this.gatesOf = Objects.requireNonNull(gatesOf, "gatesOf");
         this.chunksOf = Objects.requireNonNull(chunksOf, "chunksOf");
         Objects.requireNonNull(config, "config");
         this.captureMargin = config.captureMargin();
-        this.profile = config.profile();
+        this.profile = config.profile(guidanceV2);
         this.budget = config.budget();
     }
 
     /** The server's preparer: the gate cache's door cells and Bukkit chunk snapshots. */
     public static WalkLegPreparer server(WalkSnapshotService snapshots, WalkAccessFactory access,
                                          NavigationConfig.WalkConfig config, GateManager gateManager) {
-        return new WalkLegPreparer(snapshots, access, config, world -> GateCellsIndex.of(gateManager, world),
+        return server(snapshots, access, config, false, gateManager);
+    }
+
+    /** The server's preparer with {@code navigation.guidance-v2} on or off (phase 6.1). */
+    public static WalkLegPreparer server(WalkSnapshotService snapshots, WalkAccessFactory access,
+                                         NavigationConfig.WalkConfig config, boolean guidanceV2, GateManager gateManager) {
+        return new WalkLegPreparer(snapshots, access, config, guidanceV2, world -> GateCellsIndex.of(gateManager, world),
             WalkSnapshotService::of);
     }
 

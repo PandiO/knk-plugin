@@ -64,6 +64,7 @@ import net.knightsandkings.knk.core.roads.route.Snapper;
 import net.knightsandkings.knk.core.roads.walk.WalkGoal;
 import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
 import net.knightsandkings.knk.core.roads.walk.WalkPath;
+import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
 import net.knightsandkings.knk.core.roads.walk.WalkPathfinder;
 import net.knightsandkings.knk.core.roads.walk.WalkRequest;
 import net.knightsandkings.knk.core.roads.walk.WalkResult;
@@ -1263,6 +1264,8 @@ public final class NavigationService implements SiegeMatchObserver {
         int generation = ++leg.generation;
         walkCounts[WalkCount.REQUESTED.ordinal()]++;
         Walk walk = deps.walk();
+        // phase 6.1 (#710): with guidance-v2 a path to draw is shaped on the walk thread (the check near the road draws none)
+        boolean shape = deps.config().guidanceV2() && !leg.nearRoute;
         Location feet = a.player.getLocation();
         double[] target = leg.target;
         CompletableFuture<Supplier<WalkRequest>> capture;
@@ -1303,7 +1306,8 @@ public final class NavigationService implements SiegeMatchObserver {
                     }
                     measureWalk(searched, result, request, queueNanos);
                     WalkResult delivered = result;
-                    deps.mainThread().execute(() -> walkDelivered(a, leg, generation, delivered, null));
+                    List<double[]> trail = shape ? shapeWalk(a, searched, result) : null;
+                    deps.mainThread().execute(() -> walkDelivered(a, leg, generation, delivered, null, trail));
                 });
             } catch (java.util.concurrent.RejectedExecutionException e) {
                 walkDelivered(a, leg, generation, null, WalkCount.FAILED); // shutting down
@@ -1356,6 +1360,15 @@ public final class NavigationService implements SiegeMatchObserver {
      * passages). No result → FALLBACK, today's straight line.
      */
     private void walkDelivered(Active a, DirectLeg leg, int generation, WalkResult result, WalkCount failure) {
+        walkDelivered(a, leg, generation, result, failure, null);
+    }
+
+    /**
+     * As above, with the shaped trail of the result's path (phase 6.1, {@code guidance-v2}; null: the path's cells, as
+     * before).
+     */
+    private void walkDelivered(Active a, DirectLeg leg, int generation, WalkResult result, WalkCount failure,
+                               List<double[]> shaped) {
         if (!walkCurrent(a, leg, generation)) {
             return;
         }
@@ -1379,11 +1392,61 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         if (result != null && !result.isFound() && !a.roadsTried && leg == a.leg) {
             a.roadsTried = true;
-            if (tryRoadsInstead(a, leg, generation, () -> adoptWalkResult(a, leg, result, partial))) {
+            if (tryRoadsInstead(a, leg, generation, () -> adoptWalkResult(a, leg, result, partial, shaped))) {
                 return; // the straight line stays until the road route is known
             }
         }
-        adoptWalkResult(a, leg, result, partial);
+        adoptWalkResult(a, leg, result, partial, shaped);
+    }
+
+    // ==================== shaped walk trails (off-road phase 6.1, #710) ====================
+
+    /** Shapes walk paths; stateless, shared by the walk threads. */
+    private static final WalkPathShaper SHAPER = new WalkPathShaper();
+    /** Walk paths shaped, and the time it took (walk threads; read by {@link #walkStatus}). */
+    private final java.util.concurrent.atomic.AtomicLong shapedPaths = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong shapingNanos = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong shapingFailures = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * Walk thread: the trail of a found or partial walk path shaped over the request's own captured terrain
+     * ({@link WalkPathShaper}, DESIGN § 7.1); null when there is no path, or when shaping fails (logged; the cells are
+     * drawn as before).
+     */
+    private List<double[]> shapeWalk(Active a, WalkRequest searched, WalkResult result) {
+        if (searched == null || result == null) {
+            return null;
+        }
+        Optional<WalkPath> path = result.isFound() ? result.path() : result.partialPath();
+        if (path.isEmpty()) {
+            return null;
+        }
+        try {
+            WalkPathShaper.Shaped shaped = SHAPER.shape(path.get(), searched.terrain(), searched.profile(),
+                searched.access(), deps.config().walk().shaping());
+            if (shaped.trail().isEmpty()) {
+                return null; // nothing to draw from: the cells, as before
+            }
+            shapedPaths.incrementAndGet();
+            shapingNanos.addAndGet(shaped.nanos());
+            return shaped.trail();
+        } catch (RuntimeException e) {
+            shapingFailures.incrementAndGet();
+            deps.logger().log(Level.WARNING, "[Navigation] Walk path shaping failed for " + a.player.getName()
+                + "; drawing the cells", e);
+            return null;
+        }
+    }
+
+    /** {@code /knk road status}: shaped walk paths and their mean time, with {@code guidance-v2}; empty otherwise. */
+    String shapingStatus() {
+        if (!deps.config().guidanceV2()) {
+            return "";
+        }
+        long n = shapedPaths.get();
+        double meanMs = n == 0 ? 0 : shapingNanos.get() / 1e6 / n;
+        return "shaped " + n + String.format(java.util.Locale.ROOT, " (mean %.2f ms)", meanMs)
+            + (shapingFailures.get() > 0 ? ", shaping failed " + shapingFailures.get() : "");
     }
 
     /**
@@ -1450,7 +1513,8 @@ public final class NavigationService implements SiegeMatchObserver {
      * The walk result on the leg: the path, the partial path, or "no conventional path" (N8). The start leg
      * (KNG-75) says "to the road" - or, out of budget, that it has trouble (live test S3) - and redraws with the route.
      */
-    private void adoptWalkResult(Active a, DirectLeg leg, WalkResult result, Optional<WalkPath> partial) {
+    private void adoptWalkResult(Active a, DirectLeg leg, WalkResult result, Optional<WalkPath> partial,
+                                 List<double[]> shaped) {
         if (leg.nearRoute) {
             adoptNearRouteResult(a, leg, result);
             return;
@@ -1476,7 +1540,8 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         if (result != null) {
             leg.partial = !result.isFound();
-            leg.path = result.isFound() ? result.path().orElseThrow().points() : partial.get().points();
+            leg.path = shaped != null ? shaped
+                : result.isFound() ? result.path().orElseThrow().points() : partial.get().points();
             leg.status = DirectLeg.Status.WALKING;
             Location feet = a.player.getLocation();
             double remaining = leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
@@ -1569,7 +1634,9 @@ public final class NavigationService implements SiegeMatchObserver {
             + ", not captured " + walkCounts[WalkCount.NOT_CAPTURED.ordinal()] + ", failed " + walkCounts[WalkCount.FAILED.ordinal()]
             + "; partial " + walkCounts[WalkCount.PARTIAL.ordinal()];
         String capture = deps.walk().preparer().describe();
-        return "on; " + walking + " walking, " + inFlight + " computing; " + counts + (capture.isEmpty() ? "" : "; " + capture);
+        String shaping = shapingStatus();
+        return "on; " + walking + " walking, " + inFlight + " computing; " + counts + (capture.isEmpty() ? "" : "; " + capture)
+            + (shaping.isEmpty() ? "" : "; " + shaping);
     }
 
     /**

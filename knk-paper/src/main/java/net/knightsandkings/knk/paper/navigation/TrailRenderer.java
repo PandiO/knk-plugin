@@ -159,8 +159,11 @@ public final class TrailRenderer {
     /**
      * Direct mode with a walk path (KNG-51 {@code LAST_MILE_PATHFINDING.md} §7): the next
      * {@code trail-length} blocks of {@code floorPoints} from the player's projection onto it (half
-     * length under lag), in the leg colour and spacing. The points are floor cells already
-     * ({@code WalkPath.points()}: block centre, floor y), so no world reads. Main thread.
+     * length under lag), in the leg colour and spacing. The points are floor points already
+     * ({@code WalkPath.points()}: block centre, floor y), so no world reads. Main thread. With
+     * {@code navigation.guidance-v2} (off-road phase 6.1, #710) they are the shaped walk path's curve instead
+     * ({@code WalkPathShaper.Shaped#trail()}, computed and checked against the walls on the walk thread): drawn the same
+     * way, {@link #LEG_SPACING} apart in the leg colour (O20), so its particles follow the curve.
      */
     public void drawPath(Player viewer, List<double[]> floorPoints) {
         double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();

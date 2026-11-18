@@ -2081,7 +2081,7 @@ public class KnKPlugin extends JavaPlugin {
         });
         this.walkAccessFactory = net.knightsandkings.knk.paper.navigation.walk.WorldGuardWalkAccess.factory(access);
         var preparer = net.knightsandkings.knk.paper.navigation.walk.WalkLegPreparer.server(walkSnapshots,
-            walkAccessFactory, navigation.walk(), gateManager);
+            walkAccessFactory, navigation.walk(), navigation.guidanceV2(), gateManager);
         var search = new net.knightsandkings.knk.core.roads.walk.WalkSearch();
         // link C1: NPCs call the same capture, access and search for their off-road legs
         this.npcWalkSources = new net.knightsandkings.knk.paper.npc.nav.NpcWalkPlanner.Sources(walkSnapshots,

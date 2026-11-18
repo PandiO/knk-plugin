@@ -458,7 +458,10 @@ public class ConfigLoader {
                 walk.getInt("max-concurrent-searches", walkDefaults.maxConcurrentSearches()),
                 walk.contains("climbables") ? walk.getStringList("climbables") : walkDefaults.climbables(),
                 walk.getDouble("wall-cost", walkDefaults.wallCost()),
-                walk.getInt("max-chunks-per-request", walkDefaults.maxChunksPerRequest()));
+                walk.getInt("max-chunks-per-request", walkDefaults.maxChunksPerRequest()),
+                walk.getDouble("clearance-cost", walkDefaults.clearanceCost()),
+                walk.getDouble("wall-clearance", walkDefaults.wallClearance()),
+                walk.getBoolean("curve", walkDefaults.curve()));
 
         return new NavigationConfig(
             section.getBoolean("enabled", defaults.enabled()),
@@ -479,7 +482,8 @@ public class ConfigLoader {
             section.getDouble("sprint-speed", defaults.sprintSpeed()),
             surveyConfig,
             builderConfig,
-            walkConfig);
+            walkConfig,
+            section.getBoolean("guidance-v2", defaults.guidanceV2()));
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */

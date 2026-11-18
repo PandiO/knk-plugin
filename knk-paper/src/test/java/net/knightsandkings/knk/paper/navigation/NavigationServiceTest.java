@@ -70,6 +70,8 @@ import net.knightsandkings.knk.core.roads.walk.WalkGoal;
 import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
 import net.knightsandkings.knk.core.roads.walk.WalkSearchStats;
 import net.knightsandkings.knk.core.roads.walk.WalkPath;
+import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
+import net.knightsandkings.knk.core.roads.walk.WalkSearch;
 import net.knightsandkings.knk.core.roads.walk.WalkRequest;
 import net.knightsandkings.knk.core.roads.walk.WalkResult;
 import net.knightsandkings.knk.core.roads.walk.WalkTerrain;
@@ -179,8 +181,11 @@ class NavigationServiceTest {
         return service;
     }
 
-    private static WalkRequest request(double[] from, double[] target, WalkGoal goal) {
-        WalkTerrain terrain = new WalkTerrain(mock(SurfaceGrid.class), GateCells.NONE, WalkCells.NONE);
+    /** The captured terrain the fake preparer hands out (a mock unless a test sets a real one). */
+    private SurfaceGrid walkSurface = mock(SurfaceGrid.class);
+
+    private WalkRequest request(double[] from, double[] target, WalkGoal goal) {
+        WalkTerrain terrain = new WalkTerrain(walkSurface, GateCells.NONE, WalkCells.NONE);
         return new WalkRequest(terrain, CellAccess.OPEN, MovementProfile.PLAYER, from[0], from[1], from[2], target[0],
             target[1], target[2], goal, WalkBudget.DEFAULTS);
     }
@@ -1049,6 +1054,126 @@ class NavigationServiceTest {
         assertFalse(lines.get(4).contains("chunks"), lines.get(4));
         assertTrue(lines.get(4).contains("FALLBACK (max-expansions)"), lines.get(4));
         assertTrue(walking.walkStatus().contains("budget 1"), "the existing outcome counters are unchanged");
+    }
+
+    // ==================== off-road phase 6.1: shaped walk trails (#710) ====================
+
+    /**
+     * A field (floor 64, x -6..26, z -6..14) with a wall two high along x = 10 from z = -6 to z = 6, between the player
+     * at (0.5, 65, 0.5) and the well at (20.5, 64, 0.5): the walk path goes round its end.
+     */
+    private static SurfaceGrid wallField() {
+        return new SurfaceGrid() {
+            private boolean wall(int x, int y, int z) {
+                return x == 10 && z <= 6 && (y == 65 || y == 66);
+            }
+
+            @Override
+            public boolean isSolid(int x, int y, int z) {
+                return x >= -6 && x <= 26 && z >= -6 && z <= 14 && (y == 64 || wall(x, y, z));
+            }
+
+            @Override
+            public boolean isPassable(int x, int y, int z) {
+                return !isSolid(x, y, z);
+            }
+
+            @Override
+            public boolean isHazard(int x, int y, int z) {
+                return false;
+            }
+
+            @Override
+            public int minY() {
+                return 0;
+            }
+
+            @Override
+            public int maxY() {
+                return 128;
+            }
+
+            @Override
+            public String floorMaterial(int x, int y, int z) {
+                return isSolid(x, y, z) ? "STONE" : "AIR";
+            }
+
+            @Override
+            public boolean isStairOrSlab(int x, int y, int z) {
+                return false;
+            }
+        };
+    }
+
+    @Test
+    void withGuidanceV2TheWalkLegDrawsTheShapedCurveOfItsPath() {
+        walkSurface = wallField();
+        List<WalkRequest> searched = new ArrayList<>();
+        walkFinder = r -> {
+            searched.add(r);
+            return new WalkSearch().find(r);
+        };
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(true));
+
+        walking.navigate(player, well());
+        runSearches();
+
+        assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(walking));
+        WalkPath path = new WalkSearch().find(searched.get(0)).path().orElseThrow();
+        List<double[]> expected = new WalkPathShaper().shape(path, searched.get(0).terrain(), searched.get(0).profile(),
+            CellAccess.OPEN, NavigationConfig.WalkConfig.defaults().shaping()).trail();
+        ArgumentCaptor<List<double[]>> drawn = pathCaptor();
+        verify(trail).drawPath(any(), drawn.capture());
+        assertEquals(expected.size(), drawn.getValue().size(), "the shaped trail, computed on the walk thread");
+        for (int i = 0; i < expected.size(); i++) {
+            assertArrayEquals(expected.get(i), drawn.getValue().get(i), 1e-12);
+        }
+        assertTrue(expected.size() != path.size() || !java.util.Arrays.equals(expected.get(1), path.points().get(1)),
+            "not the cells");
+        for (double[] p : drawn.getValue()) {
+            assertTrue(p[0] <= 10 - 0.7 || p[0] >= 11 + 0.7 || p[2] >= 7 + 0.7, "keeps off the wall: "
+                + java.util.Arrays.toString(p));
+        }
+        assertTrue(walking.walkStatus().contains("shaped 1 (mean "), walking.walkStatus());
+    }
+
+    @Test
+    void withGuidanceV2OffTheWalkLegDrawsTheCellsOfItsPathExactly() {
+        // A16: the flag off - today's trail, today's search profile
+        walkSurface = wallField();
+        List<WalkRequest> searched = new ArrayList<>();
+        walkFinder = r -> {
+            searched.add(r);
+            return new WalkSearch().find(r);
+        };
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        assertFalse(NavigationConfig.defaults().guidanceV2(), "off by default");
+
+        walking.navigate(player, well());
+        runSearches();
+
+        List<double[]> cells = new WalkSearch().find(searched.get(0)).path().orElseThrow().points();
+        ArgumentCaptor<List<double[]>> drawn = pathCaptor();
+        verify(trail).drawPath(any(), drawn.capture());
+        assertEquals(cells.size(), drawn.getValue().size());
+        for (int i = 0; i < cells.size(); i++) {
+            assertArrayEquals(cells.get(i), drawn.getValue().get(i), 0.0);
+        }
+        assertFalse(walking.walkStatus().contains("shaped"), walking.walkStatus());
+    }
+
+    @Test
+    void aPathTheShaperCannotUseIsDrawnAsItsCells() {
+        // the fake search's path has no cells to shape (a mock): the trail falls back to its points
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(true));
+
+        walking.navigate(player, well());
+        runSearches();
+
+        ArgumentCaptor<List<double[]>> drawn = pathCaptor();
+        verify(trail).drawPath(any(), drawn.capture());
+        assertEquals(wellDetour().size(), drawn.getValue().size());
+        assertTrue(walking.walkStatus().contains("shaped 0 (mean 0.00 ms)"), walking.walkStatus());
     }
 
     @Test

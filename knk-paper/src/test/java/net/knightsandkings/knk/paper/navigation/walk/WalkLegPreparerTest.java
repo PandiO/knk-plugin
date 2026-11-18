@@ -76,6 +76,26 @@ class WalkLegPreparerTest {
     }
 
     @Test
+    void withGuidanceV2TheRequestCarriesTheClearanceCostAndWithoutItTodaysProfile() {
+        // off-road phase 6.1 (#710, A16): the flag decides the search profile, nothing else
+        WalkAccessFactory access = new WalkAccessFactory(
+            (p, ids) -> new GateAvailability(id -> Optional.empty(), id -> false), p -> Set.of(), p -> false,
+            (w, box) -> java.util.Map.of(), (p, w, x, y, z) -> true, id -> Optional.empty(), new DomainAccessEvaluator());
+        WalkLegPreparer on = new WalkLegPreparer(snapshots, access, config, true, name -> fake.gates(), w -> chunks);
+        WalkLegPreparer off = new WalkLegPreparer(snapshots, access, config, false, name -> fake.gates(), w -> chunks);
+        WalkGoal goal = WalkGoal.within(6.5, 64, 6.5, 0.25);
+
+        WalkRequest withFlag = await(on.prepare(player, new double[] {1.5, 65.0, 1.5}, new double[] {6.5, 64, 6.5}, goal,
+            null)).get();
+        WalkRequest withoutFlag = await(off.prepare(player, new double[] {1.5, 65.0, 1.5}, new double[] {6.5, 64, 6.5}, goal,
+            null)).get();
+
+        assertEquals(config.profile(true), withFlag.profile());
+        assertTrue(withFlag.profile().usesClearance());
+        assertEquals(config.profile(), withoutFlag.profile(), "the flag off: today's profile exactly");
+    }
+
+    @Test
     void anUnloadedChunkCompletesAtOnceWithNoRequest() {
         chunks.unloaded.add(WalkChunk.key(0, 0));
 
