@@ -13,6 +13,7 @@ import net.knightsandkings.knk.core.roads.build.PassabilityRules;
 import net.knightsandkings.knk.core.roads.route.RouterParameters;
 import net.knightsandkings.knk.core.roads.walk.MovementProfile;
 import net.knightsandkings.knk.core.roads.walk.WalkBudget;
+import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
 
 /**
  * The {@code navigation:} block of config.yml (road navigation, docs/specs/navigation/DESIGN.md §4,
@@ -49,6 +50,9 @@ import net.knightsandkings.knk.core.roads.walk.WalkBudget;
  * @param survey             survey-walk sampling
  * @param builder            tile builder parameters
  * @param walk               last-mile walkable paths (KNG-51, {@code navigation.walk.*})
+ * @param guidanceV2         {@code navigation.guidance-v2} (off-road navigation phase 6, PandiO/knk-workspace#710): the
+ *                           trail-quality pass - walk paths with the clearance cost, shaped and drawn as checked curves.
+ *                           Default false: walk paths, trails and the search exactly as before (DESIGN § 7.6, A16)
  */
 public record NavigationConfig(
     boolean enabled,
@@ -69,7 +73,8 @@ public record NavigationConfig(
     double sprintSpeed,
     SurveyConfig survey,
     BuilderConfig builder,
-    WalkConfig walk
+    WalkConfig walk,
+    boolean guidanceV2
 ) {
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
@@ -246,11 +251,22 @@ public record NavigationConfig(
      * @param wallCost              extra cost of a cell beside a wall: paths keep a block from walls (0 = hug them)
      * @param maxChunksPerRequest   a capture box larger than this many chunks is refused (64; raised on the dev server
      *                              only to measure long legs, off-road phase 0, PandiO/knk-workspace#703)
+     * @param clearanceCost         with {@code guidance-v2}: extra cost per block of clearance a cell lacks to
+     *                              {@code wallClearance}, in place of {@code wallCost}; 0 keeps {@code wallCost} (phase 6.1)
+     * @param wallClearance         with {@code guidance-v2}: the clearance walk paths keep from walls where there is room
+     *                              (0.35..2; the shaper's hard minimum is 0.35)
+     * @param curve                 with {@code guidance-v2}: corners of a shaped walk trail drawn as checked curves
      */
     public record WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
                              double detourAllowance, double climbAllowance, int maxDrop, double dropPenalty,
                              int captureMargin, int chunkTtlSeconds, double recomputeDistance, int maxConcurrentSearches,
-                             List<String> climbables, double wallCost, int maxChunksPerRequest) {
+                             List<String> climbables, double wallCost, int maxChunksPerRequest, double clearanceCost,
+                             double wallClearance, boolean curve) {
+
+        /** Default of {@code clearance-cost} (DESIGN § 7.1.4: 5 per block, as the NPC local-leg search). */
+        public static final double DEFAULT_CLEARANCE_COST = 5.0;
+        /** Default of {@code wall-clearance} (DESIGN § 7.1.2). */
+        public static final double DEFAULT_WALL_CLEARANCE = MovementProfile.DEFAULT_WALL_CLEARANCE;
 
         /** Default of {@code max-chunks-per-request}: the capture's limit before #703 (KNG-75 step 2a). */
         public static final int DEFAULT_MAX_CHUNKS_PER_REQUEST = 64;
@@ -262,6 +278,16 @@ public record NavigationConfig(
             climbables = climbables == null ? List.of("LADDER") : climbables.stream()
                 .map(name -> name == null ? "" : name.trim().toUpperCase(Locale.ROOT))
                 .toList();
+        }
+
+        /** Without the phase 6.1 keys (callers from before #710): their defaults. */
+        public WalkConfig(boolean enabled, int maxExpansions, double maxLengthFactor, double maxLength,
+                          double detourAllowance, double climbAllowance, int maxDrop, double dropPenalty,
+                          int captureMargin, int chunkTtlSeconds, double recomputeDistance, int maxConcurrentSearches,
+                          List<String> climbables, double wallCost, int maxChunksPerRequest) {
+            this(enabled, maxExpansions, maxLengthFactor, maxLength, detourAllowance, climbAllowance, maxDrop, dropPenalty,
+                captureMargin, chunkTtlSeconds, recomputeDistance, maxConcurrentSearches, climbables, wallCost,
+                maxChunksPerRequest, DEFAULT_CLEARANCE_COST, DEFAULT_WALL_CLEARANCE, true);
         }
 
         /** Without {@code max-chunks-per-request} (callers from before #703): the default 64. */
@@ -322,6 +348,13 @@ public record NavigationConfig(
                 throw new IllegalArgumentException("navigation.walk.max-chunks-per-request must be 1.."
                     + MAX_CHUNKS_PER_REQUEST_LIMIT + " (got: " + maxChunksPerRequest + ")");
             }
+            if (!(clearanceCost >= 0) || Double.isInfinite(clearanceCost)) {
+                throw new IllegalArgumentException("navigation.walk.clearance-cost must be a number >= 0 (got: " + clearanceCost + ")");
+            }
+            if (!(wallClearance >= MovementProfile.MIN_WALL_CLEARANCE && wallClearance <= MovementProfile.MAX_WALL_CLEARANCE)) {
+                throw new IllegalArgumentException("navigation.walk.wall-clearance must be " + MovementProfile.MIN_WALL_CLEARANCE
+                    + ".." + MovementProfile.MAX_WALL_CLEARANCE + " (got: " + wallClearance + ")");
+            }
             for (String name : climbables) {
                 if (name.isEmpty()) {
                     throw new IllegalArgumentException("navigation.walk.climbables must not contain blank entries");
@@ -329,10 +362,23 @@ public record NavigationConfig(
             }
         }
 
-        /** The player's {@link MovementProfile} with this config's drops and climbables. */
+        /** The player's {@link MovementProfile} with this config's drops and climbables (today's wall cost). */
         public MovementProfile profile() {
             return MovementProfile.PLAYER.withDrops(maxDrop, dropPenalty).withClimbables(Set.copyOf(climbables))
                 .withWallCost(wallCost);
+        }
+
+        /**
+         * The profile for {@code navigation.guidance-v2}: on, with the clearance cost ({@code clearance-cost} 0 keeps the
+         * wall cost); off, {@link #profile()} exactly (phase 6.1, A16).
+         */
+        public MovementProfile profile(boolean guidanceV2) {
+            return guidanceV2 ? profile().withClearance(clearanceCost, wallClearance) : profile();
+        }
+
+        /** How walk paths are shaped with {@code navigation.guidance-v2} (phase 6.1). */
+        public WalkPathShaper.Options shaping() {
+            return WalkPathShaper.Options.of(wallClearance, curve);
         }
 
         /** The search budget (snap radii keep the core defaults: start 2, goal 3). */
@@ -349,6 +395,18 @@ public record NavigationConfig(
         survey = survey == null ? SurveyConfig.defaults() : survey;
         builder = builder == null ? BuilderConfig.defaults() : builder;
         walk = walk == null ? WalkConfig.defaults() : walk;
+    }
+
+    /** Without {@code guidance-v2} (callers from before #710): off. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
+                            double destinationSnapVerticalWeight, double maxStartDistance, double maxDestinationDistance,
+                            double destinationWalkRange, TrailConfig trail, double rerouteDistance, int rerouteAfterTicks,
+                            double arriveDistance, int maxSessionMinutes, double sprintSpeed, SurveyConfig survey,
+                            BuilderConfig builder, WalkConfig walk) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, walk, false);
     }
 
     /**
@@ -375,7 +433,15 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk);
+            survey, builder, walk, guidanceV2);
+    }
+
+    /** This config with {@code guidance-v2} on or off. */
+    public NavigationConfig withGuidanceV2(boolean guidanceV2) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2);
     }
 
     /** {@code class-cost} keys as the API spells them ({@code Main}, {@code Road}, {@code Path}), any case. */

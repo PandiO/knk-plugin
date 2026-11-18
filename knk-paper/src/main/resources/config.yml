@@ -763,6 +763,10 @@ navigation:
   # Walkable last-mile paths (KNG-51, docs/specs/navigation/LAST_MILE_PATHFINDING.md §9): direct mode
   # (a target within max-snap-distance, and the last leg after a road's end) follows a path a player
   # can walk instead of a straight line through terrain. No path found -> the straight line.
+  # Trail-quality pass (off-road navigation phase 6, #710): walk paths keep wall-clearance (walk.clearance-cost),
+  # are shaped off the main thread and drawn with checked curves (walk.curve). false = walk paths, the search and the
+  # trail exactly as before. Keep false until the live test signs it off
+  guidance-v2: false
   walk:
     # false = straight lines exactly as before (the kill switch)
     enabled: true
@@ -796,6 +800,12 @@ navigation:
     # A walk leg whose capture box (the leg + capture-margin) covers more chunks than this gets no walk path (1..1024).
     # Keep 64; raise it on a test server only, to measure long legs (off-road navigation phase 0, #703)
     max-chunks-per-request: 64
+    # With guidance-v2 only (phase 6.1, #710): instead of wall-cost, this extra cost per block of clearance a step lacks
+    # to wall-clearance (0 = keep wall-cost); the clearance kept from walls where there is room (0.35..2); corners of
+    # the shaped walk trail drawn as curves checked against the walls (false = the shaped line's straight pieces)
+    clearance-cost: 5
+    wall-clearance: 0.8
+    curve: true
 
 # Player payments (currency ledger Phase 3, docs/specs/currency-payments/DESIGN.md §3.6). Every
 # limit that matters (min/max, daily caps, cooldown, confirmation threshold, who may send) lives in
