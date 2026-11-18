@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -28,6 +29,7 @@ public class ManagedRegionRepairService {
     private final AtomicBoolean running = new AtomicBoolean();
     private volatile Set<String> managedRegionKeys = Set.of();
     private volatile boolean completedOnce;
+    private volatile Consumer<List<ManagedRegionSpec>> afterRun;
 
     public ManagedRegionRepairService(ManagedRegionSpecSource source, ManagedRegionReconciler reconciler,
                                       ManagedRegionStore store, List<ManagedRegionSpec> extraRegions,
@@ -63,8 +65,29 @@ public class ManagedRegionRepairService {
             managedRegionKeys = Set.copyOf(keys);
             completedOnce = true;
             log(report);
+            notifyAfterRun(loaded.specs());
             return report;
         }, mainThread).whenComplete((report, error) -> running.set(false));
+    }
+
+    /**
+     * Overview map (PandiO/knk-workspace#735): called on {@code mainThread} after every run that read the domain data,
+     * with the domain-backed regions of that run (not the config extras). A failing listener never fails the repair.
+     */
+    public void setAfterRun(Consumer<List<ManagedRegionSpec>> listener) {
+        this.afterRun = listener;
+    }
+
+    private void notifyAfterRun(List<ManagedRegionSpec> domainSpecs) {
+        Consumer<List<ManagedRegionSpec>> listener = afterRun;
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.accept(List.copyOf(domainSpecs));
+        } catch (RuntimeException e) {
+            logger.log(Level.WARNING, "[KnK Regions] after-repair listener failed", e);
+        }
     }
 
     /** Whether at least one run has read the domain data and finished (before that, {@link #isManaged} knows nothing). */

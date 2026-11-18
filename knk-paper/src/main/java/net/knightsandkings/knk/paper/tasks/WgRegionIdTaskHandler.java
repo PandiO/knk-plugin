@@ -86,6 +86,34 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     }
 
     /**
+     * Overview map (PandiO/knk-workspace#735): told after every successful rename (main region or sub-region), with the
+     * world, the old name, the new name and the previous region it replaced (KNG-103; null for none).
+     */
+    @FunctionalInterface
+    public interface RenameListener {
+        void renamed(String world, String oldRegionId, String newRegionId, String replacedRegionId);
+    }
+
+    private volatile RenameListener renameListener;
+
+    public void setRenameListener(RenameListener renameListener) {
+        this.renameListener = renameListener;
+    }
+
+    private void notifyRenamed(String world, String oldRegionId, String newRegionId, String replacedRegionId) {
+        RenameListener listener = renameListener;
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.renamed(world, oldRegionId, newRegionId, replacedRegionId);
+        } catch (RuntimeException e) {
+            // The rename succeeded; the next repair reports the outline again.
+            LOGGER.warning("Rename listener for " + newRegionId + " failed: " + e.getMessage());
+        }
+    }
+
+    /**
      * Internal context for tracking task state
      */
     private static class TaskContext {
@@ -795,6 +823,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
             }
             LOGGER.info("Successfully renamed region from " + oldRegionId + " to " + newRegionId + " in " + world.getName()
                 + ": " + result.detail());
+            notifyRenamed(world.getName(), oldRegionId, newRegionId, replaceRegionId);
             return true;
             
         } catch (Exception e) {

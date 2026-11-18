@@ -102,6 +102,11 @@ public class ManagedRegionsBootstrap {
         report.warnings().forEach(warning -> LOGGER.warning("[KnK Regions] " + warning));
     }
 
+    /** Overview map (PandiO/knk-workspace#735): told the domain regions after every repair (startup and on demand). */
+    public void afterRepair(java.util.function.Consumer<List<ManagedRegionSpec>> listener) {
+        repairService.setAfterRun(listener);
+    }
+
     /**
      * Whether the temp-region cleanup must leave {@code regionId} alone: it backs a domain, or the domain data has not been
      * read yet so nothing can be ruled out.
