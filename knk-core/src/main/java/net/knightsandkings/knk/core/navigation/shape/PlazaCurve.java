@@ -110,7 +110,7 @@ public final class PlazaCurve {
      * @param kind          what came out
      * @param line          the plaza line from the entry to the exit (floor points), empty unless CURVE or GUIDED
      * @param curve         the pulled curve as sampled, empty when it was never built (STREET, NOT_CROSSED)
-     * @param centre        the node (floor point)
+     * @param centre        the node: its block's centre at its floor
      * @param radius        the footprint's radius, 0 for STREET and NOT_CROSSED
      * @param entryAlong    where the line starts, in blocks along the route polyline (horizontal), or -1
      * @param exitAlong     where it ends, or -1
@@ -146,7 +146,8 @@ public final class PlazaCurve {
      * @param world the world, read while this runs
      * @param route the route polyline as feet positions (a floor point plus one block), in order; it must pass within
      *              2.5 blocks of the node
-     * @param plaza the junction ({@link PlazaCrossing}: a designed plaza's radius, or 0 to measure)
+     * @param plaza the junction ({@link PlazaCrossing}: a designed plaza's radius, or 0 to measure); its centre is
+     *              taken as its block's centre
      */
     public static Result cross(NavWorld world, List<NavPoint> route, PlazaCrossing plaza, Options options) {
         Objects.requireNonNull(world, "world");
@@ -155,6 +156,11 @@ public final class PlazaCurve {
         if (route.size() < 2 || !route.get(0).world().equals(plaza.centre().world())) {
             return Result.without(Kind.NOT_CROSSED, plaza.centre());
         }
+        // the road graph gives a node as its floor block; its centre is where the route passes it (a block corner is
+        // equally near the route points of three blocks round it)
+        NavPoint node = plaza.centre();
+        plaza = new PlazaCrossing(new NavPoint(node.world(), Math.floor(node.x()) + 0.5, node.y(),
+            Math.floor(node.z()) + 0.5), plaza.radius());
         CorridorShaper.Options shaper = new CorridorShaper.Options(options.halfWidth(), options.clearance())
             .withPlazas(options.plazaBlocks(), options.clearance());
         long[] reads = new long[1];
@@ -183,12 +189,7 @@ public final class PlazaCurve {
         double chord = Math.hypot(exit.x() - entry.x(), exit.z() - entry.z());
 
         // the clearance map: the route round the plaza (a few blocks of each road) with the footprint as a disc
-        List<NavPoint> near = new ArrayList<>();
-        for (NavPoint p : route) {
-            if (Math.hypot(p.x() - cx, p.z() - cz) <= radius + ROAD_MARGIN) {
-                near.add(p);
-            }
-        }
+        List<NavPoint> near = dense(world, route, cumulative, entry.along() - ROAD_MARGIN, exit.along() + ROAD_MARGIN);
         if (near.isEmpty()) {
             near.add(route.get(at));
         }
@@ -211,6 +212,52 @@ public final class PlazaCurve {
         }
         return new Result(Kind.GUIDED, found.line(), curve, plaza.centre(), radius, entry.along(), exit.along(),
             length(found.line()), chord, routeLength, minClearance(corridor, found.line()), failure, found.expanded());
+    }
+
+    /**
+     * The route from {@code from} to {@code to} blocks along it, with a point every block or less: its own points in
+     * that stretch and points in between, each of these on the standable floor within a step or two of the last one
+     * ({@link NavGeometry#floorNear}; one with no floor there is left out). The corridor is flooded from these cells and
+     * takes the WorldGuard regions they stand in (the NPC rule: a region the route passes), so a road graph's sparse
+     * points (a node, then the next bend 10 blocks on) do not leave a region the route crosses out.
+     */
+    static List<NavPoint> dense(NavWorld world, List<NavPoint> route, double[] cumulative, double from, double to) {
+        List<NavPoint> out = new ArrayList<>();
+        int floor = Integer.MIN_VALUE;
+        for (int k = 1; k < route.size(); k++) {
+            double s0 = cumulative[k - 1];
+            double s1 = cumulative[k];
+            if (s1 < from || s0 > to) {
+                continue;
+            }
+            NavPoint a = route.get(k - 1);
+            NavPoint b = route.get(k);
+            if (floor == Integer.MIN_VALUE) {
+                floor = a.blockY() - 1;
+            }
+            double len = s1 - s0;
+            int steps = Math.max(1, (int) Math.ceil(len));
+            for (int i = out.isEmpty() ? 0 : 1; i <= steps; i++) {
+                double t = (double) i / steps;
+                double along = s0 + len * t;
+                if (along < from - 1e-9 || along > to + 1e-9) {
+                    continue;
+                }
+                if (i == 0 || i == steps) {
+                    NavPoint own = i == 0 ? a : b;
+                    out.add(own);
+                    floor = own.blockY() - 1;
+                    continue;
+                }
+                NavPoint q = new NavPoint(a.world(), a.x() + (b.x() - a.x()) * t, floor, a.z() + (b.z() - a.z()) * t);
+                NavPoint f = NavGeometry.floorNear(world, q, floor);
+                if (f != null) {
+                    out.add(NavGeometry.feet(f));
+                    floor = f.blockY();
+                }
+            }
+        }
+        return out;
     }
 
     // ==================== the curve ====================

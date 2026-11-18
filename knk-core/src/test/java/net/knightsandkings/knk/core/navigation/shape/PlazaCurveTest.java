@@ -281,6 +281,22 @@ class PlazaCurveTest {
     }
 
     @Test
+    void aRegionTheRoutePassesBetweenItsSparsePointsIsPassed() {
+        plaza("wn");
+        // a gate region across the whole west side of the plaza; the route's own points (a road graph's: the far end,
+        // the node, the far end) all lie outside it, but the route passes through it
+        for (int x = 8; x <= 10; x++) {
+            for (int z = 8; z <= 22; z++) {
+                world.regions.put(GridWorld.key(x, z), Set.of("west_gate"));
+            }
+        }
+        List<NavPoint> sparse = List.of(world.feet(-4.5, 15.5), world.feet(15.5, 15.5), world.feet(15.5, -4.5));
+        PlazaCurve.Result r = PlazaCurve.cross(world, sparse, junction(7), DEFAULTS);
+
+        assertEquals(PlazaCurve.Kind.CURVE, r.kind(), "failure: " + r.curveFailure());
+    }
+
+    @Test
     void aStreetTJunctionGetsNoPlazaLine() {
         // three 3-wide streets meeting at (15.5, 15.5): no open floor wider than the corridor half width
         world.walls(-6, 13, 13, 13).walls(17, 13, 36, 13).walls(-6, 17, 36, 17);
