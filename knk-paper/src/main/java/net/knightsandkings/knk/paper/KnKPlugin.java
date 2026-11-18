@@ -2459,6 +2459,7 @@ public class KnKPlugin extends JavaPlugin {
             registerConfigSync(hooks);
             registerErasureSync(hooks);
             registerModerationSync();
+            registerGateCommandSync(); // overview map L7 (#741): web gate commands (API flag Map:GateCommands:Enabled)
             if (metricsService != null) {
                 metricsService.register(realtimeStats);
             }
@@ -2525,6 +2526,37 @@ public class KnKPlugin extends JavaPlugin {
             net.knightsandkings.knk.paper.realtime.ModerationSettings.fromConfig(getConfig()),
             new net.knightsandkings.knk.core.realtime.RecentActionIds(), getLogger())
             .register(realtimeService.dispatcher());
+    }
+
+    /**
+     * Overview map L7 (PandiO/knk-workspace#741, OVERVIEW_MAP_DESIGN § 7.1.3, O17): {@code GateCommand} from the web app
+     * runs the existing gate operations (open, close, toggle, the {@code /gate repair} repair) with the normal animation
+     * and answers {@code GateCommandResult}. A gate held by a siege lockdown refuses. The API's
+     * {@code Map:GateCommands:Enabled} (off by default) decides whether commands are sent at all; no plugin key.
+     */
+    private void registerGateCommandSync() {
+        if (gateManager == null) {
+            getLogger().warning("Realtime: web gate commands not handled (gates not loaded)");
+            return;
+        }
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        var gateSupport = new net.knightsandkings.knk.paper.commands.GateCommandSupport(gateManager, gateStructuresApi,
+            gateDoorsApi, new net.knightsandkings.knk.paper.gates.GateTargeting(gateManager));
+        var handler = new net.knightsandkings.knk.core.gates.command.GateCommandHandler(gateManager,
+            structureId -> siegeGates != null && siegeGates.lobbyIdOf(structureId) != null, gateSupport::repair);
+        var service = realtimeService;
+        new net.knightsandkings.knk.paper.realtime.GateCommandRealtimeSync(main, handler, service::send,
+            new net.knightsandkings.knk.core.realtime.RecentActionIds(), getLogger())
+            .register(service.dispatcher());
     }
 
     /**
