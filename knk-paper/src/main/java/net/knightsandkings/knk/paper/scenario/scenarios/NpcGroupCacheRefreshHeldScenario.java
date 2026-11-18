@@ -22,7 +22,7 @@ import net.knightsandkings.knk.paper.scenario.ScenarioScene;
  * held at a district edge. A group of 8 walks out of a district (the scene of {@link NpcGroupExitDeniedScenario}) and
  * leaving it is denied through realtime when the leader and the first followers are out, so the followers inside stop
  * at the edge. Then the cache is refreshed with the rules unchanged: the map is cleared, the first availability event
- * comes at once, the fake API answers half a second later and the re-warm sends the second event. The NPC checks keep
+ * comes at once, the fake API answers 2 s later (a slow API) and the re-warm sends the second event. The NPC checks keep
  * the last known answers in that gap, so the held followers stay held (before #724 they were handed their way on the
  * first event and walked out). Once leaving is allowed again (realtime) they follow. Nobody trespasses. Needs Citizens
  * and WorldGuard.
@@ -32,6 +32,12 @@ public final class NpcGroupCacheRefreshHeldScenario implements Scenario<Scenario
     static final int TIMEOUT = 60 * 20;
     /** The district covers the north road west of x 24: the group leaves it eastwards there. */
     static final int EDGE_X = 24;
+    /**
+     * Ticks the fake API takes to answer the refresh's re-warm: a slow API (2 s), so the gap is long enough for
+     * Citizens' navigators to start walking (with half a second the held followers did not get going before the
+     * re-warm's event stopped them again, even before #724 was fixed).
+     */
+    static final int REFRESH_API_TICKS = 40;
 
     @Override
     public String name() {
@@ -143,10 +149,14 @@ public final class NpcGroupCacheRefreshHeldScenario implements Scenario<Scenario
                 }
                 return null;
             })
-            .act("/knk cache refresh with the rules unchanged (cleared, event, re-warm, event)", domains::refresh)
+            .act("/knk cache refresh with the rules unchanged (cleared, event, re-warm, event); the API answers in 2 s",
+                () -> {
+                    domains.apiTicks(REFRESH_API_TICKS);
+                    domains.refresh();
+                })
             .check("the NPC checks keep the last known answers while the map is warmed again", () -> domains.holding()
                 ? null : "no hold after the clear")
-            .await("the re-warm's event", 5 * 20, () -> domains.events() == 3)
+            .await("the re-warm's event", REFRESH_API_TICKS + 5 * 20, () -> domains.events() == 3)
             .check("the hold ended with the re-warm", () -> domains.holding() ? "still held" : null)
             .waitTicks(80)
             .check("the followers held inside stayed inside through the refresh", () -> {
@@ -162,6 +172,7 @@ public final class NpcGroupCacheRefreshHeldScenario implements Scenario<Scenario
             .check("nobody trespassed through the refresh", () -> npcs.get().metrics().total(Event.TRESPASS) == 0
                 ? null : "trespasses " + npcs.get().metrics().total(Event.TRESPASS) + npcs.get().tail(20))
             .act("leaving is allowed again (realtime)", () -> {
+                domains.apiTicks(ScenarioDomainRules.API_TICKS);
                 domains.api(ScenarioDomainRules.domain(districtId, "Old Town", district, true, true, "District"));
                 domains.realtime("District", districtId);
             })

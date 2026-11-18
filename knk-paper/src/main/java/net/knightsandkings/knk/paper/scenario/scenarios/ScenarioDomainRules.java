@@ -54,6 +54,7 @@ final class ScenarioDomainRules {
     private final AtomicInteger events = new AtomicInteger();
     private final AccessRules rules;
     private Runnable onEvent = () -> { };
+    private int apiTicks = API_TICKS;
     private Runnable beforeSwitch = () -> { };
 
     /** @param regions the regions the re-warm asks about (the roads' regions on a server) */
@@ -130,6 +131,11 @@ final class ScenarioDomainRules {
         return map.holding();
     }
 
+    /** How many ticks the fake API takes to answer from now on (default {@link #API_TICKS}; a slow API is longer). */
+    void apiTicks(int ticks) {
+        this.apiTicks = ticks;
+    }
+
     /** Availability events sent so far. */
     int events() {
         return events.get();
@@ -152,7 +158,7 @@ final class ScenarioDomainRules {
         onEvent.run();
     }
 
-    /** The fake API: the regions' current domains go into the map {@link #API_TICKS} ticks from now. */
+    /** The fake API: the regions' current domains go into the map {@link #apiTicks} ticks from now. */
     private CompletableFuture<Void> answerLater(Plugin plugin, String w, Collection<String> regions) {
         CompletableFuture<Void> done = new CompletableFuture<>();
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -163,7 +169,7 @@ final class ScenarioDomainRules {
                 }
             }
             done.complete(null);
-        }, API_TICKS);
+        }, apiTicks);
         return done;
     }
 }
