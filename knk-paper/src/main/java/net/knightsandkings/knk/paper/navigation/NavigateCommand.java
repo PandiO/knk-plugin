@@ -15,10 +15,14 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
+import net.knightsandkings.knk.core.navigation.destinations.Candidate;
+import net.knightsandkings.knk.core.navigation.destinations.DestinationEngine;
+import net.knightsandkings.knk.core.navigation.destinations.InitialScopes;
 import net.knightsandkings.knk.paper.navigation.MatchNavigationScope.MatchDestination;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Located;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Mode;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Resolution;
+import net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine;
 
 /**
  * {@code /navigate <destination> [spawn|region]}, {@code /navigate stop}, {@code /navigate}
@@ -38,6 +42,11 @@ public class NavigateCommand implements TabExecutor {
     private final Executor mainThread;
     /** KNG-234: in a minigame match only the match's destinations are accepted and offered. */
     private Supplier<MatchNavigationScope> matchScope = () -> null;
+    /**
+     * Destination engine phase 3 (PandiO/knk-workspace#69): with {@code navigation.destination-engine} on, the
+     * engine resolves and completes; null (the flag off, the default) keeps today's paths below unchanged.
+     */
+    private Supplier<PlayerNavigationEngine> engine = () -> null;
 
     public NavigateCommand(Supplier<NavigationService> service, Supplier<NavigationDestinations> destinations,
                            BiPredicate<Player, String> knkPermission, Executor mainThread) {
@@ -50,6 +59,11 @@ public class NavigateCommand implements TabExecutor {
     /** The rule for players in a minigame match (KNG-234); read lazily like the other services. */
     public void setMatchScope(Supplier<MatchNavigationScope> matchScope) {
         this.matchScope = Objects.requireNonNull(matchScope, "matchScope");
+    }
+
+    /** The destination engine, read lazily; a supplier answering null means the flag is off. */
+    public void setEngine(Supplier<PlayerNavigationEngine> engine) {
+        this.engine = Objects.requireNonNull(engine, "engine");
     }
 
     private Optional<List<MatchDestination>> matchOf(Player player) {
@@ -81,6 +95,11 @@ public class NavigateCommand implements TabExecutor {
             if (!navigation.stop(player)) {
                 player.sendMessage(NavigationMessages.notNavigating());
             }
+            return true;
+        }
+        PlayerNavigationEngine destinationEngine = engine.get();
+        if (destinationEngine != null) {
+            navigateWithEngine(player, navigation, destinationEngine, args);
             return true;
         }
         Optional<List<MatchDestination>> inMatch = matchOf(player);
@@ -144,6 +163,100 @@ public class NavigateCommand implements TabExecutor {
         }
     }
 
+    // ==================== the destination engine (phase 3, #69) ====================
+
+    /**
+     * {@code /navigate <destination> [spawn|region]} through the engine: only the player's list exists, so the same
+     * forms ({@code type:name}, {@code type:#id}, a bare name, the mode words) work in every scope - in a match too
+     * (DESIGN § 3.1). The messages are today's: ambiguity choices, "unknown destination" with "did you mean", "is in
+     * another world" (E11), "has no Location", the scope's reason in today's words (E15); in a match an unknown name
+     * names the match's destinations and the start of exactly one name picks it, as today. The model's freshness
+     * note follows a name not found (§ 7.4).
+     */
+    private void navigateWithEngine(Player player, NavigationService navigation, PlayerNavigationEngine destinations,
+                                    String[] args) {
+        Parsed parsed = parse(args);
+        String typed = String.join(" ", args).trim();
+        DestinationEngine.Resolution resolution = destinations.resolve(player, parsed.destination(), coreMode(parsed.mode()));
+        if (!resolution.found() && parsed.mode() != Mode.DEFAULT) {
+            // "Blue spawn" may be a whole name (a team spawn in a match): the whole text, as today's match path read it
+            DestinationEngine.Resolution whole = destinations.resolve(player, typed, Candidate.Mode.DEFAULT);
+            if (whole.found()) {
+                resolution = whole;
+            }
+        }
+        boolean inMatch = InitialScopes.SIEGE_MATCH.equals(resolution.list().scopeId());
+        switch (resolution.outcome()) {
+            case FOUND -> navigation.navigate(player, resolution.destination());
+            case NOT_ALLOWED -> player.sendMessage(EngineReasons.forCommand(resolution.reason()));
+            case AMBIGUOUS -> player.sendMessage(NavigationMessages.ambiguous(parsed.destination(), resolution.choiceNames()));
+            case OTHER_WORLD -> player.sendMessage(NavigationMessages.otherWorld(resolution.candidate().label()));
+            case NO_LOCATION -> player.sendMessage(NavigationMessages.noLocation(resolution.candidate().label()));
+            case NOT_FOUND -> {
+                if (inMatch) {
+                    notFoundInMatch(player, navigation, destinations, typed, resolution);
+                    return;
+                }
+                player.sendMessage(NavigationMessages.unknownDestination(parsed.destination()));
+                if (!resolution.suggestions().isEmpty()) {
+                    player.sendMessage(NavigationMessages.didYouMean(resolution.suggestionNames()));
+                }
+                destinations.degradedNote().ifPresent(note -> player.sendMessage(NavigationMessages.info(note)));
+            }
+        }
+    }
+
+    /** In a match: the start of exactly one name picks it; several are a choice; none names the match's list. */
+    private static void notFoundInMatch(Player player, NavigationService navigation, PlayerNavigationEngine destinations,
+                                        String typed, DestinationEngine.Resolution resolution) {
+        List<Candidate> starting = DestinationEngine.NAMES.suggestions(resolution.list().candidates(), typed);
+        if (starting.size() == 1) {
+            DestinationEngine.Resolution picked = destinations.resolveKey(player, starting.get(0).key(), Candidate.Mode.DEFAULT);
+            if (picked.found()) {
+                navigation.navigate(player, picked.destination());
+                return;
+            }
+        }
+        if (starting.size() > 1) {
+            player.sendMessage(CompassMessages.matchAmbiguous(typed, starting.stream().map(Candidate::label).toList()));
+            return;
+        }
+        player.sendMessage(CompassMessages.matchOnly(typed, resolution.list().candidates().stream().map(Candidate::label).toList()));
+    }
+
+    /** Tab completion through the engine: {@code stop}, the list's names, then the mode words outside a match. */
+    private static List<String> completeWithEngine(Player player, PlayerNavigationEngine destinations, String[] args) {
+        List<String> words = Arrays.asList(args);
+        String current = args[args.length - 1].toLowerCase(Locale.ROOT);
+        List<String> out = new ArrayList<>();
+        if (args.length == 1 && "stop".startsWith(current)) {
+            out.add("stop");
+        }
+        for (String word : destinations.complete(player, words)) {
+            if (!out.contains(word)) {
+                out.add(word);
+            }
+        }
+        if (args.length >= 2 && destinations.isComplete(player, words.subList(0, args.length - 1))
+            && !InitialScopes.SIEGE_MATCH.equals(destinations.list(player).scopeId())) {
+            for (String mode : MODES) {
+                if (mode.startsWith(current) && !out.contains(mode)) {
+                    out.add(mode);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The command's mode word as the engine's. */
+    static Candidate.Mode coreMode(Mode mode) {
+        return switch (mode == null ? Mode.DEFAULT : mode) {
+            case SPAWN -> Candidate.Mode.SPAWN;
+            case REGION -> Candidate.Mode.REGION;
+            case DEFAULT -> Candidate.Mode.DEFAULT;
+        };
+    }
+
     /** The destination words and the trailing {@code spawn} / {@code region}, if any. */
     record Parsed(String destination, Mode mode) {
     }
@@ -169,6 +282,10 @@ public class NavigateCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (!(sender instanceof Player player) || !hasNode(player) || args.length == 0) {
             return List.of();
+        }
+        PlayerNavigationEngine destinationEngine = engine.get();
+        if (destinationEngine != null) {
+            return completeWithEngine(player, destinationEngine, args);
         }
         Optional<List<MatchDestination>> inMatch = matchOf(player);
         if (inMatch.isPresent()) {

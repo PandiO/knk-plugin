@@ -280,6 +280,10 @@ public class KnKPlugin extends JavaPlugin {
     // Destination engine P2 (PandiO/knk-workspace#103): the navigation model and its snapshot; nothing reads it before P3.
     private net.knightsandkings.knk.paper.navigation.model.NavigationModelRuntime navigationModel;
     private net.knightsandkings.knk.paper.navigation.NavigationCompassService navigationCompass;
+    /** Destination engine phase 3 (PandiO/knk-workspace#69): set only with navigation.destination-engine on. */
+    private net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine navigationEngine;
+    /** Rev. 7 Part C road-access answers: the catalogue's, or the navigation model's with the engine on (E19). */
+    private net.knightsandkings.knk.paper.navigation.engine.RoadAccessAnswers navigationRoadAccess;
     private java.util.concurrent.ExecutorService navigationRouting;
     // KNG-51 walkable last-mile paths; null while navigation.walk.enabled is false.
     private net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService walkSnapshots;
@@ -1922,12 +1926,18 @@ public class KnKPlugin extends JavaPlugin {
         navigationDestinations.refresh();
         cacheManager.registerRefreshHook("navigation destinations", navigationDestinations::refresh);
         startNavigationModel(domainLocations);
+        // Destination engine phase 3 (#69): navigation.destination-engine (default false) switches /navigate, its
+        // completion, the compass and NavigationService to the engine and the road-access answers to the model (E19)
+        var destinationEngine = net.knightsandkings.knk.paper.navigation.engine.DestinationEngineConfig.from(getConfig());
+        this.navigationRoadAccess = new net.knightsandkings.knk.paper.navigation.engine.RoadAccessAnswers(
+            destinationEngine.enabled(), () -> navigationDestinations,
+            () -> navigationModel == null ? null : navigationModel.holder());
 
         var access = new net.knightsandkings.knk.paper.navigation.NavigationAccess(
             gateManager, () -> siegeGates, regionTracker.regionIds(), regionDomainResolver,
             this::hasRegionBypass, new net.knightsandkings.knk.core.regions.DomainAccessEvaluator(),
             // rev. 7 Part C (KNG-92): the catalogue knows which domains' rules are lifted off the roads
-            domain -> domain.id() == null || !navigationDestinations.roadAccessIgnored(domain.id()));
+            domain -> domain.id() == null || !navigationRoadAccess.roadAccessIgnored(domain.id()));
         var eligibility = new net.knightsandkings.knk.paper.navigation.NavigationEligibility(
             uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
             uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
@@ -2004,7 +2014,8 @@ public class KnKPlugin extends JavaPlugin {
         compassSettings.refresh();
         cacheManager.registerRefreshHook("navigation compass settings", compassSettings::refresh);
         this.navigationCompass = new net.knightsandkings.knk.paper.navigation.NavigationCompassService(
-            compassSettings::get, () -> navigationService, () -> navigationDestinations, () -> siegeService,
+            destinationEngine.enabled() ? () -> engineCompassSettings(compassSettings) : compassSettings::get,
+            () -> navigationService, () -> navigationDestinations, () -> siegeService,
             (player, node) -> knkPermissible != null && knkPermissible.hasPermission(player, node),
             mainThread, System::currentTimeMillis, new net.knightsandkings.knk.paper.navigation.BukkitCompassItems());
         getServer().getPluginManager().registerEvents(
@@ -2017,7 +2028,52 @@ public class KnKPlugin extends JavaPlugin {
             siegeService.addObserver(navigationCompass);
         }
         navigationService.setMatchScope(navigationCompass);
+        if (destinationEngine.enabled()) {
+            startDestinationEngine(compassSettings);
+        }
         getLogger().info("Road navigation (/navigate) initialized");
+    }
+
+    /**
+     * Destination engine phase 3 (DESIGN § 5, § 10, PandiO/knk-workspace#69), only with
+     * {@code navigation.destination-engine: true}: one engine over the catalogue provider (the navigation model's
+     * domains and Locations, the road network's streets and nodes) and the siege match provider (the compass's
+     * objectives and team spawn, the gate approach of #176); /navigate, its completion and the compass ask it, and
+     * NavigationService starts a session only from its handle (A20).
+     */
+    private void startDestinationEngine(net.knightsandkings.knk.paper.navigation.CompassSettingsStore compassSettings) {
+        net.knightsandkings.knk.core.navigation.model.NavigationModelHolder holder = navigationModel == null
+            ? new net.knightsandkings.knk.core.navigation.model.NavigationModelHolder() : navigationModel.holder();
+        var catalogue = new net.knightsandkings.knk.core.navigation.engine.CatalogueProvider(holder::current,
+            roadNetworkCache::snapshot);
+        var match = new net.knightsandkings.knk.core.navigation.engine.SiegeMatchProvider(
+            net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine.matchesOf(() -> siegeService),
+            (objective, team) -> gateManager == null ? java.util.Optional.empty()
+                : net.knightsandkings.knk.paper.navigation.SiegeGateApproaches.of(gateManager).approach(objective, team),
+            net.knightsandkings.knk.paper.navigation.CompassMessages::siegeDetail);
+        this.navigationEngine = net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine.create(
+            java.util.List.of(catalogue), match,
+            new net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine.Sources(
+                uuid -> joinLoadingGuard != null && joinLoadingGuard.isLoading(uuid),
+                uuid -> adminFreezeManager != null && adminFreezeManager.isFrozen(uuid),
+                player -> modeService != null ? modeService.getActiveMode(player)
+                    : net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
+                (player, node) -> player.hasPermission(node) || (knkPermissible != null && knkPermissible.hasPermission(player, node)),
+                () -> siegeService, () -> engineCompassSettings(compassSettings), holder::version,
+                () -> navigationModel == null
+                    ? net.knightsandkings.knk.core.navigation.model.ModelFreshness.of(null, java.time.Instant.now(), null)
+                    : navigationModel.freshness()));
+        navigationService.setHandleOnly(true);
+        navigationCompass.setEngine(() -> navigationEngine);
+        getLogger().info("[Navigation] Destination engine on (navigation.destination-engine): /navigate, completion, "
+            + "the compass and road access use the navigation model");
+    }
+
+    /** With the engine on: the compass settings of the navigation model (persisted, E1), else the live store's. */
+    private net.knightsandkings.knk.core.navigation.compass.CompassSettings engineCompassSettings(
+            net.knightsandkings.knk.paper.navigation.CompassSettingsStore store) {
+        var model = navigationModel == null ? null : navigationModel.holder().current();
+        return model != null ? model.compass() : store.get();
     }
 
     /**
@@ -2108,15 +2164,15 @@ public class KnKPlugin extends JavaPlugin {
             // rev. 7 Part C: a region whose domain's rule is "Ignored" for roads (houses, shops) does not cut roads;
             // read from the /navigate catalogue, which carries each domain's region (not the region → domain cache,
             // which /knk cache refresh clears)
-            regionId -> navigationDestinations == null || !navigationDestinations.roadsIgnoreRegion(regionId),
+            regionId -> navigationRoadAccess == null || !navigationRoadAccess.roadsIgnoreRegion(regionId),
             // KNG-110: a region whose domain keeps someone off the road, or one the domain cache does not know, makes
             // the pass look across the road; elsewhere the centre line decides, as before
             net.knightsandkings.knk.paper.roads.LiveEdgeTags.restrictsByDomainInWorld(
                 regionDomainResolver::getDomainByRegionIdNoRefresh, evaluator));
         roadNetworkCache.addListener(tags::refresh);
-        if (navigationDestinations != null) {
+        if (navigationRoadAccess != null) {
             // a changed "Ignored" set recuts the roads at once (else at the next pass, up to a minute later)
-            navigationDestinations.onRoadAccessChanged(() -> mainThread.execute(() -> tags.refreshAll(
+            navigationRoadAccess.onRoadAccessChanged(() -> mainThread.execute(() -> tags.refreshAll(
                 org.bukkit.Bukkit.getWorlds().stream().map(org.bukkit.World::getName).toList())));
         }
         org.bukkit.Bukkit.getScheduler().runTaskTimer(this, net.knightsandkings.knk.core.metrics.PluginMetrics.timed("nametags.tick", tags::tick), 1L, 1L);
@@ -3133,6 +3189,8 @@ public class KnKPlugin extends JavaPlugin {
                 MenuService.mainThreadExecutor(this));
             // KNG-234: in a minigame match only the match's destinations are accepted and offered
             navigateCommand.setMatchScope(() -> navigationCompass);
+            // Destination engine phase 3 (#69): null unless navigation.destination-engine is on
+            navigateCommand.setEngine(() -> navigationEngine);
             registerTabCommand("navigate", navigateCommand);
             // Location retention (KNG-80): /knk location here|tp|orphans replaces the built-in /knk location here;
             // each action checks its own knk.admin.location* node. tp goes through the KNG-17 teleport engine.

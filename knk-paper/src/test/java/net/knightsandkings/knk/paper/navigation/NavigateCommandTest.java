@@ -69,7 +69,7 @@ class NavigateCommandTest {
         when(player.hasPermission(NavigateCommand.NODE)).thenReturn(false);
         navigate.onCommand(player, command, "navigate", new String[] {"Kardenna"});
         assertTrue(lastMessage().contains("permission"));
-        verify(service, never()).navigate(any(), any());
+        verify(service, never()).navigate(any(), any(Destination.class));
     }
 
     @Test
@@ -93,7 +93,7 @@ class NavigateCommandTest {
         String message = lastMessage();
         assertTrue(message.contains("Several places are called \"Market\""));
         assertTrue(message.contains("town:Market") && message.contains("district:Market"));
-        verify(service, never()).navigate(any(), any());
+        verify(service, never()).navigate(any(), any(Destination.class));
     }
 
     @Test
@@ -132,7 +132,7 @@ class NavigateCommandTest {
         navigate.onCommand(player, command, "navigate", new String[] {"Ruin"});
 
         assertTrue(lastMessage().contains("Ruin has no location"));
-        verify(service, never()).navigate(any(), any());
+        verify(service, never()).navigate(any(), any(Destination.class));
     }
 
     @Test
@@ -186,7 +186,7 @@ class NavigateCommandTest {
 
         navigate.onCommand(player, command, "navigate", new String[] {"Kardenna"});
 
-        verify(service, never()).navigate(any(), any());
+        verify(service, never()).navigate(any(), any(Destination.class));
         verify(destinations, never()).resolve(anyString(), anyString());
         String message = lastMessage();
         assertTrue(message.contains("\"Kardenna\" is not part of this match"), message);
@@ -209,11 +209,11 @@ class NavigateCommandTest {
         inMatch(keep(), wall(), camp());
 
         navigate.onCommand(player, command, "navigate", new String[] {"raid"});
-        verify(service).navigate(any(), any());
+        verify(service).navigate(any(), any(Destination.class));
 
         org.mockito.Mockito.clearInvocations(service, player);
         navigate.onCommand(player, command, "navigate", new String[] {"keep"});
-        verify(service, never()).navigate(any(), any());
+        verify(service, never()).navigate(any(), any(Destination.class));
         String message = lastMessage();
         assertTrue(message.contains("Several destinations start with") && message.contains("Keep Gate") && message.contains("Keep Wall"), message);
     }
@@ -236,7 +236,7 @@ class NavigateCommandTest {
 
         navigate.onCommand(player, command, "navigate", new String[] {"Keep"});
 
-        verify(service, never()).navigate(any(), any());
+        verify(service, never()).navigate(any(), any(Destination.class));
         assertTrue(lastMessage().contains("no destinations"), lastMessage());
     }
 

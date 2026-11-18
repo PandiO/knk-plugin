@@ -243,7 +243,7 @@ class NavigationCompassServiceTest {
         compass.use(player, false);
         compass.use(player, false);
 
-        verify(navigation, times(1)).navigate(any(), any());
+        verify(navigation, times(1)).navigate(any(), any(Destination.class));
     }
 
     @Test
@@ -270,7 +270,7 @@ class NavigationCompassServiceTest {
 
         assertTrue(compass.use(player, false));
 
-        verify(navigation, never()).navigate(any(), any());
+        verify(navigation, never()).navigate(any(), any(Destination.class));
         assertTrue(lastMessage().contains("once the siege match has started"), lastMessage());
     }
 
@@ -281,7 +281,7 @@ class NavigationCompassServiceTest {
 
         compass.use(player, false);
 
-        verify(navigation, never()).navigate(any(), any());
+        verify(navigation, never()).navigate(any(), any(Destination.class));
         assertTrue(lastMessage().contains("switched off during sieges"), lastMessage());
     }
 
@@ -323,7 +323,7 @@ class NavigationCompassServiceTest {
 
         compass.use(player, false);
 
-        verify(navigation, never()).navigate(any(), any());
+        verify(navigation, never()).navigate(any(), any(Destination.class));
         assertTrue(lastMessage().contains("no destinations here"), lastMessage());
     }
 
@@ -362,7 +362,7 @@ class NavigationCompassServiceTest {
 
         compass.use(player, false);
 
-        verify(navigation, never()).navigate(any(), any());
+        verify(navigation, never()).navigate(any(), any(Destination.class));
         assertTrue(lastMessage().contains("permission"), lastMessage());
     }
 
@@ -385,7 +385,7 @@ class NavigationCompassServiceTest {
 
         compass.use(player, false);
 
-        verify(navigation, never()).navigate(any(), any());
+        verify(navigation, never()).navigate(any(), any(Destination.class));
     }
 
     // ==================== given by the siege at the hub ====================

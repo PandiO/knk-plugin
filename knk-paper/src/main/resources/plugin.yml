@@ -1262,3 +1262,9 @@ permissions:
       /navigate - guided routes along the road network (KNG-27, Phase 4). Everyone by default; the
       in-house permission system can take it away per group.
     default: true
+
+  knk.navigate.any:
+    description: >-
+      Destination engine bypass (PandiO/knk-workspace#25, E5, E12): with navigation.destination-engine on, /navigate
+      and the compass list every destination, also in a siege match. Not granted by default, not even to operators.
+    default: false

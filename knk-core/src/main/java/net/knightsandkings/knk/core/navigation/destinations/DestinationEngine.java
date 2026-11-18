@@ -203,6 +203,35 @@ public final class DestinationEngine {
             null, list);
     }
 
+    /**
+     * A handle for the listed candidate with {@code key} (phase 3, PandiO/knk-workspace#69): what a client that shows
+     * the list itself (the compass cycle, a resume of the stored key, DESIGN § 2.1 item 7, or the command's "start of
+     * one name" in a match) navigates with. The key is looked up in the list built now, so a candidate that dropped
+     * out is {@code NOT_FOUND} and a refused list is {@code NOT_ALLOWED} with the scope's reason; a key of another
+     * world is {@code OTHER_WORLD}. Next to {@link #resolve}, the only other place a handle is minted.
+     */
+    public Resolution resolveKey(NavigationContext ctx, String key, Candidate.Mode mode) {
+        DestinationList list = listFor(ctx);
+        Candidate.Mode wanted = mode == null ? Candidate.Mode.DEFAULT : mode;
+        if (list.refused()) {
+            return new Resolution(Resolution.Outcome.NOT_ALLOWED, null, null, List.of(), List.of(), list.reason(), list);
+        }
+        Candidate candidate = list.find(key).orElse(null);
+        if (candidate == null) {
+            for (Candidate away : list.otherWorld()) {
+                if (away.key().equals(key)) {
+                    return new Resolution(Resolution.Outcome.OTHER_WORLD, null, away, List.of(), List.of(), null, list);
+                }
+            }
+            return new Resolution(Resolution.Outcome.NOT_FOUND, null, null, List.of(), List.of(), null, list);
+        }
+        if (candidate.place() instanceof Candidate.Place.Domain domain && !domain.offers(wanted)) {
+            return new Resolution(Resolution.Outcome.NO_LOCATION, null, candidate, List.of(), List.of(), null, list);
+        }
+        AllowedDestination handle = new AllowedDestination(ctx.player(), list.scopeId(), candidate, wanted, list.modelVersion());
+        return new Resolution(Resolution.Outcome.FOUND, handle, candidate, List.of(), List.of(), null, list);
+    }
+
     /** Tab completions for the destination words typed so far, inside the list only; nothing when refused. */
     public List<String> complete(NavigationContext ctx, List<String> words) {
         DestinationList list = listFor(ctx);

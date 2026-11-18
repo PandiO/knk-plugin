@@ -20,6 +20,13 @@ import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.navigation.compass.CompassCycle;
 import net.knightsandkings.knk.core.navigation.compass.CompassSettings;
 import net.knightsandkings.knk.core.navigation.compass.CompassUse;
+import net.knightsandkings.knk.core.navigation.destinations.Candidate;
+import net.knightsandkings.knk.core.navigation.destinations.DestinationEngine;
+import net.knightsandkings.knk.core.navigation.destinations.DestinationList;
+import net.knightsandkings.knk.core.navigation.destinations.InitialScopes;
+import net.knightsandkings.knk.core.navigation.destinations.NavigationContext;
+import net.knightsandkings.knk.core.navigation.engine.CompassTargets;
+import net.knightsandkings.knk.core.navigation.engine.SiegeMatchProvider;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeObjective;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeScenario;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeTeam;
@@ -28,6 +35,7 @@ import net.knightsandkings.knk.core.siege.SiegeNavigationItem;
 import net.knightsandkings.knk.core.siege.SiegeCompassTargets.Target;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Located;
 import net.knightsandkings.knk.paper.navigation.NavigationDestinations.Resolution;
+import net.knightsandkings.knk.paper.navigation.engine.PlayerNavigationEngine;
 import net.knightsandkings.knk.paper.siege.SiegeLobbyRuntime;
 import net.knightsandkings.knk.paper.siege.SiegeMatch;
 import net.knightsandkings.knk.paper.siege.SiegeMatchObserver;
@@ -85,6 +93,16 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
     private final Map<UUID, Last> last = new HashMap<>();
     private SiegeGateApproaches gateApproaches = SiegeGateApproaches.NONE;
     private final Map<UUID, Long> lastClick = new HashMap<>();
+    /**
+     * Destination engine phase 3 (PandiO/knk-workspace#69): with {@code navigation.destination-engine} on, the
+     * compass cycles the engine's list; null (the flag off, the default) keeps today's lists below unchanged.
+     */
+    private Supplier<PlayerNavigationEngine> engine = () -> null;
+    /** With the engine: what a player chose last, as a candidate key (a resume resolves it again, § 2.1 item 7). */
+    private record LastKey(String situation, String key, Candidate.Mode mode) {
+    }
+
+    private final Map<UUID, LastKey> lastKeys = new HashMap<>();
 
     public NavigationCompassService(Supplier<CompassSettings> settings, Supplier<NavigationService> navigation,
                                     Supplier<NavigationDestinations> catalogue, Supplier<SiegeService> siege,
@@ -106,6 +124,11 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
      */
     public void setGateApproaches(SiegeGateApproaches gateApproaches) {
         this.gateApproaches = gateApproaches == null ? SiegeGateApproaches.NONE : gateApproaches;
+    }
+
+    /** The destination engine, read lazily; a supplier answering null means the flag is off. */
+    public void setEngine(Supplier<PlayerNavigationEngine> engine) {
+        this.engine = Objects.requireNonNull(engine, "engine");
     }
 
     // ==================== the item ====================
@@ -151,6 +174,11 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
         long now = clock.getAsLong();
         Long previous = lastClick.put(player.getUniqueId(), now);
         if (previous != null && now - previous < CLICK_COOLDOWN_MILLIS) {
+            return true;
+        }
+        PlayerNavigationEngine destinationEngine = engine.get();
+        if (destinationEngine != null) {
+            useWithEngine(player, sneaking, nav, destinationEngine);
             return true;
         }
 
@@ -233,6 +261,111 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
     private void go(Player player, NavigationService nav, String situation, String key, Destination destination) {
         last.put(player.getUniqueId(), new Last(situation, key, destination));
         nav.navigate(player, destination);
+    }
+
+    // ==================== the destination engine (phase 3, #69) ====================
+
+    /** One line of the engine-backed cycle. */
+    private record EngineEntry(String key, String label, String detail, Candidate.Mode mode) {
+    }
+
+    /**
+     * A click through the engine (DESIGN § 5: the compass is a client): the list is the engine's, the compass keeps
+     * the cursor (a candidate key now), the click rule and its own wording per reason code (E15). In a running match
+     * it cycles the match's destinations; outside a siege the configured general targets as a filter of the World
+     * list ({@link CompassTargets}); for the bypass (owner/staff mode, {@code knk.navigate.any}) the same as for
+     * anyone in their situation, as today. A resume resolves the stored key again: a destination that left the list
+     * is not resumed.
+     */
+    private void useWithEngine(Player player, boolean sneaking, NavigationService nav, PlayerNavigationEngine destinations) {
+        NavigationContext ctx = destinations.context(player);
+        DestinationList list = destinations.withFreshness(destinations.engine().listFor(ctx));
+        if (list.refused()) {
+            player.sendMessage(EngineReasons.forCompass(list.reason()));
+            return;
+        }
+        String situation;
+        List<EngineEntry> entries;
+        boolean bypass = InitialScopes.BYPASS.equals(list.scopeId());
+        if (InitialScopes.SIEGE_MATCH.equals(list.scopeId()) || (bypass && ctx.siege().matchRunning())) {
+            if (!ctx.siege().compassEnabled()) {
+                player.sendMessage(CompassMessages.disabledInSiege());
+                return;
+            }
+            situation = "siege:" + matchTokenOf(player);
+            entries = new ArrayList<>();
+            for (Candidate candidate : list.candidates()) {
+                if (SiegeMatchProvider.ID.equals(candidate.source())) {
+                    entries.add(new EngineEntry(candidate.key(), candidate.label(), candidate.detail(), Candidate.Mode.DEFAULT));
+                }
+            }
+        } else if (bypass && ctx.siege().lobbyMember()) {
+            player.sendMessage(CompassMessages.waitForMatch());
+            return;
+        } else if (settings.get().generalEnabled()) {
+            situation = "general";
+            entries = new ArrayList<>();
+            for (CompassTargets.Pick pick : CompassTargets.of(list, settings.get().generalTargets())) {
+                entries.add(new EngineEntry(pick.candidate().key(), pick.candidate().label(), null, pick.mode()));
+            }
+        } else {
+            player.sendMessage(CompassMessages.disabledHere());
+            return;
+        }
+
+        LastKey chosen = lastKeys.get(player.getUniqueId());
+        if (chosen != null && !chosen.situation().equals(situation)) {
+            lastKeys.remove(player.getUniqueId());
+            chosen = null;
+        }
+        switch (CompassUse.onClick(sneaking, nav.isNavigating(player.getUniqueId()), chosen != null)) {
+            case STOP -> {
+                if (!nav.stop(player)) {
+                    player.sendMessage(NavigationMessages.notNavigating());
+                }
+            }
+            case RESUME -> {
+                DestinationEngine.Resolution again = destinations.resolveKey(player, chosen.key(), chosen.mode());
+                if (again.found()) {
+                    nav.navigate(player, again.destination());
+                } else {
+                    lastKeys.remove(player.getUniqueId());
+                    player.sendMessage(CompassMessages.nothingToResume());
+                }
+            }
+            case CYCLE -> cycleWithEngine(player, nav, destinations, situation, entries, list, chosen);
+        }
+    }
+
+    private void cycleWithEngine(Player player, NavigationService nav, PlayerNavigationEngine destinations, String situation,
+                                 List<EngineEntry> entries, DestinationList list, LastKey chosen) {
+        if (entries.isEmpty()) {
+            player.sendMessage(CompassMessages.disabledHere());
+            if (list.degraded() && list.degradedText() != null) {
+                player.sendMessage(NavigationMessages.info(list.degradedText()));
+            }
+            return;
+        }
+        List<String> keys = entries.stream().map(EngineEntry::key).toList();
+        int index = CompassCycle.next(keys, chosen == null ? null : chosen.key());
+        EngineEntry entry = entries.get(index);
+        player.sendMessage(CompassMessages.selected(index + 1, entries.size(), entry.label(), entry.detail()));
+        DestinationEngine.Resolution resolution = destinations.resolveKey(player, entry.key(), entry.mode());
+        switch (resolution.outcome()) {
+            case FOUND -> {
+                lastKeys.put(player.getUniqueId(), new LastKey(situation, entry.key(), entry.mode()));
+                nav.navigate(player, resolution.destination());
+            }
+            case NOT_ALLOWED -> player.sendMessage(EngineReasons.forCompass(resolution.reason()));
+            case OTHER_WORLD -> player.sendMessage(NavigationMessages.otherWorld(entry.label()));
+            case NO_LOCATION -> player.sendMessage(NavigationMessages.noLocation(entry.label()));
+            case AMBIGUOUS, NOT_FOUND -> player.sendMessage(NavigationMessages.unknownDestination(entry.label()));
+        }
+    }
+
+    private String matchTokenOf(Player player) {
+        SiegeService siegeService = siege.get();
+        return siegeService == null ? "?" : siegeService.runningMatchOf(player.getUniqueId()).map(SiegeMatch::matchToken).orElse("?");
     }
 
     // ==================== the lists ====================
@@ -369,6 +502,7 @@ public final class NavigationCompassService implements SiegeMatchObserver, Match
     public void forget(UUID playerId) {
         last.remove(playerId);
         lastClick.remove(playerId);
+        lastKeys.remove(playerId);
     }
 
     private boolean hasNode(Player player) {
