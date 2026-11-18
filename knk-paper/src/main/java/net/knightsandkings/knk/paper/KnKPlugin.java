@@ -809,6 +809,11 @@ public class KnKPlugin extends JavaPlugin {
                 } else {
                     freezeFlightGuard.released(uuid, net.knightsandkings.knk.core.freeze.FreezeFlightLedger.Source.ADMIN);
                 }
+                // destination engine phase 4 (#62, DESIGN § 8): a freeze change re-checks running routes at once
+                // (any thread; nothing happens with navigation.destination-engine off)
+                if (navigationService != null) {
+                    navigationService.revalidateSoon();
+                }
                 // PandiO/knk-workspace#170: a static red "Frozen by <staff> for: <reason>" boss bar while staff hold
                 // the player (any thread).
                 if (enchantmentRuntime != null) {
@@ -2064,6 +2069,14 @@ public class KnKPlugin extends JavaPlugin {
                     ? net.knightsandkings.knk.core.navigation.model.ModelFreshness.of(null, java.time.Instant.now(), null)
                     : navigationModel.freshness()));
         navigationService.setHandleOnly(true);
+        // phase 4 (#62, DESIGN § 8): running sessions are re-checked against the list every 2 s and at once on a
+        // siege event (NavigationService's observer), a mode change, a freeze change (the freeze hook) and a model
+        // refresh; a destination that left the list ends with the scope's reason (DESTINATION_NOT_ALLOWED)
+        navigationService.setRevalidator(navigationEngine::revalidate);
+        holder.onChange(model -> navigationService.revalidateSoon());
+        if (modeService != null) {
+            modeService.addModeListener((player, mode) -> navigationService.revalidateSoon());
+        }
         navigationCompass.setEngine(() -> navigationEngine);
         getLogger().info("[Navigation] Destination engine on (navigation.destination-engine): /navigate, completion, "
             + "the compass and road access use the navigation model");

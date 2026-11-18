@@ -148,6 +148,26 @@ class NavigateCommandEngineTest {
     }
 
     @Test
+    void withoutTheNodeTheNoPermissionScopeRefusesWithTodaysWords() {
+        // phase 4 (#62, A22): the scope (80) refuses, not the command's own check
+        f.nodes.clear();
+        run("Kardenna");
+        assertEquals(List.of(plain(NavigationMessages.noPermission())), messages());
+        noSession();
+        assertEquals(List.of("stop"), navigate.onTabComplete(f.player, command, "navigate", new String[] {""}));
+    }
+
+    @Test
+    void theBypassNodeAloneIsEnoughWithTheEngine() {
+        // phase 4 (#62): the bypass (100) sits above the no-permission scope (80), E5
+        f.nodes.clear();
+        f.nodes.add(InitialScopes.BYPASS_NODE);
+        run("Kardenna");
+        assertEquals("domain:Town:1", handle().candidateKey());
+        assertTrue(navigate.onTabComplete(f.player, command, "navigate", new String[] {"Kar"}).contains("Kardenna"));
+    }
+
+    @Test
     void stopAndStatusAreUnchanged() {
         run("stop");
         verify(service).stop(f.player);
@@ -271,5 +291,16 @@ class NavigateCommandEngineTest {
         run("Kardenna");
         verify(catalogue).resolve("Kardenna", EngineFixture.WORLD);
         assertEquals(List.of(plain(NavigationMessages.unknownDestination("Kardenna"))), messages());
+    }
+
+    @Test
+    void withTheFlagOffTheCommandStillChecksTheNodeItself() {
+        navigate.setEngine(() -> null);
+        f.nodes.clear();
+        f.nodes.add(InitialScopes.BYPASS_NODE); // the bypass means nothing without the engine
+        run("Kardenna");
+        assertEquals(List.of(plain(NavigationMessages.noPermission())), messages());
+        noSession();
+        assertEquals(List.of(), navigate.onTabComplete(f.player, command, "navigate", new String[] {""}));
     }
 }

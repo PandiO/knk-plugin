@@ -266,6 +266,7 @@ public final class NavigationMessages {
             case NO_ROUTE -> noRoute(name);
             case DIFFERENT_COMPONENTS -> noRoadConnects(name);
             case ALREADY_THERE -> alreadyThere(name);
+            case DESTINATION_NOT_ALLOWED -> info("Navigation to " + name + " ended - you can't navigate there now.");
         };
     }
 

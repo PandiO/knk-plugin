@@ -195,6 +195,24 @@ class NavigationCompassEngineTest {
     }
 
     @Test
+    void withoutTheNodeTheCompassKeepsItsNoPermissionWords() {
+        // phase 4 (#62, A22): the no-permission scope (80) refuses; the compass's own words for the code (E15)
+        f.nodes.clear();
+        click(false);
+        assertEquals(plain(CompassMessages.noPermission()), lastMessage());
+        verify(navigation, never()).navigate(any(), any(AllowedDestination.class));
+    }
+
+    @Test
+    void theBypassNodeAloneIsEnoughForTheCompass() {
+        f.nodes.clear();
+        f.nodes.add(InitialScopes.BYPASS_NODE);
+        f.inMatch();
+        click(false);
+        assertEquals("objective:7", handles(1).get(0).candidateKey());
+    }
+
+    @Test
     void withTheFlagOffTheEngineIsNotUsed() {
         compass.setEngine(() -> null);
         when(catalogue.resolve(any(), any())).thenReturn(new NavigationDestinations.Resolution(null, List.of(), List.of()));
