@@ -1796,6 +1796,25 @@ public class KnKPlugin extends JavaPlugin {
      * and the survey/build code reads the region tracker's WorldGuard query (R8).
      *
      */
+    /**
+     * The plaza-line options for a world (off-road navigation phase 7, PandiO/knk-workspace#712): which junctions are
+     * plazas and how far a plaza reaches by the NPC side's {@code corridor-half-width} and {@code plaza-corridor-blocks}
+     * for that world (O19, DESIGN § 8.7: shared keys), the walk trail's {@code wall-clearance}, and {@code plaza-pull}
+     * and {@code plaza-guide-cost}.
+     */
+    private net.knightsandkings.knk.core.navigation.shape.PlazaCurve.Options plazaLineOptions(String world) {
+        net.knightsandkings.knk.core.npc.nav.NavigationSettings npc =
+            net.knightsandkings.knk.paper.npc.nav.NpcNavigationConfig.from(getConfig().getConfigurationSection(
+                net.knightsandkings.knk.paper.npc.nav.NpcNavigationConfig.PATH)).settings();
+        var scope = net.knightsandkings.knk.core.npc.nav.NavigationSettings.Scope.of(world);
+        net.knightsandkings.knk.paper.config.NavigationConfig navigation = config.navigation();
+        return new net.knightsandkings.knk.core.navigation.shape.PlazaCurve.Options(
+            npc.value(net.knightsandkings.knk.core.npc.nav.NavigationSettings.CORRIDOR_HALF_WIDTH, scope),
+            navigation.walk().wallClearance(),
+            npc.value(net.knightsandkings.knk.core.npc.nav.NavigationSettings.PLAZA_CORRIDOR_BLOCKS, scope),
+            navigation.plazaLines().pull(), navigation.plazaLines().guideCost());
+    }
+
     private void initializeRoads() {
         net.knightsandkings.knk.paper.config.NavigationConfig navigation = config.navigation();
         if (!navigation.enabled()) {
@@ -2988,6 +3007,13 @@ public class KnKPlugin extends JavaPlugin {
             roadAdmin.setNavigation(() -> navigationService, () -> navigationDestinations);
             roadAdmin.setProposals(() -> roadProposals);
             roadAdmin.setLiveTags(() -> liveEdgeTags);
+            // Off-road navigation phase 7 step 1 (PandiO/knk-workspace#712): /knk road plazaline previews plaza lines
+            // for staff, with navigation.plaza-lines off; the trail does not use them yet
+            roadAdmin.setPlazaLines(new net.knightsandkings.knk.paper.navigation.PlazaLinePreview(this,
+                () -> roadNetworkCache, () -> navigationService,
+                () -> new net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld(
+                    regionTracker == null ? null : regionTracker.regionIds()),
+                this::plazaLineOptions));
             knkAdminCommand.registerSubcommand(
                 net.knightsandkings.knk.paper.roads.RoadAdminCommand.metadata(), roadAdmin, roadAdmin::complete);
             knkAdminCommand.setSubcommandVisibleToAny("road",

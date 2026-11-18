@@ -107,6 +107,51 @@ class RoadAdminCommandTest {
         assertTrue(lastMessage(player).contains("/knk road seed add [note] | remove <id> | list"));
     }
 
+    @Test
+    void plazaLineNeedsAPlayerAndTheNode() {
+        // off-road navigation phase 7 step 1 (#712): the preview is under knk.admin.road like every road tool
+        ConsoleCommandSender console = mock(ConsoleCommandSender.class);
+        command.execute(console, new String[] {"plazaline", "Brink"});
+        assertTrue(lastMessage(console).contains("needs a player"), lastMessage(console));
+
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(false);
+        command.execute(player, new String[] {"plazaline", "Brink"});
+        assertTrue(lastMessage(player).contains("permission"));
+    }
+
+    @Test
+    void plazaLineRunsThePreviewWithTheWordsAfterIt() {
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        command.execute(player, new String[] {"plazaline"});
+        assertTrue(lastMessage(player).contains("not available"), "not wired: " + lastMessage(player));
+
+        net.knightsandkings.knk.paper.navigation.PlazaLinePreview preview =
+            mock(net.knightsandkings.knk.paper.navigation.PlazaLinePreview.class);
+        command.setPlazaLines(preview);
+        command.execute(player, new String[] {"plazaline", "\"Merchant's", "Square\""});
+        verify(preview).run(player, new String[] {"\"Merchant's", "Square\""});
+        command.execute(player, new String[] {"PlazaLine"});
+        verify(preview).run(player, new String[0]);
+    }
+
+    @Test
+    void plazaLineIsInTheUsageAndCompletesWithPlazaNames() {
+        when(player.hasPermission(RoadAdminCommand.NODE)).thenReturn(true);
+        assertTrue(RoadAdminCommand.USAGE.contains("plazaline"));
+        assertEquals(List.of("plazaline"), command.complete(player, new String[] {"pla"}));
+
+        org.bukkit.World world = mock(org.bukkit.World.class);
+        when(world.getName()).thenReturn("world");
+        when(player.getWorld()).thenReturn(world);
+        when(cache.snapshot("world")).thenReturn(RoadNetworkSnapshot.builder("world")
+            .addNode(new RoadNode(1, 0, 64, 0, RoadNodeKind.JUNCTION, "Brink", 0))
+            .addNode(new RoadNode(2, 9, 64, 9, RoadNodeKind.ANCHOR, "Merchant's Square", 0, false, 12))
+            .addNode(new RoadNode(3, 20, 64, 9, RoadNodeKind.ANCHOR, "Keep Upper Stairhouse", 0))
+            .build());
+        assertEquals(List.of("\"Merchant's Square\"", "Brink"), command.complete(player, new String[] {"plazaline", ""}));
+        assertEquals(List.of("Brink"), command.complete(player, new String[] {"plazaline", "b"}));
+    }
+
     /**
      * {@code /knk road status} with the walk-search measurements of off-road phase 0 (PandiO/knk-workspace#703).
      * {@code status} lists the server's worlds, so these run on a MockBukkit server.

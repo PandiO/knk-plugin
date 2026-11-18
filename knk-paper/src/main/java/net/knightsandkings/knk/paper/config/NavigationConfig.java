@@ -57,6 +57,9 @@ import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
  * @param cursorJump         {@code navigation.cursor-jump} (phase 6.2, PandiO/knk-workspace#711; with {@code guidance-v2}
  *                           only): how far along the route the cursor may move in one tick before only a player who left
  *                           the previous stretch makes it jump (loops and switchbacks, DESIGN § 7.5.6). Default 12
+ * @param plazaLines         {@code navigation.plaza-lines}, {@code plaza-pull} and {@code plaza-guide-cost} (off-road
+ *                           navigation phase 7, PandiO/knk-workspace#712): plaza lines for the players' trail. Default
+ *                           off: routes and trails exactly as before (A24)
  */
 public record NavigationConfig(
     boolean enabled,
@@ -79,7 +82,8 @@ public record NavigationConfig(
     BuilderConfig builder,
     WalkConfig walk,
     boolean guidanceV2,
-    double cursorJump
+    double cursorJump,
+    PlazaLinesConfig plazaLines
 ) {
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
@@ -413,6 +417,48 @@ public record NavigationConfig(
         survey = survey == null ? SurveyConfig.defaults() : survey;
         builder = builder == null ? BuilderConfig.defaults() : builder;
         walk = walk == null ? WalkConfig.defaults() : walk;
+        plazaLines = plazaLines == null ? PlazaLinesConfig.defaults() : plazaLines;
+    }
+
+    /**
+     * Plaza lines for the players' trail (off-road navigation phase 7, DESIGN § 8.7, PandiO/knk-workspace#712).
+     * Phase 7's first step only previews them ({@code /knk road plazaline}, which works with the flag off); the trail
+     * does not use them yet.
+     *
+     * @param enabled   {@code navigation.plaza-lines}: the trail takes the plaza line where a route crosses a plaza.
+     *                  Default false: today's route polyline (A24)
+     * @param pull      {@code navigation.plaza-pull}: how far the curve's middle is pulled from the chord towards the
+     *                  plaza node, 0 to 1. Default 0.35 (O30), tuned live on Cinix and Brink
+     * @param guideCost {@code navigation.plaza-guide-cost}: the A* fallback's cost per block of distance from the
+     *                  curve, at least 0. Default 2
+     */
+    public record PlazaLinesConfig(boolean enabled, double pull, double guideCost) {
+        public static PlazaLinesConfig defaults() {
+            return new PlazaLinesConfig(false, net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_PULL,
+                net.knightsandkings.knk.core.navigation.shape.PlazaCurve.DEFAULT_GUIDE_COST);
+        }
+
+        public void validate() {
+            if (!(pull >= 0 && pull <= 1)) {
+                throw new IllegalArgumentException("navigation.plaza-pull must be 0..1 (got: " + pull + ")");
+            }
+            if (!(guideCost >= 0)) {
+                throw new IllegalArgumentException("navigation.plaza-guide-cost must not be negative (got: " + guideCost + ")");
+            }
+        }
+    }
+
+    /** Without the plaza-line keys (callers from before #712): the defaults, plaza lines off. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
+                            double destinationSnapVerticalWeight, double maxStartDistance, double maxDestinationDistance,
+                            double destinationWalkRange, TrailConfig trail, double rerouteDistance, int rerouteAfterTicks,
+                            double arriveDistance, int maxSessionMinutes, double sprintSpeed, SurveyConfig survey,
+                            BuilderConfig builder, WalkConfig walk, boolean guidanceV2, double cursorJump) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, walk,
+            guidanceV2, cursorJump, null);
     }
 
     /** Without {@code cursor-jump} (callers from before #711): the default. */
@@ -464,7 +510,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
     }
 
     /** This config with {@code guidance-v2} on or off. */
@@ -472,7 +518,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
     }
 
     /** This config with another trail block ({@code trail-*} keys). */
@@ -480,7 +526,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
     }
 
     /** This config with another {@code cursor-jump}. */
@@ -488,7 +534,15 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
+    }
+
+    /** This config with other plaza-line keys. */
+    public NavigationConfig withPlazaLines(PlazaLinesConfig plazaLines) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines);
     }
 
     /** {@code guidance-v2}'s route cursor ({@code cursor-jump}); null with the flag off: the session as before. */
@@ -569,6 +623,7 @@ public record NavigationConfig(
         survey.validate();
         builder.validate();
         walk.validate();
+        plazaLines.validate();
     }
 
     /** Snapping and class costs for the router (Phases 2d/4); the snap weight is the player's start's. */

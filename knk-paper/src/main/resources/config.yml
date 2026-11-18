@@ -772,6 +772,19 @@ navigation:
   # the previous stretch (farther than reroute-distance) makes it jump to another (loops, switchbacks)
   trail-leg-spacing: 3.0
   cursor-jump: 12
+  # Plaza lines for the players' trail (off-road navigation phase 7, #712). Where a route enters a plaza on one road
+  # and leaves on another, the trail would take a rounded line from road to road, pulled towards the plaza node,
+  # instead of the sharp bend at the node; checked against walls, wells, stalls, regions and floor (an A* line round
+  # an obstacle when the curve does not fit). Plazas only: a designed plaza, or a junction whose open floor is wider
+  # than npc.navigation.corridor-half-width (plaza-corridor-blocks there caps the plaza's radius). The route's length,
+  # ETA and maneuvers never change. Not used by the trail yet: /knk road plazaline previews the lines for staff,
+  # with this off. Keep false until the developer has seen the lines on real plazas
+  plaza-lines: false
+  # How far the middle of the curve is pulled from the straight entry-to-exit line towards the plaza node (0 = the
+  # straight line with rounded ends, 1 = through the node; 0..1); the A* fallback's cost per block it strays from the
+  # curve (0 or more)
+  plaza-pull: 0.35
+  plaza-guide-cost: 2
   walk:
     # false = straight lines exactly as before (the kill switch)
     enabled: true
