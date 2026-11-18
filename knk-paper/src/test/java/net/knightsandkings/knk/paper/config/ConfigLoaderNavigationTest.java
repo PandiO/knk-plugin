@@ -147,6 +147,39 @@ class ConfigLoaderNavigationTest {
     }
 
     @Test
+    void thePhase62KeysAreInConfigYmlWithTheDesignDefaultsAndAreChecked() throws Exception {
+        // off-road phase 6.2 (#711, DESIGN § 7.6 corrected: trail-leg-spacing 3.0 per O20 and § 7.2.2)
+        YamlConfiguration bundled = bundledConfig();
+        assertTrue(bundled.contains("navigation.trail-leg-spacing"));
+        assertTrue(bundled.contains("navigation.cursor-jump"));
+        NavigationConfig loaded = ConfigLoader.load(bundled).navigation();
+        assertEquals(3.0, loaded.trail().legSpacing());
+        assertEquals(12.0, loaded.cursorJump());
+        assertEquals(3.0, NavigationConfig.defaults().trail().legSpacing());
+        assertEquals(12.0, NavigationConfig.defaults().cursorJump());
+        assertEquals(null, loaded.cursorParameters(), "guidance-v2 off: the session keeps no cursor");
+
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("navigation.guidance-v2", true);
+        yaml.set("navigation.trail-leg-spacing", 2.5);
+        yaml.set("navigation.cursor-jump", 20);
+        NavigationConfig navigation = ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"));
+        navigation.validate();
+        assertEquals(2.5, navigation.trail().legSpacing());
+        assertEquals(20.0, navigation.cursorParameters().cursorJump());
+
+        yaml.set("navigation.cursor-jump", 0);
+        IllegalArgumentException jump = assertThrows(IllegalArgumentException.class,
+            ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"))::validate);
+        assertTrue(jump.getMessage().contains("cursor-jump"), jump.getMessage());
+        yaml.set("navigation.cursor-jump", 12);
+        yaml.set("navigation.trail-leg-spacing", 40);
+        IllegalArgumentException spacing = assertThrows(IllegalArgumentException.class,
+            ConfigLoader.loadNavigation(yaml.getConfigurationSection("navigation"))::validate);
+        assertTrue(spacing.getMessage().contains("trail-leg-spacing"), spacing.getMessage());
+    }
+
+    @Test
     void aMissingSectionMeansOnWithDefaults() {
         assertEquals(NavigationConfig.defaults(), ConfigLoader.loadNavigation(null));
     }

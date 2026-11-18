@@ -41,7 +41,9 @@ import net.knightsandkings.knk.core.navigation.NavigationEffect.RerouteStartedEf
 import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteAdoptedEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteKeptEffect;
 import net.knightsandkings.knk.core.navigation.NavigationEffect.RouteReason;
+import net.knightsandkings.knk.core.navigation.JoinPoint;
 import net.knightsandkings.knk.core.navigation.NavigationSession;
+import net.knightsandkings.knk.core.navigation.PolylineCursor;
 import net.knightsandkings.knk.core.navigation.SessionParameters;
 import net.knightsandkings.knk.core.roads.route.AStarRouter;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
@@ -405,9 +407,60 @@ public final class NavigationService implements SiegeMatchObserver {
          */
         boolean nearRoute;
         CompletableFuture<?> capture;
+        /**
+         * {@code guidance-v2} (phase 6.2, #711, DESIGN § 7.2.3): the player's place on {@link #path} (blocks along it),
+         * followed with continuity ({@link PolylineCursor}); NaN until the first step on the current path.
+         */
+        double cursor = Double.NaN;
+        /** The path the cursor belongs to: a new path starts a new cursor. */
+        private List<double[]> cursorPath;
+        private double[] cursorCumulative;
 
         DirectLeg(double[] target) {
             this.target = target;
+        }
+
+        /**
+         * {@code guidance-v2}: one step of the cursor on the walk path (WALKING only) - a jump of more than
+         * {@link PolylineCursor#PATH_WINDOW} along the path only when the player is really nearer to it, so a player at a
+         * wall's other side does not make the trail jump.
+         */
+        void followCursor(double x, double floorY, double z) {
+            if (path != cursorPath) {
+                cursorPath = path;
+                cursorCumulative = PolylineCursor.cumulative(path);
+                cursor = Double.NaN;
+            }
+            cursor = PolylineCursor.follow(path, cursorCumulative, cursor, x, floorY, z, PolylineCursor.PATH_WINDOW,
+                Double.POSITIVE_INFINITY, PolylineCursor.PATH_NEARER).along();
+        }
+
+        /** {@code guidance-v2}: the cursor on the current path, after a step from this floor position when it has none. */
+        double cursorAt(double x, double floorY, double z) {
+            if (path != cursorPath || Double.isNaN(cursor)) {
+                followCursor(x, floorY, z);
+            }
+            return cursor;
+        }
+
+        /**
+         * {@code guidance-v2}: the remaining distance from the cursor (along the path from it, the gap to it and the
+         * partial path's rest); not walking: straight to the target, as {@link #remainingOf}.
+         */
+        double remainingFromCursor(double x, double floorY, double z) {
+            if (!walking()) {
+                return distance(x, floorY, z, target);
+            }
+            double at = cursorAt(x, floorY, z);
+            double[] p = PolylineCursor.pointAt(path, cursorCumulative, at);
+            double[] end = path.get(path.size() - 1);
+            double rest = partial ? distance(end[0], end[1], end[2], target) : 0;
+            return Math.max(0, cursorCumulative[cursorCumulative.length - 1] - at) + distance(x, floorY, z, p) + rest;
+        }
+
+        /** {@code guidance-v2}: the point {@code ahead} blocks beyond the cursor on the path (the HUD arrow). */
+        double[] aheadOfCursor(double x, double floorY, double z, double ahead) {
+            return PolylineCursor.pointAt(path, cursorCumulative, cursorAt(x, floorY, z) + ahead);
         }
 
         boolean walking() {
@@ -848,7 +901,8 @@ public final class NavigationService implements SiegeMatchObserver {
             startDirect(a);
             return;
         }
-        a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now);
+        a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now,
+                    deps.config().cursorParameters());
         apply(a, a.session.start());
     }
 
@@ -1148,14 +1202,19 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         double remaining = leg.remainingOf(x, floorY, z);
         leg.best = Math.min(leg.best, remaining);
+        boolean v2 = deps.config().guidanceV2();
+        if (v2 && leg.walking()) {
+            leg.followCursor(x, floorY, z); // phase 6.2 (#711): the trail, the HUD distance and the arrow from the cursor
+            remaining = leg.remainingFromCursor(x, floorY, z);
+        }
         if ((now - a.startedTick) % deps.trail().periodTicks() == 0) {
             drawLeg(a, leg);
         }
         if ((now - a.startedTick) % HUD_TICKS == 0) {
             deps.hud().update(a.player, a.destination.name(), remaining, 1 - Math.min(1, remaining / leg.total));
-            double[] towards = leg.walking()
-                ? TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD)
-                : leg.target;
+            double[] towards = !leg.walking() ? leg.target
+                : v2 ? leg.aheadOfCursor(x, floorY, z, WALK_ARROW_AHEAD)
+                : TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD);
             deps.hud().arrowTowards(a.player, towards[0], towards[2]);
         }
     }
@@ -1163,7 +1222,7 @@ public final class NavigationService implements SiegeMatchObserver {
     /** The leg's trail: the walk path when there is one, nothing when there is no way, else the straight line. */
     private void drawLeg(Active a, DirectLeg leg) {
         if (leg.walking()) {
-            deps.trail().drawPath(a.player, leg.path);
+            drawWalkPath(a, leg);
         } else if (leg.status != DirectLeg.Status.NO_PATH) {
             deps.trail().drawDirect(a.player, leg.target);
         }
@@ -1191,6 +1250,10 @@ public final class NavigationService implements SiegeMatchObserver {
                 leg.best = distance(x, floorY, z, leg.target);
                 requestWalk(a, leg, now);
             }
+            return;
+        }
+        if (deps.config().guidanceV2() && leg.walking()) {
+            recheckWalkingLegV2(a, leg, now, x, floorY, z);
             return;
         }
         double d = leg.remainingOf(x, floorY, z);
@@ -1449,6 +1512,46 @@ public final class NavigationService implements SiegeMatchObserver {
             + (shapingFailures.get() > 0 ? ", shaping failed " + shapingFailures.get() : "");
     }
 
+    // ==================== anchored walk trails and winding back (off-road phase 6.2, #711) ====================
+
+    /**
+     * A walking leg's trail: with {@code guidance-v2} on fixed anchors from the leg's cursor (DESIGN § 7.2,
+     * {@link TrailRenderer#drawPath(Player, List, double)}); otherwise from the player's projection, as before.
+     */
+    private void drawWalkPath(Active a, DirectLeg leg) {
+        if (deps.config().guidanceV2()) {
+            Location feet = a.player.getLocation();
+            deps.trail().drawPath(a.player, leg.path, leg.cursorAt(feet.getX(), feet.getY() - 1, feet.getZ()));
+        } else {
+            deps.trail().drawPath(a.player, leg.path);
+        }
+    }
+
+    /**
+     * {@code guidance-v2} (DESIGN § 7.5.5, A21): the direct re-check of a walking leg. {@code DirectLeg.best} and
+     * "heading away" are replaced by the player's distance to the leg's path: within {@code recompute-distance} the leg
+     * stays (and the window is drawn from its cursor; the usual re-check still renews a stale or old path); beyond it the
+     * leg is recomputed from the player's position, with the target re-derived from there (a region's closest point, a
+     * street's nearest point), at most once per {@code reroute-min-interval}. The old path stays drawn until the new one
+     * arrives; the walk search's own messages (rev. 9, the partial path, N17) are kept.
+     */
+    private void recheckWalkingLegV2(Active a, DirectLeg leg, long now, double x, double floorY, double z) {
+        double off = TrailRenderer.project(leg.path, new double[] {x, floorY, z})[1];
+        if (off <= deps.config().walk().recomputeDistance()) {
+            recheckWalk(a, leg, now, x, floorY, z);
+            return;
+        }
+        if (leg.lastRecalcTick != Long.MIN_VALUE && now - leg.lastRecalcTick < sessionParameters.rerouteMinIntervalTicks()) {
+            return;
+        }
+        leg.lastRecalcTick = now;
+        leg.cancelWalk();
+        leg.target = directTarget(a, leg, x, floorY, z);
+        if (walkEnabled()) {
+            requestWalk(a, leg, now);
+        }
+    }
+
     /**
      * Live test 2026-10-08 run 5 (A8/A9, finding N13): a nearby target the walk search cannot reach may still
      * be reached by the roads - back and round. Asks the router once (from a road within the snap distance to
@@ -1501,7 +1604,8 @@ public final class NavigationService implements SiegeMatchObserver {
                 a.goals = to;
                 a.target = leg.target;
                 long now = deps.tick().getAsLong();
-                a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now);
+                a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now,
+                    deps.config().cursorParameters());
                 a.session.start(); // its first computation is this one: the result is fed in below
                 apply(a, a.session.onRouteResult(delivered, now));
             });
@@ -1552,7 +1656,7 @@ public final class NavigationService implements SiegeMatchObserver {
             if (startLeg) {
                 a.route().ifPresent(route -> drawStartLeg(a, leg, route));
             } else {
-                deps.trail().drawPath(a.player, leg.path);
+                drawWalkPath(a, leg);
             }
             return;
         }
@@ -1859,7 +1963,9 @@ public final class NavigationService implements SiegeMatchObserver {
             dropStartLeg(a);
             return;
         }
-        double[] start = near ? nearest.point() : route.start().point();
+        double[] start = near ? nearest.point()
+            : deps.config().guidanceV2() ? JoinPoint.choose(route.polyline(), x, floorY, z, startLimit()).point() // § 7.5.4
+            : route.start().point();
         if (a.startLeg != null && a.startLeg.nearRoute == near
             && distance(start[0], start[1], start[2], a.startLeg.target) <= 1) {
             a.startLegClosestToRoute = Math.min(a.startLegClosestToRoute, toRoute);
@@ -1907,11 +2013,22 @@ public final class NavigationService implements SiegeMatchObserver {
             return false;
         }
         double remaining = leg.remainingOf(x, floorY, z);
-        // heading away: farther along the leg AND farther from the route. Either alone misleads - past a partial
-        // path's end the leg's measure grows while the player still nears the road (live test S3: down a spiral
-        // stair), and a walk path may first lead away from the road (out through a back door).
-        if (remaining > leg.best + sessionParameters.rerouteDistance()
+        boolean v2 = deps.config().guidanceV2() && leg.walking();
+        if (v2) {
+            // phase 6.2 (#711, DESIGN § 7.5.5): N16's "heading away" is replaced by the distance to the leg's path. Beyond
+            // recompute-distance the leg ends; the session (off the route) re-routes from the player, at most once per
+            // reroute-min-interval, and the new route's start leg goes to its join point
+            if (TrailRenderer.project(leg.path, new double[] {x, floorY, z})[1] > deps.config().walk().recomputeDistance()) {
+                dropStartLeg(a);
+                return false;
+            }
+            leg.followCursor(x, floorY, z);
+            remaining = leg.remainingFromCursor(x, floorY, z);
+        } else if (remaining > leg.best + sessionParameters.rerouteDistance()
             && toRoute > a.startLegClosestToRoute + sessionParameters.rerouteDistance()) {
+            // heading away: farther along the leg AND farther from the route. Either alone misleads - past a partial
+            // path's end the leg's measure grows while the player still nears the road (live test S3: down a spiral
+            // stair), and a walk path may first lead away from the road (out through a back door).
             dropStartLeg(a);
             return false;
         }
@@ -1923,9 +2040,9 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         if (since % HUD_TICKS == 0) {
             deps.hud().update(a.player, a.destination.name(), remaining + route.length(), 0);
-            double[] towards = leg.walking()
-                ? TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD)
-                : leg.target;
+            double[] towards = !leg.walking() ? leg.target
+                : v2 ? leg.aheadOfCursor(x, floorY, z, WALK_ARROW_AHEAD)
+                : TrailRenderer.pointAt(leg.path, TrailRenderer.project(leg.path, new double[] {x, floorY, z})[0] + WALK_ARROW_AHEAD);
             deps.hud().arrowTowards(a.player, towards[0], towards[2]);
         }
         return true;
@@ -1937,7 +2054,7 @@ public final class NavigationService implements SiegeMatchObserver {
      */
     private void drawStartLeg(Active a, DirectLeg leg, Route route) {
         if (leg.walking()) {
-            deps.trail().drawPath(a.player, leg.path);
+            drawWalkPath(a, leg);
         }
         boolean straight = !leg.walking() && leg.status != DirectLeg.Status.NO_PATH;
         deps.trail().drawRoute(a.player, route, 0, trailTarget(a), straight);
@@ -2081,7 +2198,8 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         AccessPolicy policy = deps.policies().policyFor(a.player, a.snapshot,
             destinationRegions(a.player, a.destination, a.goals, a.target));
-        double travelled = a.session.along();
+        // walked already: behind the player's place on the route (with guidance-v2 the cursor, which winds back; else the progress)
+        double travelled = a.session.cursor();
         double stepStart = 0;
         for (int i = 0; i < route.steps().size(); i++) {
             Route.Step step = route.steps().get(i);
@@ -2337,15 +2455,20 @@ public final class NavigationService implements SiegeMatchObserver {
 
     private double remaining(Active a) {
         if (a.direct()) {
-            Location feet = a.player.getLocation();
-            return a.leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
+            return legRemaining(a.leg, a.player.getLocation());
         }
         double road = a.session == null ? 0 : a.session.remainingBlocks();
         if (a.startLeg != null && !a.startLeg.nearRoute) {
-            Location feet = a.player.getLocation();
-            return road + a.startLeg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
+            return road + legRemaining(a.startLeg, a.player.getLocation());
         }
         return road;
+    }
+
+    /** A leg's remaining distance: from its cursor with {@code guidance-v2} (phase 6.2), else as before. */
+    private double legRemaining(DirectLeg leg, Location feet) {
+        return deps.config().guidanceV2()
+            ? leg.remainingFromCursor(feet.getX(), feet.getY() - 1, feet.getZ())
+            : leg.remainingOf(feet.getX(), feet.getY() - 1, feet.getZ());
     }
 
     static double distance(double x, double y, double z, double[] p) {

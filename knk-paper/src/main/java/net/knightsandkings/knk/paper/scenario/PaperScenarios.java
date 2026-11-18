@@ -17,6 +17,7 @@ import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnOnGroundScen
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnUnderRoofScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSwitchedOffScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersLineScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.WalkTrailCursorScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.WalkTrailStairhouseScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcCornersWalkScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.NpcGroupAccessChangeScenario;
@@ -83,6 +84,8 @@ public final class PaperScenarios {
             // walking ones need Citizens, which CI's paper-boot server has as a pinned build
             .register(new NpcCornersLineScenario())
             .register(new WalkTrailStairhouseScenario())
+            // off-road navigation phase 6.2 (PandiO/knk-workspace#711): the walk leg's cursor and anchored particles
+            .register(new WalkTrailCursorScenario())
             .register(new NpcCornersWalkScenario())
             .register(new NpcStuckLadderScenario())
             .register(new NpcGroupNarrowsScenario())

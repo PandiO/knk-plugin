@@ -767,6 +767,11 @@ navigation:
   # are shaped off the main thread and drawn with checked curves (walk.curve). false = walk paths, the search and the
   # trail exactly as before. Keep false until the live test signs it off
   guidance-v2: false
+  # With guidance-v2 only (phase 6.2, #711): blocks between the fixed anchors of a walk trail's particles (0.5..16;
+  # 3.0 is today's spacing); how far along the route the cursor may move in one tick before only a player who left
+  # the previous stretch (farther than reroute-distance) makes it jump to another (loops, switchbacks)
+  trail-leg-spacing: 3.0
+  cursor-jump: 12
   walk:
     # false = straight lines exactly as before (the kill switch)
     enabled: true
