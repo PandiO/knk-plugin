@@ -156,7 +156,7 @@ jobs:
         # off and on) add about 3.5 minutes to the run (a local run: 9 min 40 s for 45, 6 min 40 s for the 35 before).
         # The three collision scenarios of #627 (link M7) add about 30 s (a local run: 10 min 5 s for 48).
         env:
-          MIN_SCENARIOS: 51
+          MIN_SCENARIOS: 52
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
