@@ -153,7 +153,18 @@ class NavigationServiceWalkLinksTest {
                 target[2], goal, WalkBudget.DEFAULTS);
             return CompletableFuture.completedFuture(request);
         };
-        NavigationService.PolicyFactory policies = (pl, s) -> AccessPolicy.ALL_OPEN;
+        NavigationService.PolicyFactory policies = new NavigationService.PolicyFactory() {
+            @Override
+            public AccessPolicy policyFor(Player pl, RoadNetworkSnapshot s) {
+                return AccessPolicy.ALL_OPEN;
+            }
+
+            @Override
+            public AccessPolicy policyFor(net.knightsandkings.knk.core.npc.nav.AccessSubject subject, RoadNetworkSnapshot s,
+                                          java.util.Set<String> destinationRegions) {
+                return AccessPolicy.ALL_OPEN;
+            }
+        };
         service = new NavigationService(new NavigationService.Deps(null, config, w -> snapshot, policies,
             (w, id) -> Optional.empty(), new NavigationEligibility(u -> false, u -> false, u -> false), hud, trail,
             Runnable::run, Runnable::run, tick::get, events::add, Logger.getLogger("test"),
@@ -370,6 +381,44 @@ class NavigationServiceWalkLinksTest {
     }
 
     @Test
+    void theRoadTrailKeepsTheLeadUntilTheRoadsEnd() {
+        // coordinator note (2026-11-18, the developer's scene 3): with walk links on, the last walk leg starts at the
+        // road's end, never while the player is still on the road; the courtyard link is part of the route, not a leg
+        service(linksOn(), true);
+        moveTo(-59.5, 0.5);
+        service.navigate(player, Destination.point("Keep door", WORLD, 80.5, 65, 12.5));
+        runSearches();
+        assertTrue(route().hasWalkLinks());
+        for (int x = -59; x <= 74; x++) { // the road ends at 80; within arrive-distance (4) of it is its end
+            moveTo(x + 0.5, 0.5);
+            ticks(1);
+            assertFalse(service.isDirect(playerId), "still on the route at x " + x);
+            assertTrue(service.sessionOf(playerId).isPresent());
+        }
+        moveTo(80.5, 0.5);
+        ticks(1);
+        assertTrue(service.isDirect(playerId), "the last walk from the road's end");
+    }
+
+    @Test
+    void anNpcRoadPlanNeverTakesAWalkLink() {
+        // coordinator note (NPC chain, 2026-11-18): NPCs learn walk links in a later NPC phase; with the flag on their
+        // road plans (planRoadFor, the NPC module's port) stay on today's router - only a player's route passes links
+        service(linksOn(), true);
+        moveTo(-59.5, 0.5);
+        service.navigate(player, Destination.point("Keep", WORLD, 80.5, 65, 0.5));
+        runSearches();
+        assertTrue(route().hasWalkLinks(), "the player has the link");
+        var npc = new net.knightsandkings.knk.core.npc.nav.NpcAccessSubject("guard-1",
+            net.knightsandkings.knk.core.npc.nav.NpcAccessProfile.DEFAULT, WORLD, java.util.Set.of());
+        var plan = service.planRoadFor(npc, new net.knightsandkings.knk.core.navigation.shape.NavPoint(WORLD, -60, 64, 0),
+            new net.knightsandkings.knk.core.navigation.shape.NavPoint(WORLD, 80, 64, 0)).join();
+        assertEquals(net.knightsandkings.knk.core.npc.nav.RoadPlanner.Status.FOUND, plan.status());
+        assertTrue(plan.line().stream().anyMatch(p -> p.z() <= -29), "round the courtyard by road: " + plan.line());
+        assertEquals(1, cache.counters().cachedFound(), "no link searched for the NPC");
+    }
+
+        @Test
     void withTheFlagOffDirectModeStaysAsToday() {
         service(NavigationConfig.defaults(), false);
         moveTo(-49.5, 3.5);
