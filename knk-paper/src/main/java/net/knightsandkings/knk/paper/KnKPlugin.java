@@ -318,6 +318,8 @@ public class KnKPlugin extends JavaPlugin {
     private CommandCooldownManager cooldownManager;
     private EnchantmentBootstrap.EnchantmentRuntime enchantmentRuntime;
     private ExecutorService regionLookupExecutor;
+    // Item identity (PandiO/knk-workspace#141); null unless items.identity.enabled.
+    private net.knightsandkings.knk.paper.items.identity.ItemIdentityService itemIdentityService;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
     /** Overview map reports (PandiO/knk-workspace#735); off unless map.reporting.enabled. */
@@ -711,6 +713,19 @@ public class KnKPlugin extends JavaPlugin {
                     wgRegionIdHandler::isHandlingTask),
                     getConfig().getLong("regions.temp-retention.release-interval-minutes", 5));
             tempRegionRetentionTask.start();
+
+            // Item identity (PandiO/knk-workspace#141): off by default (items.identity.enabled /.convert-on-obtain);
+            // with both off, items are built and handled exactly as before.
+            var itemIdentitySettings = net.knightsandkings.knk.paper.items.identity.ItemIdentitySettings.fromConfig(getConfig());
+            if (itemIdentitySettings.enabled()) {
+                itemIdentityService = new net.knightsandkings.knk.paper.items.identity.ItemIdentityService(
+                    this, apiClient.getItemIdentityApi(), itemIdentitySettings, getLogger());
+                itemIdentityService.start();
+                if (itemIdentitySettings.convertOnObtain()) {
+                    getServer().getPluginManager().registerEvents(
+                        new net.knightsandkings.knk.paper.items.identity.ItemConversionListener(itemIdentityService), this);
+                }
+            }
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
             headlessWorldTaskPoller = new HeadlessWorldTaskPoller(worldTasksApi, this, worldTaskLeases.serverId());
@@ -1318,8 +1333,17 @@ public class KnKPlugin extends JavaPlugin {
         return true;
     }
 
+    /** Item identity (PandiO/knk-workspace#141): the one item resolver; null while items.identity.enabled is off. */
+    public net.knightsandkings.knk.paper.items.identity.ItemIdentityService getItemIdentityService() {
+        return itemIdentityService;
+    }
+
     @Override
     public void onDisable() {
+        if (itemIdentityService != null) {
+            itemIdentityService.stop();
+            itemIdentityService = null;
+        }
         if (navigationModel != null) {
             navigationModel.stop();
             navigationModel = null;
