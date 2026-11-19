@@ -27,7 +27,7 @@ import java.util.logging.Logger;
 /**
  * The {@code SiegeWeaponSpot} world task (SIEGE_WEAPONS § 4, W4, W5, W44, W70; A02-A03; PandiO/knk-workspace#799). The
  * weapon spot form in the web app starts it ("Send to Minecraft" on its bounds); an admin claims it in game with
- * {@code /knk task-claim <code>}, selects the spot with WorldEdit (or names a WorldGuard region) and works in chat:
+ * {@code /knk task <code>}, selects the spot with WorldEdit (or names a WorldGuard region) and works in chat:
  * <ol>
  *   <li>{@code save}: reads the WorldEdit selection; {@code region <id>}: reads a WorldGuard region (bounding box). The
  *       facing is pre-filled from where the admin looks (rounded to north, east, south or west) unless they set one;
