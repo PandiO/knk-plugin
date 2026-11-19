@@ -28,6 +28,8 @@ import java.util.logging.Logger;
  *   region always keeps its drawn outline and Y range, PandiO/knk-workspace#487)
  * - GET /api/regions/{regionId}/contains-location?x=...&z=...&allowBoundary=false
  * - GET /api/regions/{parentRegionId}/contains-region/{childRegionId}?requireFullContainment=true
+ * - GET /api/territory/contains-region/{regionId} and /api/territory/contains-location (P2c PandiO/knk-workspace#677,
+ *   {@link TerritoryLookupHandler}; only when {@link #setTerritoryLookup} was called before {@link #start()})
  *
  * It listens on {@code region-http.bind-address} only (loopback by default), and when the plugin has an API
  * key every request must carry it in {@code X-API-Key} ({@link RegionHttpAuthFilter}).
@@ -41,6 +43,8 @@ public class RegionHttpServer {
     private final int port;
     private final RegionHttpAuthFilter authFilter;
     private HttpServer server;
+    /** P2c (#677): the territory lookup; null: not served (the catch-all 404). */
+    private TerritoryLookupHandler territoryLookup;
     private ExecutorService executor = Executors.newCachedThreadPool();
 
     /**
@@ -59,6 +63,9 @@ public class RegionHttpServer {
         server = HttpServer.create(new InetSocketAddress(bindAddress, port), 0);
         server.createContext("/Regions/rename", new RenameHandler()).getFilters().add(authFilter);
         server.createContext("/api/regions/", new RegionContainmentHandler()).getFilters().add(authFilter);
+        if (territoryLookup != null) {
+            server.createContext("/api/territory/", territoryLookup).getFilters().add(authFilter);
+        }
         // Anything else would get the JDK's default 404 without the key check; keep the answer uniform.
         server.createContext("/", exchange -> send(exchange, 404, "Not Found")).getFilters().add(authFilter);
         server.setExecutor(executor);
@@ -72,6 +79,14 @@ public class RegionHttpServer {
             LOGGER.warning("RegionHttpServer is reachable beyond this host without a key - set api.auth.api-key"
                 + " or bind region-http.bind-address to 127.0.0.1");
         }
+    }
+
+    /**
+     * P2c (PandiO/knk-workspace#677): serve the territory lookup the API's {@code InsideTerritory} rule calls. Call before
+     * {@link #start()}. The handler answers 503 itself while territory is off.
+     */
+    public void setTerritoryLookup(TerritoryLookupHandler territoryLookup) {
+        this.territoryLookup = territoryLookup;
     }
 
     /** The address the server listens on, or null before {@link #start()}. */

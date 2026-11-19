@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.scenario;
 
 import net.knightsandkings.knk.core.scenario.ScenarioRegistry;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateBlocksNeverSuffocateScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.RuralStructureRegionScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.TerritoryBorderCrossingScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateClosingKeepsSidesScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateClosingMovesEntityOutScenario;
@@ -147,6 +148,8 @@ public final class PaperScenarios {
             .register(new PlayerTpIntoClosedGateScenario())
             .register(new PlayerRejoinInClosedGateScenario())
             // Territory (PandiO/knk-workspace#689): the lookup on a border crossing
-            .register(new TerritoryBorderCrossingScenario());
+            .register(new TerritoryBorderCrossingScenario())
+            // P2c (PandiO/knk-workspace#677): rural structure regions top level, the territory lookup
+            .register(new RuralStructureRegionScenario());
     }
 }

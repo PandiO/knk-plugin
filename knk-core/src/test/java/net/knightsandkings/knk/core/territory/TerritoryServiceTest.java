@@ -30,6 +30,10 @@ class TerritoryServiceTest {
     private final List<Map<String, Object>> sentOutlines = new ArrayList<>();
     private TerritoryInputs inputs = withVersion("v1", true, List.of(district(10, "d", 1, 40), district(11, "gone", 1, 40)));
     private int reportStatus = 200;
+    private List<TerritoryService.StructureRef> structureRefs = List.of(
+            new TerritoryService.StructureRef(100, 10, WORLD, "s-inside"),
+            new TerritoryService.StructureRef(101, 10, WORLD, "s-far"),
+            new TerritoryService.StructureRef(102, 99, WORLD, "s-far"));
 
     private final TerritoryApi api = new TerritoryApi() {
         @Override
@@ -56,10 +60,7 @@ class TerritoryServiceTest {
         TerritorySettings settings = new TerritorySettings(true, 10, true, true, mapOutlines, 0, Map.of());
         return new TerritoryService(settings, api,
                 (world, regionId) -> Optional.ofNullable(regions.get(regionId)),
-                () -> CompletableFuture.completedFuture(List.of(
-                        new TerritoryService.StructureRef(100, 10, WORLD, "s-inside"),
-                        new TerritoryService.StructureRef(101, 10, WORLD, "s-far"),
-                        new TerritoryService.StructureRef(102, 99, WORLD, "s-far"))),
+                () -> CompletableFuture.completedFuture(structureRefs),
                 (method, argument) -> {
                     assertEquals(TerritoryService.OUTLINES_METHOD, method);
                     return sentOutlines.add(argument);
@@ -91,6 +92,25 @@ class TerritoryServiceTest {
         assertEquals(101, reports.get(0).structures().get(0).structureId());
         assertEquals(TerritoryReport.StructureFlag.OUTSIDE, reports.get(0).structures().get(0).flag());
         assertTrue(service.lastReport().startsWith(WORLD + ": 0 overlap(s), 1 flagged structure(s)"));
+    }
+
+    /** P2 (PandiO/knk-workspace#91, #677): the structure search's townId places rural structures (no district) too. */
+    @Test
+    void ruralStructures_areFlaggedThroughTheirTownId_fromTheStructureSearch() {
+        structureRefs = List.of(
+                new TerritoryService.StructureRef(200, null, 1, WORLD, "s-inside"), // rural Phoenix, home: no flag
+                new TerritoryService.StructureRef(201, null, 1, WORLD, "s-far"), // rural Phoenix, wilderness: outside
+                new TerritoryService.StructureRef(202, null, 2, WORLD, "s-inside"), // rural Rivertown on Phoenix land
+                new TerritoryService.StructureRef(203, null, null, WORLD, "s-far"), // no town known: left out
+                new TerritoryService.StructureRef(204, 99, 1, WORLD, "s-inside")); // townId wins over an unknown district
+        TerritoryService service = service(false);
+
+        service.refresh("test", false).join();
+
+        List<Integer> flagged = reports.get(0).structures().stream().map(TerritoryReport.StructureFlag::structureId).toList();
+        assertEquals(List.of(201, 202), flagged);
+        assertTrue(reports.get(0).structures().stream()
+                .allMatch(entry -> TerritoryReport.StructureFlag.OUTSIDE.equals(entry.flag())));
     }
 
     @Test

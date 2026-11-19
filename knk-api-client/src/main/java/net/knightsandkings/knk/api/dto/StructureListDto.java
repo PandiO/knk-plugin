@@ -12,5 +12,7 @@ public record StructureListDto(
         @JsonProperty("streetName") String streetName,
         @JsonProperty("districtId") Integer districtId,
         @JsonProperty("districtName") String districtName,
-        @JsonProperty("worldName") String worldName
+        @JsonProperty("worldName") String worldName,
+        // P2 (PandiO/knk-workspace#91, #677): the effective town (district's town, or a rural structure's own town)
+        @JsonProperty("townId") Integer townId
 ) {}

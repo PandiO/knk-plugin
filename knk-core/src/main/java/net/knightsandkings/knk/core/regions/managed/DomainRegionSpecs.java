@@ -28,6 +28,19 @@ public final class DomainRegionSpecs {
 
     public static Result build(List<TownSummary> towns, List<DistrictSummary> districts, List<StructureSummary> structures,
                                Map<Integer, String> domainTypes) {
+        return build(towns, districts, structures, domainTypes, false);
+    }
+
+    /**
+     * @param production P2c (PandiO/knk-workspace#677, production DESIGN § 3.4), the plugin's {@code production.enabled}:
+     *                   a {@code ProductionStructure} is {@link ManagedRegionKind#RESOURCE_PRODUCTION} and a
+     *                   {@code Warehouse} a {@link ManagedRegionKind#STRUCTURE}
+     *                   ({@link ManagedRegionKind#fromDomainType(String, boolean)}), and a rural structure (a town, no
+     *                   district) is top level on purpose: no parent, its kind's floor priority, in its town's world, and
+     *                   no "unknown district" warning. Off: exactly as before P2c (A21).
+     */
+    public static Result build(List<TownSummary> towns, List<DistrictSummary> districts, List<StructureSummary> structures,
+                               Map<Integer, String> domainTypes, boolean production) {
         List<ManagedRegionSpec> specs = new ArrayList<>();
         List<Skipped> skipped = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
@@ -70,12 +83,20 @@ public final class DomainRegionSpecs {
                 skipped.add(new Skipped(label, "no wgRegionId"));
                 continue;
             }
+            ManagedRegionKind kind = ManagedRegionKind.fromDomainType(type, production).filter(ManagedRegionKind::isStructureTier)
+                    .orElse(ManagedRegionKind.STRUCTURE);
+            // P2c (#677): a rural structure has no district, so no parent region: PvP and the world default apply
+            // around it, no town flags are inherited (production DESIGN § 3.4, confirmed 2026-11-11)
+            if (production && structure.districtId() == null && structure.townId() != null) {
+                String world = firstNonBlank(structure.worldName(), townWorlds.get(structure.townId()));
+                specs.add(new ManagedRegionSpec(structure.wgRegionId(), kind, null,
+                        label + " (rural, Town#" + structure.townId() + ")", world));
+                continue;
+            }
             String parent = structure.districtId() != null ? districtRegions.get(structure.districtId()) : null;
             if (parent == null) {
                 warnings.add(label + ": its District (id " + structure.districtId() + ") is unknown or has no region; no parent set");
             }
-            ManagedRegionKind kind = ManagedRegionKind.fromDomainType(type).filter(ManagedRegionKind::isStructureTier)
-                    .orElse(ManagedRegionKind.STRUCTURE);
             String world = firstNonBlank(structure.worldName(),
                     structure.districtId() != null ? districtWorlds.get(structure.districtId()) : null);
             specs.add(new ManagedRegionSpec(structure.wgRegionId(), kind, parent, label, world));

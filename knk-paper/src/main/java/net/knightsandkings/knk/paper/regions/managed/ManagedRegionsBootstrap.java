@@ -40,6 +40,8 @@ public class ManagedRegionsBootstrap {
     private final WorldGuardManagedRegionStore store;
     private final ManagedRegionReconciler reconciler;
     private final ManagedRegionRepairService repairService;
+    /** The plugin's production.enabled: crown land (#689), production structure kinds and rural structures (P2c #677). */
+    private final boolean production;
 
     public ManagedRegionsBootstrap(JavaPlugin plugin, ManagedRegionsConfig config, TownsQueryApi towns,
                                    DistrictsQueryApi districts, StructuresQueryApi structures,
@@ -48,9 +50,11 @@ public class ManagedRegionsBootstrap {
         this.config = config;
         this.store = new WorldGuardManagedRegionStore(ManagedRegionsBootstrap::loadedManagers);
         this.reconciler = new ManagedRegionReconciler(new ManagedRegionPolicy(config.options()), config.overrides());
-        // PandiO/knk-workspace#689: crown land regions are managed only with production.enabled (A21)
+        // PandiO/knk-workspace#689: crown land regions are managed only with production.enabled (A21); P2c (#677): so
+        // are the production structure kinds and rural structures without a parent
+        this.production = plugin.getConfig().getBoolean("production.enabled", false);
         ManagedRegionSpecSource source = new ManagedRegionSpecSource(towns, districts, structures, domainCatalog, config.pageSize(),
-                plugin.getConfig().getBoolean("production.enabled", false));
+                production);
         this.repairService = new ManagedRegionRepairService(source, reconciler, store, config.extraRegions(),
                 runnable -> Bukkit.getScheduler().runTask(plugin, runnable), LOGGER);
     }
@@ -91,7 +95,7 @@ public class ManagedRegionsBootstrap {
 
     /** KNG-112: as above, for the region in {@code worldName} (null: whichever loaded world has it). */
     public void finalizeNewRegion(String regionId, String domainType, String parentRegionId, String worldName) {
-        ManagedRegionKind kind = ManagedRegionKind.fromDomainType(domainType).orElse(null);
+        ManagedRegionKind kind = ManagedRegionKind.fromDomainType(domainType, production).orElse(null);
         if (kind == null) {
             LOGGER.fine("[KnK Regions] " + regionId + " renamed without a domain type; the next repair will set it up");
             return;
