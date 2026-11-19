@@ -58,6 +58,7 @@ import net.knightsandkings.knk.core.roads.route.Maneuver;
 import net.knightsandkings.knk.core.roads.route.ManeuverBuilder;
 import net.knightsandkings.knk.core.roads.route.RegionClosestPoint;
 import net.knightsandkings.knk.core.roads.route.RegionShape;
+import net.knightsandkings.knk.core.roads.route.RoadGoalChoice;
 import net.knightsandkings.knk.core.domain.roads.RoadNodeKind;
 import net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot;
 import net.knightsandkings.knk.core.roads.route.Route;
@@ -403,6 +404,13 @@ public final class NavigationService implements SiegeMatchObserver {
          * uses; the default ({@code preferred}) is today's routing.
          */
         RouteMode mode = RouteMode.DEFAULT;
+        /**
+         * Fix link F2 (#780, {@code navigation.road-goal-reachable}): the generation of the road-goal choice; an answer
+         * for an older one (a network change, a new navigation) is dropped.
+         */
+        int goalChoice;
+        /** ... and the chosen goal's walk path to the target (floor points): the hint of the last leg's first search. */
+        List<double[]> goalWalkPath;
 
         Active(Player player, Destination destination, long startedTick) {
             this.player = player;
@@ -1122,12 +1130,22 @@ public final class NavigationService implements SiegeMatchObserver {
         a.session = new NavigationSession(sessionParameters, new ManeuverBuilder(snapshot)::build, now,
                     deps.config().cursorParameters());
         apply(a, a.session.start());
+        chooseRoadGoal(a);
     }
 
     // ==================== goals (DESIGN §6.2, §6.3) ====================
 
     /** The goal set of a destination for the player's position, or why there is none. Main thread. */
     Goals resolveGoals(Player player, RoadNetworkSnapshot snapshot, Destination destination) {
+        return resolveGoals(player, snapshot, destination, false);
+    }
+
+    /**
+     * As {@link #resolveGoals(Player, RoadNetworkSnapshot, Destination)}; with {@code keepRoad} (fix link F2, #771 item 5,
+     * {@code navigation.road-to-its-end}) never direct mode: a target within {@code max-snap-distance} still gets its
+     * road goals, so a running road route is kept to its end.
+     */
+    Goals resolveGoals(Player player, RoadNetworkSnapshot snapshot, Destination destination, boolean keepRoad) {
         Location feet = player.getLocation();
         double px = feet.getX(), pFloorY = feet.getY() - 1, pz = feet.getZ();
         double maxSnap = routerParameters.maxSnapDistance();
@@ -1146,7 +1164,7 @@ public final class NavigationService implements SiegeMatchObserver {
                         return Goals.already();
                     }
                 }
-                if (distance(px, pFloorY, pz, floor) <= maxSnap) {
+                if (!keepRoad && distance(px, pFloorY, pz, floor) <= maxSnap) {
                     return new Goals(List.of(), floor, null, true, null, false);
                 }
                 Optional<SnapPoint> goal = new Snapper(snapshot, destinationParameters).snapFloor(floor[0], floor[1], floor[2]);
@@ -1164,7 +1182,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 if (distance(px, pFloorY, pz, floor) <= sessionParameters.arriveDistance()) {
                     return Goals.already();
                 }
-                if (distance(px, pFloorY, pz, floor) <= maxSnap) {
+                if (!keepRoad && distance(px, pFloorY, pz, floor) <= maxSnap) {
                     return new Goals(List.of(), floor, null, true, null, false);
                 }
                 return new Goals(List.of(goal.get()), floor, null, false, null, false);
@@ -1179,7 +1197,14 @@ public final class NavigationService implements SiegeMatchObserver {
                 if (insideRegion(destination, region, feet)) {
                     return Goals.already();
                 }
-                return regionGoals(destination, region, snapshot, px, pFloorY, pz);
+                Goals regionGoals = regionGoals(destination, region, snapshot, px, pFloorY, pz);
+                if (keepRoad && regionGoals.direct()) {
+                    List<SnapPoint> crossings = RegionClosestPoint.crossings(region, snapshot);
+                    if (!crossings.isEmpty()) {
+                        return new Goals(crossings, null, region, false, null, false);
+                    }
+                }
+                return regionGoals;
             }
             case STREET -> {
                 List<SnapPoint> goals = streetPoints(snapshot, destination.streetId(), px, pFloorY, pz);
@@ -1191,7 +1216,7 @@ public final class NavigationService implements SiegeMatchObserver {
                 if (nearestDistance <= sessionParameters.arriveDistance()) {
                     return Goals.already();
                 }
-                if (nearestDistance <= maxSnap) {
+                if (!keepRoad && nearestDistance <= maxSnap) {
                     return new Goals(List.of(), nearest.point(), null, true, null, false);
                 }
                 return new Goals(goals, null, null, false, null, false);
@@ -1379,6 +1404,9 @@ public final class NavigationService implements SiegeMatchObserver {
     private void startDirect(Active a) {
         dropLeg(a);
         DirectLeg leg = new DirectLeg(a.target);
+        // F2 (#780): the last leg from a road goal chosen by walk reachability starts with that walk path as its hint
+        leg.foundPath = a.goalWalkPath;
+        a.goalWalkPath = null;
         a.leg = leg;
         Location feet = a.player.getLocation();
         double d = distance(feet.getX(), feet.getY() - 1, feet.getZ(), leg.target);
@@ -1391,6 +1419,176 @@ public final class NavigationService implements SiegeMatchObserver {
             leg.status = DirectLeg.Status.PENDING; // the straight line stays until a path arrives
             requestWalk(a, leg, deps.tick().getAsLong());
         }
+    }
+
+    // ==================== the road goal by walk reachability (fix link F2, #780) ====================
+
+    /** One road-goal choice in flight: the candidates, nearest first, and each one's walk path (null: not reached). */
+    private static final class GoalChoice {
+        final int generation;
+        final RoadNetworkSnapshot snapshot;
+        final double[] target;
+        final List<SnapPoint> candidates;
+        final List<WalkPath> paths = new ArrayList<>();
+        final LandmarkWeights weights;
+
+        GoalChoice(int generation, RoadNetworkSnapshot snapshot, double[] target, List<SnapPoint> candidates,
+                   LandmarkWeights weights) {
+            this.generation = generation;
+            this.snapshot = snapshot;
+            this.target = target;
+            this.candidates = candidates;
+            this.weights = weights;
+        }
+    }
+
+    /**
+     * {@code navigation.road-goal-reachable} (#780 option (b), #771 item 4): for a point destination reached by road, the
+     * road goal among the {@code road-goal-candidates} nearest road points (one per edge, within
+     * {@code max-snap-distance}) from which a walk search reaches the target within the {@code walk:} limits, the least
+     * road plus walk length winning. The searches run one after another on the walk executor (never more than one per
+     * navigation, so a walk leg always finds a thread), the routes on the routing thread. The first route is today's; a
+     * different choice replaces it, taken as it is. None reachable: today's goal. Off, without walk paths, for another
+     * destination kind or without a road goal: nothing happens. NPC road plans ({@link #planRoadFor}) never come here.
+     * Main thread.
+     */
+    private void chooseRoadGoal(Active a) {
+        a.goalChoice++;
+        a.goalWalkPath = null;
+        if (!deps.config().routeEnds().reachableGoal() || !walkEnabled() || a.session == null || a.target == null
+            || a.destination.kind() != Destination.Kind.POINT || a.goals.size() != 1) {
+            return;
+        }
+        double[] target = a.target.clone();
+        List<SnapPoint> candidates = RoadGoalChoice.candidates(a.snapshot, target[0], target[1], target[2],
+            routerParameters.maxSnapDistance(), deps.config().routeEnds().goalCandidates(), a.goals.get(0));
+        GoalChoice choice = new GoalChoice(a.goalChoice, a.snapshot, target, candidates, walkWeights(a));
+        searchGoalCandidate(a, choice);
+    }
+
+    private boolean goalChoiceCurrent(Active a, GoalChoice choice) {
+        return active.get(a.player.getUniqueId()) == a && a.goalChoice == choice.generation && a.session != null
+            && a.snapshot == choice.snapshot;
+    }
+
+    /** Main thread: the walk search from the next candidate, or the routes once every candidate answered. */
+    private void searchGoalCandidate(Active a, GoalChoice choice) {
+        if (!goalChoiceCurrent(a, choice)) {
+            return;
+        }
+        int index = choice.paths.size();
+        if (index >= choice.candidates.size()) {
+            routeGoalCandidates(a, choice);
+            return;
+        }
+        double[] floor = choice.candidates.get(index).point();
+        double[] feet = {Math.floor(floor[0]) + 0.5, Math.floor(floor[1]) + 1, Math.floor(floor[2]) + 0.5};
+        Walk walk = deps.walk();
+        CompletableFuture<Supplier<WalkRequest>> capture;
+        try {
+            capture = walk.preparer().prepare(a.player, feet, choice.target, walkGoal(a, choice.target),
+                destinationRegions(a.player, a.destination, a.goals, a.target));
+        } catch (RuntimeException e) {
+            deps.logger().log(Level.FINE, "[Navigation] Road goal capture failed", e);
+            goalCandidateAnswered(a, choice, null);
+            return;
+        }
+        capture.whenComplete((request, error) -> {
+            if (error != null || request == null) {
+                deps.mainThread().execute(() -> goalCandidateAnswered(a, choice, null)); // not captured: not reached
+                return;
+            }
+            try {
+                walk.searches().execute(() -> {
+                    WalkPath path = null;
+                    try {
+                        WalkResult result = walk.pathfinder().find(forMode(request.get(), a.mode, choice.weights));
+                        if (result != null && result.status() == WalkResult.Status.FOUND) {
+                            path = result.path().orElse(null);
+                        }
+                    } catch (RuntimeException e) {
+                        deps.logger().log(Level.FINE, "[Navigation] Road goal search failed", e);
+                    }
+                    WalkPath found = path;
+                    deps.mainThread().execute(() -> goalCandidateAnswered(a, choice, found));
+                });
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                deps.mainThread().execute(() -> goalCandidateAnswered(a, choice, null)); // shutting down
+            }
+        });
+    }
+
+    private void goalCandidateAnswered(Active a, GoalChoice choice, WalkPath path) {
+        if (!goalChoiceCurrent(a, choice)) {
+            return;
+        }
+        choice.paths.add(path);
+        searchGoalCandidate(a, choice);
+    }
+
+    /**
+     * Main thread: every candidate answered. The reached ones are routed to from where the player is (as
+     * {@link #computeRoute} does) on the routing thread; the least road plus walk length wins
+     * ({@link RoadGoalChoice#best}).
+     */
+    private void routeGoalCandidates(Active a, GoalChoice choice) {
+        List<Integer> reached = new ArrayList<>();
+        for (int i = 0; i < choice.paths.size(); i++) {
+            if (choice.paths.get(i) != null) {
+                reached.add(i);
+            }
+        }
+        if (reached.isEmpty()) {
+            deps.logger().fine("[Navigation] " + a.player.getName() + ": no road goal reaches " + a.destination.name()
+                + " on foot; the nearest road point stays");
+            return;
+        }
+        Location feet = a.player.getLocation();
+        RoadNetworkSnapshot snapshot = choice.snapshot;
+        Optional<SnapPoint> start = snapStart(snapshot, feet.getX(), feet.getY() - 1, feet.getZ(), null);
+        if (start.isEmpty()) {
+            return;
+        }
+        AccessPolicy policy = deps.policies().policyFor(a.player, snapshot,
+            destinationRegions(a.player, a.destination, a.goals, a.target));
+        SnapPoint from = connectedStart(snapshot, feet, start.get(), a.goals);
+        RouteMode mode = a.mode;
+        deps.routing().execute(() -> {
+            List<RoadGoalChoice.Option> options = new ArrayList<>();
+            for (int i : reached) {
+                SnapPoint goal = choice.candidates.get(i);
+                try {
+                    RouteResult result = new AStarRouter(snapshot).route(
+                        RouteRequest.of(from, List.of(goal), policy, routerParameters).withMode(mode));
+                    if (result.status() == RouteResult.Status.FOUND) {
+                        WalkPath path = choice.paths.get(i);
+                        options.add(new RoadGoalChoice.Option(goal, result.route().length(), path.length(), path.points()));
+                    }
+                } catch (RuntimeException e) {
+                    deps.logger().log(Level.FINE, "[Navigation] Road goal routing failed", e);
+                }
+            }
+            Optional<RoadGoalChoice.Option> best = RoadGoalChoice.best(options);
+            deps.mainThread().execute(() -> goalChosen(a, choice, best.orElse(null)));
+        });
+    }
+
+    /** Main thread: the chosen goal replaces today's (a fresh route, taken as it is), or keeps it with its walk path. */
+    private void goalChosen(Active a, GoalChoice choice, RoadGoalChoice.Option best) {
+        if (!goalChoiceCurrent(a, choice) || best == null) {
+            return;
+        }
+        a.goalWalkPath = best.walkPath();
+        SnapPoint current = a.goals.get(0);
+        if (RoadGoalChoice.sameGoal(current, best.goal())) {
+            return;
+        }
+        deps.logger().fine(String.format(Locale.ROOT, "[Navigation] %s: road goal for %s moved to edge %d (%.0f %.0f %.0f),"
+                + " %.0f by road + %.0f on foot", a.player.getName(), a.destination.name(), best.goal().edgeId(),
+            best.goal().x(), best.goal().y(), best.goal().z(), best.roadLength(), best.walkLength()));
+        a.goals = List.of(best.goal());
+        a.generation++; // a route still being computed for the old goal is dropped
+        apply(a, a.session.onNetworkChanged(new ManeuverBuilder(a.snapshot)::build, deps.tick().getAsLong()));
     }
 
     /**
@@ -3145,7 +3343,9 @@ public final class NavigationService implements SiegeMatchObserver {
                 end(a, EndReason.DESTINATION_LOST);
                 continue;
             }
-            Goals goals = resolveGoals(a.player, snapshot, a.destination);
+            // F2 (#771 item 5, navigation.road-to-its-end): a road route the session follows is kept to its end
+            boolean keepRoad = deps.config().routeEnds().roadToItsEnd() && a.route().isPresent();
+            Goals goals = resolveGoals(a.player, snapshot, a.destination, keepRoad);
             if (goals.alreadyThere()) {
                 arrive(a);
                 continue;
@@ -3163,6 +3363,7 @@ public final class NavigationService implements SiegeMatchObserver {
             a.region = goals.region();
             if (goals.direct()) {
                 a.session = null;
+                a.goalWalkPath = null; // the hint is for a last leg from the road's end only
                 startDirect(a);
                 continue;
             }
@@ -3170,7 +3371,11 @@ public final class NavigationService implements SiegeMatchObserver {
             // have (live test 2026-10-09, "unknown road edge 5385"): drop a route still being computed on it and
             // take the one computed on the new network as it is
             a.generation++;
+            a.goalWalkPath = null;
             apply(a, a.session.onNetworkChanged(new ManeuverBuilder(snapshot)::build, now));
+            if (active.get(a.player.getUniqueId()) == a) {
+                chooseRoadGoal(a); // F2 (#780): the goals belong to the new network, choose again
+            }
         }
     }
 
