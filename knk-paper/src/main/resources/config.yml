@@ -1139,6 +1139,23 @@ items:
     convert-on-obtain: false
     map-refresh-minutes: 10        # how often the material map is fetched again (never per event)
     report-interval-minutes: 10    # how often the counts go to the API (api/ItemIdentity/conversion-counts) and the log
+# Production, storage and transport (PandiO/knk-workspace#22, G16). Off by default: with enabled: false nothing of the
+# feature runs (A21). Territory (#689): the chunk cache built from GET api/Territory/inputs and the WorldGuard regions of
+# districts and crown land, the lookup on every chunk crossing, and the conflict report (needs the API's
+# Production:Enabled too). Crown land regions are managed (no parent, priority 10) only while enabled is true.
+production:
+  enabled: false
+  territory:
+    refresh-minutes: 10            # also re-read the inputs and region shapes this often (0 = only on TerritoryChanged and /knk territory rebuild)
+    notify-players: true           # action bar line when a player enters or leaves territory
+    report: true                   # PUT api/Territory/report (overlaps, structure flags) after each rebuild
+    map-outlines: false            # send outlines over the game hub (ReportTerritoryOutlines) for the overview map; needs map support in the API
+    max-chunks-per-world: 500000   # safety limit of the cache; a source that would pass it is left out (logged)
+    messages:                      # & colour codes; {name} = town or kingdom, {holders} = the contesting holders
+      enter-town: "&7Entering the territory of &f{name}"
+      enter-crown-land: "&7Entering the crown land of &f{name}"
+      enter-contested: "&6Entering contested land: &f{holders}"
+      enter-wilderness: "&7Leaving &f{name}&7: wilderness"
 lootboxes:
   enabled: true
   # Sent with every spawn so the drop log shows which server made the box.

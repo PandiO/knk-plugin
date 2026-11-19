@@ -308,6 +308,7 @@ permissions:
       knk.admin.health: true
       knk.admin.cache: true
       knk.admin.regions: true
+      knk.admin.world.territory: true
       knk.admin.world.landmark: true
       knk.admin.clans: true
       knk.admin.towns: true
@@ -353,6 +354,9 @@ permissions:
 
   knk.admin.world.landmark:
     description: Access to /knk landmark create|list|show|move|delete|link|unlink, the staff-made named places players can /navigate to (off-road navigation phase 5.1, PandiO/knk-workspace#708; needs navigation.landmarks). Also gates landmark writes in the web app. Matched by knk.admin.world.*, knk.admin.* and *.
+    default: false
+  knk.admin.world.territory:
+    description: Access to /knk territory here|status|rebuild (territory lookup where you stand, the territory chunk cache, rebuild it now; PandiO/knk-workspace#689; needs production.enabled). Matched by knk.admin.world.*, knk.admin.* and *.
     default: false
   knk.admin.regions:
     description: Access to /knk regions repair (re-applies the managed WorldGuard parent, priority and flags to every Knights and Kings region), /knk regions sync (domain access flags now, and every sub-region made a copy of its main region) and /knk regions temp [purge [hours]] (reports leftover tempregion_worldtask_* regions and unused domain_<id> regions; purge deletes unused temp regions)

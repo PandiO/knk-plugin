@@ -82,7 +82,8 @@ public final class ManagedRegionPolicy {
             case ARENA -> List.of(FlagRule.seed("entry", FlagState.ALLOW), NO_ENTRY_MESSAGE);
             // The exception that defines the category: fighting is allowed here whatever the town says.
             case BATTLEGROUND -> List.of(FlagRule.enforce("entry", FlagState.DENY), FlagRule.enforce("pvp", FlagState.ALLOW));
-            case DISTRICT, STRUCTURE, GATE -> List.of();
+            // Crown land (#689): hierarchy and priority only; the world default applies inside (territory DESIGN § 8).
+            case DISTRICT, STRUCTURE, GATE, CROWN_LAND -> List.of();
         };
     }
 }

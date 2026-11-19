@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.scenario;
 
 import net.knightsandkings.knk.core.scenario.ScenarioRegistry;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateBlocksNeverSuffocateScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.TerritoryBorderCrossingScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateClosingKeepsSidesScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateClosingMovesEntityOutScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateClosingMovesItemOutScenario;
@@ -144,6 +145,8 @@ public final class PaperScenarios {
             .register(new PlayerJoinLoadingHoldScenario())
             .register(new PlayerMenuClickScenario())
             .register(new PlayerTpIntoClosedGateScenario())
-            .register(new PlayerRejoinInClosedGateScenario());
+            .register(new PlayerRejoinInClosedGateScenario())
+            // Territory (PandiO/knk-workspace#689): the lookup on a border crossing
+            .register(new TerritoryBorderCrossingScenario());
     }
 }

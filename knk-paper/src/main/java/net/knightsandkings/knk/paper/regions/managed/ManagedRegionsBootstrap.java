@@ -48,7 +48,9 @@ public class ManagedRegionsBootstrap {
         this.config = config;
         this.store = new WorldGuardManagedRegionStore(ManagedRegionsBootstrap::loadedManagers);
         this.reconciler = new ManagedRegionReconciler(new ManagedRegionPolicy(config.options()), config.overrides());
-        ManagedRegionSpecSource source = new ManagedRegionSpecSource(towns, districts, structures, domainCatalog, config.pageSize());
+        // PandiO/knk-workspace#689: crown land regions are managed only with production.enabled (A21)
+        ManagedRegionSpecSource source = new ManagedRegionSpecSource(towns, districts, structures, domainCatalog, config.pageSize(),
+                plugin.getConfig().getBoolean("production.enabled", false));
         this.repairService = new ManagedRegionRepairService(source, reconciler, store, config.extraRegions(),
                 runnable -> Bukkit.getScheduler().runTask(plugin, runnable), LOGGER);
     }

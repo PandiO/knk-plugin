@@ -17,6 +17,11 @@ public enum ManagedRegionKind {
     GLOBAL(0),
     /** v1 {@code town_N} base region -> v3 {@code Town}. */
     TOWN(10),
+    /**
+     * v3-only: {@code CrownLand}, a kingdom's anchor region (territory DESIGN § 2, G10; PandiO/knk-workspace#689). Top
+     * level like a town (no parent); included in the repair only with {@code production.enabled}.
+     */
+    CROWN_LAND(10),
     /** v1 town child regions (68 unflagged children of 5 towns) -> v3 {@code District}: inherits from its Town. */
     DISTRICT(20),
     /** A v3 {@code Structure} whose subtype has no v1 flag category (Shop, Warehouse, Keep, ...): hierarchy only. */
@@ -64,6 +69,7 @@ public enum ManagedRegionKind {
         return Optional.of(switch (normalise(domainType)) {
             case "TOWN" -> TOWN;
             case "DISTRICT" -> DISTRICT;
+            case "CROWNLAND" -> CROWN_LAND;
             case "GATE", "GATESTRUCTURE" -> GATE;
             case "HOUSE" -> HOUSE;
             case "PROPERTY", "RESOURCEPROPERTY" -> PROPERTY;
