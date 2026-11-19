@@ -44,6 +44,24 @@ public record WalkBox(String world, int minX, int minY, int minZ, int maxX, int 
             Math.max(sx, tx) + margin, maxY, Math.max(sz, tz) + margin);
     }
 
+    /**
+     * This box grown to hold the block box {@code bounds} ({@code {minX, minY, minZ, maxX, maxY, maxZ}}, floor blocks)
+     * expanded by {@code margin} on every side, clamped to {@code worldMinY..worldMaxY - 1} (PandiO/knk-workspace#771:
+     * a recompute keeps the rest of the leg's found path in its capture).
+     */
+    public WalkBox including(int[] bounds, int margin, int worldMinY, int worldMaxY) {
+        if (bounds == null || bounds.length != 6) {
+            throw new IllegalArgumentException("bounds must be {minX, minY, minZ, maxX, maxY, maxZ}");
+        }
+        if (margin < 0) {
+            throw new IllegalArgumentException("margin must not be negative: " + margin);
+        }
+        int lowY = Math.max(worldMinY, Math.min(minY, bounds[1] - margin));
+        int highY = Math.min(worldMaxY - 1, Math.max(maxY, bounds[4] + 1 + margin));
+        return new WalkBox(world, Math.min(minX, bounds[0] - margin), Math.min(lowY, highY), Math.min(minZ, bounds[2] - margin),
+            Math.max(maxX, bounds[3] + margin), Math.max(lowY, highY), Math.max(maxZ, bounds[5] + margin));
+    }
+
     public int minChunkX() {
         return minX >> 4;
     }

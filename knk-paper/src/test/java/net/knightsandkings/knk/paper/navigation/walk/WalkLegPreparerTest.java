@@ -118,4 +118,48 @@ class WalkLegPreparerTest {
         assertEquals(0, snapshots.stats().pendingRequests());
         assertTrue(chunks.captured.isEmpty(), "nobody waits for the chunks any more: " + chunks.captured);
     }
+
+    // ===== PandiO/knk-workspace#771 item 1: the recompute hint =====
+
+    @Test
+    void aHintKeepsTheFoundPathInTheBoxAndItsLengthInTheCap() {
+        WalkGoal goal = WalkGoal.within(6.5, 64, 6.5, 0.25);
+        java.util.List<double[]> found = java.util.List.of(new double[] {1.5, 64, 1.5}, new double[] {1.5, 64, 40.5},
+            new double[] {6.5, 64, 40.5}, new double[] {6.5, 64, 6.5});
+        net.knightsandkings.knk.core.roads.walk.WalkRecomputeHint hint =
+            net.knightsandkings.knk.core.roads.walk.WalkRecomputeHint.of(found, 1.5, 64, 1.5).orElseThrow();
+
+        WalkRequest request = await(preparer.prepare(player, new double[] {1.5, 65.0, 1.5}, new double[] {6.5, 64, 6.5},
+            goal, null, hint)).get();
+
+        assertTrue(request.budget().lengthCap(request.straightDistance(), request.heightDifference()) >= hint.minLength(),
+            request.budget().toString());
+        assertEquals(config.budget().maxExpansions(), request.budget().maxExpansions());
+        WalkBox leg = WalkBox.around("world", 1.5, 65.0, 1.5, 6.5, 64, 6.5, config.captureMargin(), WalkCaptureTest.MIN_Y,
+            WalkCaptureTest.MAX_Y);
+        WalkBox grown = preparer.boxFor(leg, hint, WalkCaptureTest.MIN_Y, WalkCaptureTest.MAX_Y);
+        assertTrue(grown.contains(6, 64, 40) && grown.contains(1, 64, 40), grown.toString());
+        assertTrue(grown.maxZ() >= 40 + WalkLegPreparer.HINT_MARGIN, grown.toString());
+    }
+
+    @Test
+    void withoutAHintTheBoxAndBudgetAreAsBefore() {
+        WalkGoal goal = WalkGoal.within(6.5, 64, 6.5, 0.25);
+        WalkBox leg = WalkBox.around("world", 1.5, 65.0, 1.5, 6.5, 64, 6.5, 2, WalkCaptureTest.MIN_Y, WalkCaptureTest.MAX_Y);
+
+        assertSame(leg, preparer.boxFor(leg, null, WalkCaptureTest.MIN_Y, WalkCaptureTest.MAX_Y));
+        WalkRequest request = await(preparer.prepare(player, new double[] {1.5, 65.0, 1.5}, new double[] {6.5, 64, 6.5},
+            goal, null, null)).get();
+        assertEquals(config.budget(), request.budget());
+    }
+
+    @Test
+    void aHintThatWouldTakeTheBoxOverTheChunkCapIsLeftOutOfTheBox() {
+        WalkBox leg = WalkBox.around("world", 1.5, 65.0, 1.5, 6.5, 64, 6.5, 2, WalkCaptureTest.MIN_Y, WalkCaptureTest.MAX_Y);
+        net.knightsandkings.knk.core.roads.walk.WalkRecomputeHint far = net.knightsandkings.knk.core.roads.walk
+            .WalkRecomputeHint.of(java.util.List.of(new double[] {1.5, 64, 1.5}, new double[] {5000.5, 64, 5000.5}),
+                1.5, 64, 1.5).orElseThrow();
+
+        assertSame(leg, preparer.boxFor(leg, far, WalkCaptureTest.MIN_Y, WalkCaptureTest.MAX_Y));
+    }
 }

@@ -330,6 +330,28 @@ class WalkSnapshotServiceTest {
         assertEquals("STONE", port.blocks(2, 3).materialAt(1, 64, 1));
     }
 
+    @Test
+    void theBukkitPortReadsATrapdoorsOpenState() {
+        // PandiO/knk-workspace#771 item 2: the open state is block data, read from the same snapshot
+        World world = mock(World.class);
+        Chunk chunk = mock(Chunk.class);
+        ChunkSnapshot snapshot = mock(ChunkSnapshot.class);
+        when(world.getChunkAt(0, 0)).thenReturn(chunk);
+        when(chunk.getChunkSnapshot(false, false, false)).thenReturn(snapshot);
+        org.bukkit.block.data.type.TrapDoor open = mock(org.bukkit.block.data.type.TrapDoor.class);
+        when(open.isOpen()).thenReturn(true);
+        org.bukkit.block.data.type.TrapDoor closed = mock(org.bukkit.block.data.type.TrapDoor.class);
+        when(closed.isOpen()).thenReturn(false);
+        when(snapshot.getBlockData(1, 107, 1)).thenReturn(open);
+        when(snapshot.getBlockData(2, 107, 1)).thenReturn(closed);
+        when(snapshot.getBlockData(3, 107, 1)).thenReturn(mock(org.bukkit.block.data.BlockData.class));
+
+        SpanExtractor.BlockSource blocks = WalkSnapshotService.of(world).blocks(0, 0);
+        assertTrue(blocks.isOpen(1, 107, 1));
+        assertFalse(blocks.isOpen(2, 107, 1));
+        assertFalse(blocks.isOpen(3, 107, 1), "not an openable block");
+    }
+
     private static GateCells gates(Map<Long, Integer> cells) {
         record MapGates(Map<Long, Integer> cells) implements GateCells {
             @Override

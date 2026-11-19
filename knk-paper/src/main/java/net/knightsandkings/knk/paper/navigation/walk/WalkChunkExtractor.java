@@ -10,6 +10,7 @@ import java.util.Set;
 
 import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.build.PassabilityRules;
+import net.knightsandkings.knk.core.roads.walk.WalkCells;
 import net.knightsandkings.knk.core.util.BlockKey;
 import net.knightsandkings.knk.paper.roads.SpanExtractor;
 
@@ -23,7 +24,8 @@ import net.knightsandkings.knk.paper.roads.SpanExtractor;
  *
  * <p>Per block it records passable/solid/hazard and stair-or-slab like the builder's grid, and the
  * walk-only flags the search reads through {@code WalkCells} ({@link PassabilityRules#isHandOpenableDoor},
- * the profile's climbables, {@link PassabilityRules#isWater}) — on paper {@code LADDER} and doors are
+ * the profile's climbables, {@link PassabilityRules#isWater}; an open trapdoor over a climbable is climbable too,
+ * {@link WalkCells#isClimbableHatch}, read from the block's {@code open} state) — on paper {@code LADDER} and doors are
  * collidable (solid), the walk view makes them passable through these flags. A floor material is kept
  * for every solid, hazard-free block whose block above is walk-passable (passable, a door, a climbable
  * or a gate-door cell): exactly the blocks the search may ask {@code floorMaterial} about.
@@ -138,7 +140,7 @@ public final class WalkChunkExtractor {
                 int y = baseY + ly;
                 for (int lz = 0; lz < 16; lz++) {
                     for (int lx = 0; lx < 16; lx++) {
-                        int f = y < worldMinY || y >= worldMaxY ? airFlags : flagsOf(material(chunk, lx, y, lz));
+                        int f = y < worldMinY || y >= worldMaxY ? airFlags : blockFlags(chunk, lx, y, lz);
                         data[(ly << 8) | (lz << 4) | lx] = (byte) f;
                     }
                 }
@@ -179,7 +181,7 @@ public final class WalkChunkExtractor {
                         continue;
                     }
                     int above = y + 1 <= highY ? flagsAt(sections, uniform, from, x, y + 1, z)
-                        : flagsOf(material(chunk, lx, y + 1, lz));
+                        : blockFlags(chunk, lx, y + 1, lz);
                     boolean walkPassable = (above & (WalkChunk.PASSABLE | WalkChunk.DOOR | WalkChunk.CLIMBABLE)) != 0
                         || gateCells.doorAt(x, y + 1, z).isPresent();
                     if (!walkPassable) {
@@ -207,6 +209,20 @@ public final class WalkChunkExtractor {
         Arrays.sort(doorKeys);
         return new WalkChunk(chunkX, chunkZ, from, sections, uniform, floorKeys, floorIds,
             palette.toArray(String[]::new), doorKeys, capturedAt);
+    }
+
+    /**
+     * A block's flags: its material's, plus {@link WalkChunk#CLIMBABLE} for an open trapdoor over a climbable
+     * ({@link WalkCells#isClimbableHatch}, PandiO/knk-workspace#771 item 2) - the one flag that depends on block state.
+     */
+    private int blockFlags(SpanExtractor.BlockSource chunk, int lx, int y, int lz) {
+        String name = material(chunk, lx, y, lz);
+        int f = flagsOf(name);
+        if (PassabilityRules.isTrapdoor(name) && y - 1 >= worldMinY
+            && WalkCells.isClimbableHatch(name, chunk.isOpen(lx, y, lz), material(chunk, lx, y - 1, lz), climbables)) {
+            f |= WalkChunk.CLIMBABLE;
+        }
+        return f;
     }
 
     private static int flagsAt(byte[][] sections, byte[] uniform, int from, int x, int y, int z) {

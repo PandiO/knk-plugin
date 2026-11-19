@@ -220,6 +220,14 @@ public final class PassabilityRules {
         return !isNeverFloor(material) && !isHandOpenableDoor(material);
     }
 
+    /**
+     * A trapdoor of any kind ({@code *_TRAPDOOR}, the iron one included), by name. Its open or closed state is block
+     * state, not material: the walk capture reads it separately (PandiO/knk-workspace#771 item 2).
+     */
+    public static boolean isTrapdoor(String material) {
+        return Objects.requireNonNull(material, "material").endsWith("_TRAPDOOR");
+    }
+
     /** Water (or a bubble column) by name. */
     public static boolean isWater(String material) {
         return WATER_MATERIALS.contains(Objects.requireNonNull(material, "material"));

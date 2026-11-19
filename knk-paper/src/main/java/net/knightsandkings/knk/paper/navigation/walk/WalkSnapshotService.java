@@ -104,7 +104,18 @@ public final class WalkSnapshotService {
             @Override
             public SpanExtractor.BlockSource blocks(int chunkX, int chunkZ) {
                 ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ).getChunkSnapshot(false, false, false);
-                return (lx, y, lz) -> snapshot.getBlockType(lx, y, lz).name();
+                return new SpanExtractor.BlockSource() {
+                    @Override
+                    public String materialAt(int lx, int y, int lz) {
+                        return snapshot.getBlockType(lx, y, lz).name();
+                    }
+
+                    @Override
+                    public boolean isOpen(int lx, int y, int lz) {
+                        return snapshot.getBlockData(lx, y, lz) instanceof org.bukkit.block.data.Openable openable
+                            && openable.isOpen();
+                    }
+                };
             }
         };
     }
