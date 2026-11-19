@@ -66,4 +66,18 @@ public record WalkBudget(int maxExpansions, double maxLengthFactor, double maxLe
         return Math.min(maxLength, Math.max(maxLengthFactor * straight, straight + detourAllowance))
             + climbAllowance * Math.abs(rise);
     }
+
+    /**
+     * This budget with a length cap of at least {@code minCap} for a leg {@code straight} blocks long and {@code rise}
+     * blocks high (PandiO/knk-workspace#771 item 1: a recompute must be allowed the way a found path already took):
+     * {@code this} when its cap already allows it, else {@code maxLength} and {@code detourAllowance} raised just
+     * enough. The other limits stay.
+     */
+    public WalkBudget withLengthAtLeast(double straight, double rise, double minCap) {
+        if (!(minCap > 0.0) || Double.isInfinite(minCap) || lengthCap(straight, rise) >= minCap) {
+            return this;
+        }
+        return new WalkBudget(maxExpansions, maxLengthFactor, Math.max(maxLength, minCap),
+            Math.max(detourAllowance, minCap - straight), climbAllowance, startSnap, goalSnap);
+    }
 }

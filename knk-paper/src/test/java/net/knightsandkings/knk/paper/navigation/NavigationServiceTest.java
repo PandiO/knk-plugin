@@ -3,6 +3,9 @@ package net.knightsandkings.knk.paper.navigation;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -114,6 +117,8 @@ class NavigationServiceTest {
 
     // KNG-51 walk paths: the fake capture and search
     private final List<double[]> walkTargets = new ArrayList<>();
+    /** The recompute hint of every walk request (#771 item 1; null: none). */
+    private final List<net.knightsandkings.knk.core.roads.walk.WalkRecomputeHint> walkHints = new ArrayList<>();
     private final List<WalkGoal> walkGoals = new ArrayList<>();
     private final List<Set<String>> walkDestinationRegions = new ArrayList<>();
     private final List<CompletableFuture<Supplier<WalkRequest>>> walkCaptures = new ArrayList<>();
@@ -162,7 +167,30 @@ class NavigationServiceTest {
      * capture and the search are this test's fakes; searches wait for {@link #runSearches}.
      */
     private NavigationService walkService(NavigationConfig config) {
-        NavigationService.WalkPreparer preparer = (p, from, target, goal, destinationRegions) -> {
+        NavigationService.WalkPreparer preparer = new NavigationService.WalkPreparer() {
+            @Override
+            public CompletableFuture<Supplier<WalkRequest>> prepare(Player p, double[] from, double[] target, WalkGoal goal,
+                                                                    Set<String> destinationRegions) {
+                return prepare(p, from, target, goal, destinationRegions, null);
+            }
+
+            @Override
+            public CompletableFuture<Supplier<WalkRequest>> prepare(Player p, double[] from, double[] target, WalkGoal goal,
+                                                                    Set<String> destinationRegions,
+                                                                    net.knightsandkings.knk.core.roads.walk.WalkRecomputeHint hint) {
+                walkHints.add(hint);
+                return fakePrepare(from, target, goal, destinationRegions);
+            }
+        };
+        service = new NavigationService(new NavigationService.Deps(null, config, w -> network.snapshot, policies, shapes,
+            eligibility, hud, trail, Runnable::run, Runnable::run, tick::get, events::add, Logger.getLogger("test"),
+            new NavigationService.Walk(preparer, request -> walkFinder.apply(request), walkSearches::add)));
+        return service;
+    }
+
+    private CompletableFuture<Supplier<WalkRequest>> fakePrepare(double[] from, double[] target, WalkGoal goal,
+                                                               Set<String> destinationRegions) {
+        {
             walkTargets.add(target.clone());
             walkGoals.add(goal);
             walkDestinationRegions.add(destinationRegions);
@@ -174,11 +202,7 @@ class NavigationServiceTest {
                     : walkCaptureStats == null ? request : new NavigationService.PreparedWalk(request, walkCaptureStats));
             }
             return capture;
-        };
-        service = new NavigationService(new NavigationService.Deps(null, config, w -> network.snapshot, policies, shapes,
-            eligibility, hud, trail, Runnable::run, Runnable::run, tick::get, events::add, Logger.getLogger("test"),
-            new NavigationService.Walk(preparer, request -> walkFinder.apply(request), walkSearches::add)));
-        return service;
+        }
     }
 
     /** The captured terrain the fake preparer hands out (a mock unless a test sets a real one). */
@@ -1361,6 +1385,41 @@ class NavigationServiceTest {
         ticks(NavigationService.RECHECK_TICKS * 2);
         assertEquals(3, walkTargets.size(), "the path is recomputed once it is chunk-ttl-seconds (10 s) old");
         assertTrue(messages().stream().noneMatch(m -> m.contains("heading away")));
+    }
+
+    @Test
+    void aRecomputeCarriesTheFoundPathsHintAlsoAfterAFailedSearch() {
+        // #771 item 1 (scene 1): the next search keeps the way the found path took, in its box and its length cap
+        NavigationService walking = walkService(NavigationConfig.defaults());
+        walking.navigate(player, well());
+        assertNull(walkHints.get(0), "the first search has no hint");
+        runSearches();
+
+        moveTo(7.5, 65, 1.5); // 7 off the path
+        ticks(NavigationService.RECHECK_TICKS);
+        assertEquals(2, walkHints.size());
+        var hint = walkHints.get(1);
+        assertNotNull(hint, "a recompute after a found path carries its hint");
+        assertArrayEquals(new double[] {20.5, 64, 0.5}, hint.remaining().get(hint.remaining().size() - 1), 1e-9);
+        assertTrue(hint.minLength() >= 20, String.valueOf(hint.minLength()));
+
+        NavigationService.DirectLeg leg = walking.legOf(playerId).orElseThrow();
+        List<double[]> found = leg.foundPath;
+        assertNotNull(found);
+        walkFinder = r -> WalkResult.noPath("closed inside the box", 900);
+        runSearches();
+        assertSame(found, leg.foundPath, "a failed search keeps the found path for the next hint");
+    }
+
+    @Test
+    void withGuidanceV2ARecomputeCarriesTheFoundPathsHintToo() {
+        NavigationService v2 = walkService(NavigationConfig.defaults().withGuidanceV2(true));
+        v2.navigate(player, well());
+        runSearches();
+        moveTo(10.5, 65, -10.5);
+        ticks(NavigationService.RECHECK_TICKS);
+        assertEquals(2, walkHints.size());
+        assertNotNull(walkHints.get(1));
     }
 
     @Test

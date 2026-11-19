@@ -82,6 +82,7 @@ import net.knightsandkings.knk.core.roads.walk.WalkMeasurements;
 import net.knightsandkings.knk.core.roads.walk.WalkPath;
 import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
 import net.knightsandkings.knk.core.roads.walk.WalkPathfinder;
+import net.knightsandkings.knk.core.roads.walk.WalkRecomputeHint;
 import net.knightsandkings.knk.core.roads.walk.WalkRequest;
 import net.knightsandkings.knk.core.roads.walk.WalkResult;
 import net.knightsandkings.knk.paper.config.NavigationConfig;
@@ -215,6 +216,17 @@ public final class NavigationService implements SiegeMatchObserver {
          */
         CompletableFuture<Supplier<WalkRequest>> prepare(Player player, double[] feet, double[] target, WalkGoal goal,
                                                          Set<String> destinationRegions);
+
+        /**
+         * As {@link #prepare(Player, double[], double[], WalkGoal, Set)}, with what the leg's last found path tells the
+         * search (PandiO/knk-workspace#771 item 1): its rest stays in the capture and its length in the cap, so a
+         * recompute can take the way the first search found. Null: no hint. Preparers without it ignore the hint.
+         */
+        default CompletableFuture<Supplier<WalkRequest>> prepare(Player player, double[] feet, double[] target,
+                                                                 WalkGoal goal, Set<String> destinationRegions,
+                                                                 WalkRecomputeHint hint) {
+            return prepare(player, feet, target, goal, destinationRegions);
+        }
 
         /** Capture counters for {@code /knk road status}; empty when there is nothing to say. */
         default String describe() {
@@ -432,6 +444,11 @@ public final class NavigationService implements SiegeMatchObserver {
         Status status = Status.FALLBACK;
         /** The walk path as floor points (WALKING only). */
         List<double[]> path;
+        /**
+         * The leg's last found (complete) path as floor points, kept when a later search fails (#771 item 1): the hint
+         * of the next request ({@link WalkRecomputeHint}). Null until a path was found.
+         */
+        List<double[]> foundPath;
         /** The path ends short of the target (a partial path, §11-5). */
         boolean partial;
         /** "No conventional path" was said for this leg; said again only after a path was found meanwhile. */
@@ -1543,11 +1560,14 @@ public final class NavigationService implements SiegeMatchObserver {
         CompletableFuture<Supplier<WalkRequest>> capture;
         try {
             // KNG-121: the navigation's destination, also for the walk to the road (not the road's start)
+            // #771 item 1: the rest of the leg's found path stays in the capture and the length cap
+            WalkRecomputeHint hint = WalkRecomputeHint.of(leg.foundPath, feet.getX(), feet.getY() - 1, feet.getZ())
+                .orElse(null);
             capture = walk.preparer().prepare(a.player, new double[] {feet.getX(), feet.getY(), feet.getZ()}, target,
                 leg == a.startLeg ? WalkGoal.within(target[0], target[1], target[2],
                     leg.nearRoute ? ON_ROUTE_HORIZONTAL : sessionParameters.arriveDistance())
                     : walkGoal(a, target),
-                destinationRegions(a.player, a.destination, a.goals, a.target));
+                destinationRegions(a.player, a.destination, a.goals, a.target), hint);
         } catch (RuntimeException e) {
             deps.logger().log(Level.WARNING, "[Navigation] Walk capture failed for " + a.player.getName(), e);
             walkDelivered(a, leg, generation, null, WalkCount.FAILED);
@@ -2298,6 +2318,7 @@ public final class NavigationService implements SiegeMatchObserver {
         }
         if (result != null && result.isFound()) {
             leg.noPathAnnounced = false;
+            leg.foundPath = result.path().orElseThrow().points();
         }
         if (result != null && !result.isFound() && partial.isEmpty()) {
             leg.path = null;
