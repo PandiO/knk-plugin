@@ -168,7 +168,7 @@ public final class BukkitNavWorld implements NavWorld {
      * The top of a block's step (block-relative boxes, 0 to 1): the highest top among the boxes that span the whole
      * cell, else the highest of all; clamped to (0, 1], 1 without any box.
      */
-    static double surfaceTop(java.util.Collection<org.bukkit.util.BoundingBox> boxes) {
+    public static double surfaceTop(java.util.Collection<org.bukkit.util.BoundingBox> boxes) {
         double spanning = -1;
         double any = -1;
         for (org.bukkit.util.BoundingBox box : boxes) {

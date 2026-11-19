@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.npc.citizens;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,6 +55,37 @@ class StepHopTest {
         // a jump with nothing at the feet is one toward a target above: it stays
         assertFalse(StepHop.isStepHop(53.0, 53, List.of(), STEP));
         assertFalse(StepHop.isStepHop(53.0, 53, null, STEP));
+    }
+
+    @Test
+    void aJumpForATargetAWholeBlockUpWithinABlockIsNeeded() {
+        // on a stair's lower half (feet 53.5), a waypoint at 55 (a full block past the stair) 0.8 across: vanilla jumps
+        assertTrue(StepHop.jumpsForTarget(0.0, 1.5, -0.8, STEP, 1.0));
+        // the stair's upper half (0.5 up) or a waypoint more than a block across: no jump for the target
+        assertFalse(StepHop.jumpsForTarget(0.0, 0.5, -0.8, STEP, 1.0));
+        assertFalse(StepHop.jumpsForTarget(0.0, 1.5, -1.2, STEP, 1.0));
+    }
+
+    @Test
+    void besideAStairTheBodyWalksOnTowardAWaypointABlockUp() {
+        // the replay's hall entry: feet 115.0, the next cell toward the waypoint at 116 is the stair (its step at 115.5)
+        double next = StepHop.nextSurface(115.0, 115.0, 115.5, Double.NaN);
+        assertEquals(115.5, next, 1e-9);
+        assertTrue(StepHop.walksOn(115.0, next, STEP));
+    }
+
+    @Test
+    void aFullBlockInTheWayKeepsTheJump() {
+        assertFalse(StepHop.walksOn(115.0, StepHop.nextSurface(115.0, 115.0, 116.0, Double.NaN), STEP));
+        // a block above the feet's level too: more than a block up
+        assertFalse(StepHop.walksOn(115.0, StepHop.nextSurface(115.0, 115.0, 116.0, 117.0), STEP));
+    }
+
+    @Test
+    void aLevelOrLowerCellIsWalkedOn() {
+        assertTrue(StepHop.walksOn(115.0, StepHop.nextSurface(115.0, 115.0, Double.NaN, Double.NaN), STEP));
+        assertTrue(StepHop.walksOn(115.0, StepHop.nextSurface(115.0, Double.NaN, Double.NaN, Double.NaN), STEP),
+            "no floor: a drop, no jump up");
     }
 
     @Test

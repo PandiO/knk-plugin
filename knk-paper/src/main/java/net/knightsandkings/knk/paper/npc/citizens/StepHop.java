@@ -11,7 +11,11 @@ import org.bukkit.util.BoundingBox;
  * block, and the hop lifts it a further 0.4 or so before it lands on the upper half. The developer saw it as "already
  * walked up a stair block and then seemed to jump up a bit". When that top is at most the body's step height above the
  * feet, the body walks up onto it by itself (a player's step height is 0.6, a stair's upper half is 0.5 up), so the
- * hop is not needed. Pure; the Bukkit side reads the block and the step height.
+ * hop is not needed. The move control's other jump, for a target more than a step above the feet within a block
+ * ({@link #jumpsForTarget}), is not needed either when the next cell toward that target is at most a step up
+ * ({@link #walksOn}): Citizens moves on to the next waypoint once the body is within the list's margin of the current
+ * one, so from beside a stair the next waypoint can already be a block up (the replay's hall entry). A full block in the
+ * way keeps its jump. Pure; the Bukkit side reads the blocks, the target and the step height.
  */
 final class StepHop {
 
@@ -40,5 +44,45 @@ final class StepHop {
         }
         double above = blockY + top - feetY;
         return above > ON_TOP && above <= stepHeight + 1e-6;
+    }
+
+    /**
+     * Whether the move control also jumps for its target: one more than {@code stepHeight} above the feet and less than
+     * {@code reach} (the larger of a block and the body's width) away across, as vanilla's move control decides. Such a
+     * jump is needed (a whole block up just past a stair's lower half) and is never held back.
+     *
+     * @param dx         target x minus the body's x
+     * @param dy         target y minus the feet
+     * @param dz         target z minus the body's z
+     * @param stepHeight the body's step height
+     * @param reach      {@code max(1, body width)}
+     */
+    static boolean jumpsForTarget(double dx, double dy, double dz, double stepHeight, double reach) {
+        return dy > stepHeight && dx * dx + dz * dz < reach;
+    }
+
+    /**
+     * The surface a body walking at {@code feetY} meets in the next cell toward its target, from that cell's blocks:
+     * the block the feet are level with ({@code atTop}), the one above it ({@code aboveTop}) and the one below
+     * ({@code belowTop}), each the absolute top of its step (NaN without a collision box). A block above means a rise
+     * of more than a block; without any, the cell drops.
+     */
+    static double nextSurface(double feetY, double belowTop, double atTop, double aboveTop) {
+        if (!Double.isNaN(aboveTop)) {
+            return aboveTop;
+        }
+        if (!Double.isNaN(atTop)) {
+            return atTop;
+        }
+        return Double.isNaN(belowTop) ? feetY - 1 : belowTop;
+    }
+
+    /**
+     * Whether the body walks on toward its target without a jump: the next cell's surface ({@link #nextSurface}) is at
+     * most a step above the feet. Then a jump the move control makes for that target is not needed either: from beside
+     * a stair the body steps onto the stair's lower half, and from there onto the next.
+     */
+    static boolean walksOn(double feetY, double nextSurface, double stepHeight) {
+        return nextSurface - feetY <= stepHeight + 1e-6;
     }
 }

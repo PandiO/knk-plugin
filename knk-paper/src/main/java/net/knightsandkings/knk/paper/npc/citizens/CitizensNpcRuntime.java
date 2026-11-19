@@ -166,8 +166,10 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
     /**
      * The jump power Citizens asks for whenever one of K&K's NPCs jumps ({@code NPC.Metadata.JUMP_POWER_SUPPLIER}):
      * none for the engine's stair hop (link J1, PandiO/knk-workspace#695, {@link StepHop}), so a body on a stair's
-     * lower half walks onto the upper half instead of hopping; otherwise the body's own (its jump strength, halved on
-     * a honey block as in vanilla). Citizens' human NPC jumps through its own code, not Paper's {@code EntityJumpEvent}.
+     * lower half walks onto the upper half instead of hopping; and none for a jump toward a waypoint more than a step up
+     * within a block when the next cell toward it is at most a step up ({@link #walksOn}): the body steps up instead.
+     * Otherwise the body's own (its jump strength, halved on a honey block as in vanilla). Citizens' human NPC jumps
+     * through its own code, not Paper's {@code EntityJumpEvent}.
      */
     static float jumpPower(NPC npc, CitizensNpcMover mover) {
         Entity entity = npc.getEntity();
@@ -176,7 +178,14 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
         }
         Location at = body.getLocation();
         org.bukkit.block.Block block = at.getBlock();
-        if (StepHop.isStepHop(at.getY(), block.getY(), block.getCollisionShape().getBoundingBoxes(), stepHeight(body))) {
+        double step = stepHeight(body);
+        net.citizensnpcs.api.ai.PathStrategy strategy = npc.getNavigator().getPathStrategy();
+        Location target = strategy == null ? null : strategy.getCurrentDestination();
+        boolean forTarget = target != null && StepHop.jumpsForTarget(target.getX() - at.getX(),
+            target.getY() - at.getY(), target.getZ() - at.getZ(), step, Math.max(1.0, body.getWidth()));
+        boolean held = forTarget ? walksOn(at, target, step)
+            : StepHop.isStepHop(at.getY(), block.getY(), block.getCollisionShape().getBoundingBoxes(), step);
+        if (held) {
             if (mover != null) {
                 mover.stepHopHeld();
             }
@@ -188,6 +197,37 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
         boolean honey = block.getType() == org.bukkit.Material.HONEY_BLOCK
             || at.clone().subtract(0, 0.5000001, 0).getBlock().getType() == org.bukkit.Material.HONEY_BLOCK;
         return (float) (honey ? power * 0.5 : power);
+    }
+
+    /**
+     * Whether the body walks on toward {@code target} without a jump ({@link StepHop#walksOn}): the first cell the
+     * line to it enters is at most a step above the feet. A target in the body's own cell keeps its jump.
+     */
+    static boolean walksOn(Location at, Location target, double step) {
+        int cx = at.getBlockX();
+        int cz = at.getBlockZ();
+        double dx = target.getX() - at.getX();
+        double dz = target.getZ() - at.getZ();
+        double len = Math.sqrt(dx * dx + dz * dz);
+        for (double d = 0.05; d <= len + 1e-9; d += 0.05) {
+            int x = (int) Math.floor(at.getX() + dx * d / len);
+            int z = (int) Math.floor(at.getZ() + dz * d / len);
+            if (x == cx && z == cz) {
+                continue;
+            }
+            org.bukkit.World world = at.getWorld();
+            int y = (int) Math.floor(at.getY() + 1e-3);
+            return StepHop.walksOn(at.getY(), StepHop.nextSurface(at.getY(), top(world.getBlockAt(x, y - 1, z)),
+                top(world.getBlockAt(x, y, z)), top(world.getBlockAt(x, y + 1, z))), step);
+        }
+        return false;
+    }
+
+    /** A block's absolute step top ({@code BukkitNavWorld.surfaceTop}), NaN without a collision box. */
+    private static double top(org.bukkit.block.Block block) {
+        java.util.Collection<org.bukkit.util.BoundingBox> boxes = block.getCollisionShape().getBoundingBoxes();
+        return boxes.isEmpty() ? Double.NaN
+            : block.getY() + net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld.surfaceTop(boxes);
     }
 
     /** The body's step height (a player's 0.6 unless an attribute changed it). */

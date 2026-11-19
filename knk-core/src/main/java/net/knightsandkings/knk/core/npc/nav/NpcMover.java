@@ -44,9 +44,9 @@ public interface NpcMover {
     }
 
     /**
-     * How many of the engine's stair hops the mover held back since it was spawned (link J1,
-     * PandiO/knk-workspace#695): jumps whose only reason was a block at the feet with a top the body steps onto by
-     * itself. 0 for an engine that does not hold them back.
+     * How many of the engine's jumps the mover held back since it was spawned because the body walks on instead (link
+     * J1, PandiO/knk-workspace#695): the hop on a stair's lower half, and a jump toward a waypoint a block up when the
+     * next cell toward it is at most a step up. 0 for an engine that does not hold them back.
      */
     default long stepHopsHeld() {
         return 0;
