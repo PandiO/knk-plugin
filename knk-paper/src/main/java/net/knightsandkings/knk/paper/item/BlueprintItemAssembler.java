@@ -6,6 +6,7 @@ import net.knightsandkings.knk.core.domain.item.KnkItemBlueprint;
 import net.knightsandkings.knk.core.domain.item.KnkItemBlueprintDefaultEnchantment;
 import net.knightsandkings.knk.core.ports.enchantment.EnchantmentRepository;
 import net.knightsandkings.knk.paper.enchantbook.EnchantBookItems;
+import net.knightsandkings.knk.paper.mapper.BlueprintTag;
 import net.knightsandkings.knk.paper.mapper.EnchantmentDefinitionBukkitMapper;
 import net.knightsandkings.knk.paper.mapper.ItemBlueprintBukkitMapper;
 import org.bukkit.Bukkit;
@@ -39,6 +40,10 @@ import java.util.function.Consumer;
  *   <li>Custom enchantment lines moved to the top of the lore ({@link CustomEnchantmentLore#enchantmentsFirst}).</li>
  *   <li>{@link Options#metaStamp()}, if any: the caller's extra PDC tags (the lootbox item-instance id and rolled
  *       grade, Phase 3).</li>
+ *   <li>Item identity (PandiO/knk-workspace#141), only with {@code items.identity.enabled}: the blueprint id as
+ *       {@code knightsandkings:knk_blueprint} ({@link BlueprintTag#stampIfEnabled}), on items that differ from the
+ *       plain vanilla item. A plain item stays untagged and resolves through its material's vanilla match, so
+ *       stacking stays vanilla's.</li>
  * </ol>
  * A permanent enchantment book blueprint (KNG-5) never gets enchantments: it teaches its enchantment, it doesn't
  * carry it. Skipped enchantments are reported in {@link Result#skipped()}, never thrown.
@@ -178,7 +183,9 @@ public final class BlueprintItemAssembler {
      * when the blueprint is null or the material key is unknown.
      */
     public Result assemble(KnkItemBlueprint blueprint, String materialNamespaceKey, List<EnchantmentRequest> enchantments, Options options) {
-        return enchant(build(blueprint, materialNamespaceKey), blueprint, enchantments, options);
+        Result result = enchant(build(blueprint, materialNamespaceKey), blueprint, enchantments, options);
+        BlueprintTag.stampIfEnabled(result.itemStack(), blueprint.id());
+        return result;
     }
 
     /**
@@ -214,6 +221,7 @@ public final class BlueprintItemAssembler {
         }
 
         applyQuantity(itemStack, blueprint, quantity);
+        BlueprintTag.stampIfEnabled(itemStack, blueprint.id());
         return new Result(itemStack, applied, List.copyOf(skipped));
     }
 

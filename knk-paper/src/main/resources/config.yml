@@ -1118,6 +1118,21 @@ custom-enchantments:
 # Lootboxes (docs/specs/lootboxes/DESIGN.md §3.4). Everything the API decides - areas, limits, odds, the daily cap,
 # announcement templates - is set in the web app (/admin/lootboxes); this section is only how this server places,
 # shows and opens boxes. /knk lootbox reload re-reads it.
+# Item identity (PandiO/knk-workspace#141, production DESIGN §8): every item a player obtains resolves to one item
+# blueprint (instance tag -> blueprint tag -> the material's vanilla match from knk-web-api). Off by default; with both
+# switches off, items are built and handled exactly as before.
+#   enabled:           load the material -> blueprint map, stamp knightsandkings:knk_blueprint on blueprint items that
+#                      differ from the plain vanilla item (kits, lootboxes, /knk itemblueprints give), and send the
+#                      conversion counts. Plain vanilla items are never tagged, so stacking stays exactly vanilla's.
+#   convert-on-obtain: the conversion hooks (pickup, block and mob drops, fishing, crafting, trades, first open of a
+#                      container): resolve, count, and remove a stale blueprint tag from an otherwise plain item.
+#                      Items that don't resolve (custom-named, custom-lored, other plugins) are logged once and left alone.
+items:
+  identity:
+    enabled: false
+    convert-on-obtain: false
+    map-refresh-minutes: 10        # how often the material map is fetched again (never per event)
+    report-interval-minutes: 10    # how often the counts go to the API (api/ItemIdentity/conversion-counts) and the log
 lootboxes:
   enabled: true
   # Sent with every spawn so the drop log shows which server made the box.
