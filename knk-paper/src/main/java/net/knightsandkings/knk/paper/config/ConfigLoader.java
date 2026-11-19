@@ -499,7 +499,11 @@ public class ConfigLoader {
                 section.getInt("walk-link-retry-seconds", defaults.walkLinks().retrySeconds()),
                 section.getInt("walk-link-searches-per-route", defaults.walkLinks().searchesPerRoute()),
                 section.getDouble("road-first-share", defaults.walkLinks().roadFirstShare()),
-                section.getDouble("road-first-max-ratio", defaults.walkLinks().roadFirstMaxRatio())));
+                section.getDouble("road-first-max-ratio", defaults.walkLinks().roadFirstMaxRatio())),
+            new NavigationConfig.RouteEndsConfig(
+                section.getBoolean("road-goal-reachable", defaults.routeEnds().reachableGoal()),
+                section.getInt("road-goal-candidates", defaults.routeEnds().goalCandidates()),
+                section.getBoolean("road-to-its-end", defaults.routeEnds().roadToItsEnd())));
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */
