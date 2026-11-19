@@ -20,6 +20,14 @@ public final class SpanExtractor {
     @FunctionalInterface
     public interface BlockSource {
         String materialAt(int lx, int y, int lz);
+
+        /**
+         * Whether the block at chunk-local {@code (lx, y, lz)} is open (a trapdoor's {@code open} state; the walk capture
+         * asks it for trapdoors only, PandiO/knk-workspace#771). Sources without block states say no.
+         */
+        default boolean isOpen(int lx, int y, int lz) {
+            return false;
+        }
     }
 
     private final PassabilityRules rules;

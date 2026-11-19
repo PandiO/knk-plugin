@@ -27,6 +27,7 @@ final class WalkFixture {
     static final String IRON_DOOR = "IRON_DOOR";
     static final String OAK_FENCE_GATE = "OAK_FENCE_GATE";
     static final String LADDER = "LADDER";
+    static final String OAK_TRAPDOOR = "OAK_TRAPDOOR";
 
     /**
      * The budget of the geometry fixtures: the design's expansion cap, but a length cap loose enough
@@ -35,6 +36,8 @@ final class WalkFixture {
     static final WalkBudget GEOMETRY = new WalkBudget(20_000, 10.0, 200.0, 0.0, 2, 3);
 
     final GridFixture grid = new GridFixture();
+    /** The blocks whose {@code open} state is true (trapdoors, PandiO/knk-workspace#771). */
+    final java.util.Set<Long> open = new java.util.HashSet<>();
 
     /** Draw a layer with its top-left corner at {@code (0, y, 0)}. */
     WalkFixture layer(int y, String... rows) {
@@ -77,8 +80,20 @@ final class WalkFixture {
         return this;
     }
 
+    /** An oak trapdoor at {@code (x, y, z)}, open or closed. */
+    WalkFixture trapdoor(int x, int y, int z, boolean isOpen) {
+        grid.block(x, y, z, OAK_TRAPDOOR);
+        if (isOpen) {
+            open.add(net.knightsandkings.knk.core.util.BlockKey.pack(x, y, z));
+        } else {
+            open.remove(net.knightsandkings.knk.core.util.BlockKey.pack(x, y, z));
+        }
+        return this;
+    }
+
     WalkTerrain terrain() {
-        return new WalkTerrain(grid, grid, WalkCells.ofMaterials(grid::material, Set.of(LADDER)));
+        return new WalkTerrain(grid, grid, WalkCells.ofMaterials(grid::material, Set.of(LADDER),
+            (x, y, z) -> open.contains(net.knightsandkings.knk.core.util.BlockKey.pack(x, y, z))));
     }
 
     /**
