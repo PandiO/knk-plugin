@@ -162,8 +162,9 @@ public final class TerritoryModule {
             for (StructureSummary structure : items) {
                 if (structure != null && structure.id() != null && structure.wgRegionId() != null
                         && !structure.wgRegionId().isBlank()) {
+                    // P2 (#677): townId from the search, so rural structures (no district) are placed too
                     collected.add(new TerritoryService.StructureRef(structure.id(), structure.districtId(),
-                            structure.worldName(), structure.wgRegionId()));
+                            structure.townId(), structure.worldName(), structure.wgRegionId()));
                 }
             }
             int total = result == null ? 0 : result.totalCount();

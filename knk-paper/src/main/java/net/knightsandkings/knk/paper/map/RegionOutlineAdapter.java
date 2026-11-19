@@ -45,7 +45,8 @@ public final class RegionOutlineAdapter implements RegionOutlinePort {
         return Optional.empty();
     }
 
-    static Optional<RegionOutline> outlineOf(ProtectedRegion region, String worldName) {
+    /** {@code region}'s outline in {@code worldName}; empty for a global region or one without three points. */
+    public static Optional<RegionOutline> outlineOf(ProtectedRegion region, String worldName) {
         if (region instanceof GlobalProtectedRegion) {
             return Optional.empty();
         }

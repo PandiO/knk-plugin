@@ -26,7 +26,11 @@ public class ManagedRegionSpecSource {
     private final StructuresQueryApi structures;
     private final DomainCatalogQueryApi domainCatalog;
     private final int pageSize;
-    /** PandiO/knk-workspace#689: crown land regions as {@link ManagedRegionKind#CROWN_LAND}, only with production.enabled. */
+    /**
+     * The plugin's {@code production.enabled}: PandiO/knk-workspace#689 crown land regions as
+     * {@link ManagedRegionKind#CROWN_LAND}; P2c #677 the production structure kinds and rural structures without a parent
+     * ({@link DomainRegionSpecs#build(List, List, List, Map, boolean)}).
+     */
     private final boolean includeCrownLand;
 
     /** @param domainCatalog optional: without it every Structure is a plain STRUCTURE (Gates not told apart). */
@@ -36,8 +40,10 @@ public class ManagedRegionSpecSource {
     }
 
     /**
-     * @param includeCrownLand PandiO/knk-workspace#689: also manage the crown land regions of the domain catalog (domain
-     *                         type {@code CrownLand}) as top-level {@link ManagedRegionKind#CROWN_LAND} regions
+     * @param includeCrownLand the plugin's {@code production.enabled}. PandiO/knk-workspace#689: also manage the crown
+     *                         land regions of the domain catalog (domain type {@code CrownLand}) as top-level
+     *                         {@link ManagedRegionKind#CROWN_LAND} regions. P2c #677: production structure kinds and
+     *                         rural structures at the top level
      */
     public ManagedRegionSpecSource(TownsQueryApi towns, DistrictsQueryApi districts, StructuresQueryApi structures,
                                    DomainCatalogQueryApi domainCatalog, int pageSize, boolean includeCrownLand) {
@@ -77,7 +83,7 @@ public class ManagedRegionSpecSource {
 
         return CompletableFuture.allOf(townsFuture, districtsFuture, structuresFuture, typesFuture).thenApply(ignored -> {
             DomainRegionSpecs.Result built = DomainRegionSpecs.build(
-                    townsFuture.join(), districtsFuture.join(), structuresFuture.join(), typesFuture.join());
+                    townsFuture.join(), districtsFuture.join(), structuresFuture.join(), typesFuture.join(), includeCrownLand);
             List<String> warnings = new ArrayList<>(built.warnings());
             warnings.addAll(extraWarnings);
             if (crownLands.isEmpty()) {
