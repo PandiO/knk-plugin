@@ -80,7 +80,7 @@ public final class TerritoryLookupHandler implements HttpHandler {
     }
 
     /** The answer for a request; null for a method other than GET. */
-    TerritoryLookup.Answer answer(String method, URI uri) {
+    public TerritoryLookup.Answer answer(String method, URI uri) {
         if (!"GET".equalsIgnoreCase(method)) {
             return null;
         }
