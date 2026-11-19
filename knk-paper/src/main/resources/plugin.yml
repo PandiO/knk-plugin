@@ -1230,7 +1230,7 @@ permissions:
     default: false
 
   knk.siege.admin.manage:
-    description: /siege admin manage - pointer to the web-app forms; with siege.weapons.enabled also /knk weaponspot (create weapon spots in game, PandiO/knk-workspace#783)
+    description: /siege admin manage - pointer to the web-app forms (no in-game editing)
     default: false
 
   knk.siege.bypass.commands:

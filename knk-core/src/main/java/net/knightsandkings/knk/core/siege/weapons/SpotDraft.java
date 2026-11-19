@@ -5,7 +5,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * One weapon spot as the in-game spot task holds it before it is created (SIEGE_WEAPONS § 4, A02-A03): the bounds and
+ * One weapon spot as the {@code SiegeWeaponSpot} world task holds it before it completes (SIEGE_WEAPONS § 4, A02-A03;
+ * PandiO/knk-workspace#799): the bounds and
  * the WorldGuard region they came from, the facing (pre-filled from the admin's look direction, W5, until the admin
  * overrides it) and the size class worked out from both (W70). Immutable; every change returns a new draft.
  *
