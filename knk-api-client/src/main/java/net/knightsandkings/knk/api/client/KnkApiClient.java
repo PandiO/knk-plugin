@@ -42,6 +42,7 @@ import net.knightsandkings.knk.api.impl.SiegeMatchesCommandApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeMatchHistoryApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeGatesCommandApiImpl;
 import net.knightsandkings.knk.api.impl.SiegeScenariosQueryApiImpl;
+import net.knightsandkings.knk.api.impl.SiegeWeaponSpotsApiImpl;
 import net.knightsandkings.knk.api.impl.TitleBracketsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.KitsQueryApiImpl;
 import net.knightsandkings.knk.api.impl.KitsCommandApiImpl;
@@ -78,6 +79,7 @@ import net.knightsandkings.knk.core.ports.api.SiegeLobbiesQueryApi;
 import net.knightsandkings.knk.core.ports.api.SiegeMatchesCommandApi;
 import net.knightsandkings.knk.core.ports.api.SiegeGatesCommandApi;
 import net.knightsandkings.knk.core.ports.api.SiegeScenariosQueryApi;
+import net.knightsandkings.knk.core.ports.api.SiegeWeaponSpotsApi;
 import net.knightsandkings.knk.core.ports.api.TitleBracketsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsQueryApi;
 import net.knightsandkings.knk.core.ports.api.KitsCommandApi;
@@ -139,6 +141,8 @@ public class KnkApiClient {
     private final ClansQueryApi clansQueryApi;
     private final SiegeLobbiesQueryApi siegeLobbiesQueryApi;
     private final SiegeScenariosQueryApi siegeScenariosQueryApi;
+    // Siege weapons phase 2 (PandiO/knk-workspace#783)
+    private final SiegeWeaponSpotsApi siegeWeaponSpotsApi;
     private final SiegeMatchesCommandApi siegeMatchesCommandApi;
     private final net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi siegeMatchHistoryApi;
     private final SiegeGatesCommandApi siegeGatesCommandApi;
@@ -224,6 +228,7 @@ public class KnkApiClient {
         this.clansQueryApi = new ClansQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeLobbiesQueryApi = new SiegeLobbiesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeScenariosQueryApi = new SiegeScenariosQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.siegeWeaponSpotsApi = new SiegeWeaponSpotsApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeMatchesCommandApi = new SiegeMatchesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeMatchHistoryApi = new SiegeMatchHistoryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeGatesCommandApi = new SiegeGatesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -518,6 +523,11 @@ public class KnkApiClient {
 
     public SiegeScenariosQueryApi getSiegeScenariosQueryApi() {
         return siegeScenariosQueryApi;
+    }
+
+    /** Siege weapons phase 2 (PandiO/knk-workspace#783): the in-game spot task's teams lookup and spot create. */
+    public SiegeWeaponSpotsApi getSiegeWeaponSpotsApi() {
+        return siegeWeaponSpotsApi;
     }
 
     /** Siege Phase 6: match lifecycle checkpoints (wrap it in knk-core's SiegeMatchRecorder). */
