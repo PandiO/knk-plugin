@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
@@ -13,6 +14,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 
+import net.knightsandkings.knk.core.domain.domains.DomainAccessRule;
 import net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi;
 import net.knightsandkings.knk.core.regions.OrphanedSubRegions;
 import net.knightsandkings.knk.core.regions.SubRegionMirror;
@@ -33,6 +35,9 @@ import net.knightsandkings.knk.paper.regions.WorldGuardSubRegionMirrorStore;
  * admin's flag on the main region reaches them within {@code interval-minutes}. KNG-258: then it marks the
  * {@code domain_<d>_sub_<s>} regions no domain lists any more as orphans ({@link OrphanedSubRegions}), which the daily
  * temp-region cleanup deletes after the retention period.
+ *
+ * <p>PandiO/knk-workspace#750: a listener set with {@link #afterSync} gets every completed run's rules (main thread),
+ * after the sub-region mirror; the overview map reports the sub-regions' outlines from them.
  */
 public final class DomainAccessFlagSync {
     private static final Logger LOGGER = Logger.getLogger(DomainAccessFlagSync.class.getName());
@@ -70,6 +75,8 @@ public final class DomainAccessFlagSync {
     private volatile SubRegionMirror.Report lastSubRegionReport;
     private final OrphanedSubRegions orphans = new OrphanedSubRegions();
     private final WorldGuardOrphanedSubRegionStore orphanStore = new WorldGuardOrphanedSubRegionStore(DomainAccessFlagSync::loadedManagers);
+    /** #750: told the rules of every completed run, after the sub-region mirror (null: nobody). */
+    private volatile Consumer<List<DomainAccessRule>> afterSync;
     /** KNG-258: the sub-region ids the last completed sync listed (lower-case); null before the first. */
     private volatile Set<String> listedSubRegions;
 
@@ -77,6 +84,27 @@ public final class DomainAccessFlagSync {
         this.plugin = plugin;
         this.api = api;
         this.settings = settings;
+    }
+
+    /**
+     * #750: {@code listener} gets the rules of every completed run on the main thread, after the sub-region mirror. A
+     * failing listener is logged and never fails the sync. Set it before {@link #schedule()}.
+     */
+    public void afterSync(Consumer<List<DomainAccessRule>> listener) {
+        this.afterSync = listener;
+    }
+
+    /** Hands {@code rules} to the {@link #afterSync} listener, if any; a listener's failure is logged, not thrown. */
+    void notifyAfterSync(List<DomainAccessRule> rules) {
+        Consumer<List<DomainAccessRule>> listener = afterSync;
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.accept(rules);
+        } catch (RuntimeException e) {
+            LOGGER.warning("[KnK Regions] After-sync listener failed: " + e.getMessage());
+        }
     }
 
     /** Startup sync with retries, then the periodic one. Call once from onEnable. */
@@ -127,6 +155,7 @@ public final class DomainAccessFlagSync {
                         lastSubRegionReport = null;
                         LOGGER.warning("[KnK Regions] Sub-region sync failed: " + e.getMessage());
                     }
+                    notifyAfterSync(rules);
                     listedSubRegions = rules.stream().flatMap(rule -> rule.subRegionIds().stream())
                         .map(id -> id.toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet());
                     try {
