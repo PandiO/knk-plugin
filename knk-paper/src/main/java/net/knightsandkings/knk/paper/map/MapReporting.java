@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.paper.map;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
@@ -10,6 +12,7 @@ import org.bukkit.plugin.Plugin;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.managers.RegionManager;
 
+import net.knightsandkings.knk.core.domain.domains.DomainAccessRule;
 import net.knightsandkings.knk.core.map.MapReportSender;
 import net.knightsandkings.knk.core.map.MapReportingService;
 import net.knightsandkings.knk.core.map.OnlinePlayerSnapshotPort;
@@ -91,6 +94,30 @@ public final class MapReporting {
     /** The domain regions a managed-region repair worked on, as the regions to report. */
     public static List<RegionRef> domainRegions(List<ManagedRegionSpec> specs) {
         return specs.stream().map(spec -> new RegionRef(spec.worldName(), spec.regionId())).toList();
+    }
+
+    /**
+     * The domain sub-regions an access sync's rules list (PandiO/knk-workspace#750), as the regions to report: each in
+     * its domain's world (null: whichever loaded world has it, as the sub-region mirror looks it up). A sub-region id
+     * equal to the domain's main region is left out (the repair reports that one).
+     */
+    public static List<RegionRef> subRegions(Collection<DomainAccessRule> rules) {
+        List<RegionRef> regions = new ArrayList<>();
+        if (rules == null) {
+            return regions;
+        }
+        for (DomainAccessRule rule : rules) {
+            if (rule == null) {
+                continue;
+            }
+            for (String subRegionId : rule.subRegionIds()) {
+                if (rule.wgRegionId() != null && subRegionId.equalsIgnoreCase(rule.wgRegionId().trim())) {
+                    continue;
+                }
+                regions.add(new RegionRef(rule.worldName(), subRegionId));
+            }
+        }
+        return regions;
     }
 
     private static List<RegionManager> loadedManagers() {

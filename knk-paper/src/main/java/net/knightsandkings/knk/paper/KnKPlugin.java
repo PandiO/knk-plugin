@@ -656,6 +656,9 @@ public class KnKPlugin extends JavaPlugin {
                 managedRegions.afterRepair(specs -> mapReporting.reportDomainRegions(
                     net.knightsandkings.knk.paper.map.MapReporting.domainRegions(specs)));
                 wgRegionIdHandler.setRenameListener(mapReporting::regionRenamed);
+                // PandiO/knk-workspace#750: the repair never sees sub-regions; every access sync lists them.
+                domainAccessSync.afterSync(rules -> mapReporting.reportSubRegions(
+                    net.knightsandkings.knk.paper.map.MapReporting.subRegions(rules)));
             }
             managedRegions.scheduleStartupRepair();
             domainAccessSync.setFallbackPolling(fallbackPolling); // S3 (#182): DomainAccessChanged is pushed
