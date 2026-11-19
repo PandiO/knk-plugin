@@ -762,7 +762,8 @@ public final class CrowdControl {
      * The queue spot {@code k} of direction {@code dir} at a place (feet): {@link #FIRST_GAP} plus k ×
      * {@link #QUEUE_SPACING} before it on its axis (further back while the way there is still narrow), {@link #SIDE_OFFSET} to the right of the way where the floor and the
      * body's room allow, else to the left, else half as far, else on the axis; the NPC must reach it in a straight
-     * walkable line. Null when none of them works (it then waits where it stands).
+     * walkable line, and on the way's own level ({@link #onTheWaysLevel}, link J1). Null when none of them works (it
+     * then waits where it stands).
      */
     NavPoint spot(NavWorld world, Place p, int dir, int k, NavPoint at) {
         return spot(world, p, dir, k, at, false);
@@ -783,11 +784,16 @@ public final class CrowdControl {
         double rx = -hz;
         double rz = hx;
         int floorY = at.blockY() - 1;
+        // the queue line's own floor there: a spot is on the same level (link J1)
+        NavPoint axis = HopPlanner.floorNear(world, new NavPoint(p.world, bx, floorY, bz), floorY);
         for (double off : new double[] {SIDE_OFFSET, -SIDE_OFFSET, SIDE_OFFSET / 2, -SIDE_OFFSET / 2, 0}) {
             double x = bx + rx * off;
             double z = bz + rz * off;
             NavPoint floor = HopPlanner.floorNear(world, new NavPoint(p.world, x, floorY, z), floorY);
             if (floor == null || Math.abs(floor.blockY() - floorY) > 1 || !NavGeometry.hasHeadroom(world, floor)) {
+                continue;
+            }
+            if (!onTheWaysLevel(world, floor, axis, at)) {
                 continue;
             }
             NavPoint feet = new NavPoint(p.world, x, floor.blockY() + 1, z);
@@ -802,6 +808,21 @@ public final class CrowdControl {
             }
         }
         return null;
+    }
+
+    /**
+     * Whether a queue spot's floor is on the way's own level (link J1, PandiO/knk-workspace#695): its surface at most a
+     * step ({@link NavGeometry#STEP_UP}) above or below the queue line's floor there ({@code axis}); where the queue
+     * line has no floor (a diagonal place's line carried back through a wall), at most a step above the NPC's feet. A
+     * wall top or a ledge beside a flight is no spot: Minecraft's move control jumps at a target more than a step above
+     * the feet, again and again when it cannot get there (the climb's flight 1, a queue line through its west wall).
+     */
+    static boolean onTheWaysLevel(NavWorld world, NavPoint floor, NavPoint axis, NavPoint at) {
+        double surface = NavGeometry.surfaceY(world, floor);
+        if (axis != null) {
+            return Math.abs(surface - NavGeometry.surfaceY(world, axis)) <= NavGeometry.STEP_UP + 1e-6;
+        }
+        return surface - at.y() <= NavGeometry.STEP_UP + 1e-6;
     }
 
     // ==================== counts ====================
