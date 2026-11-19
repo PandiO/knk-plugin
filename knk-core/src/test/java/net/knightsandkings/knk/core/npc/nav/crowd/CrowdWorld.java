@@ -14,6 +14,8 @@ final class CrowdWorld implements NavWorld {
     final Set<Long> walls = new HashSet<>();
     /** Columns whose floor is a block higher (65): a wall top or a ledge beside the way, with room above it. */
     final Set<Long> ledges = new HashSet<>();
+    /** A floor block's top where it is not a whole block ("x,y,z" to 0..1), as {@code FakeNavWorld}. */
+    final java.util.Map<String, Double> tops = new java.util.HashMap<>();
     long reads;
 
     static long key(int x, int z) {
@@ -67,6 +69,11 @@ final class CrowdWorld implements NavWorld {
     public double freeHeight(String world, int x, int floorY, int z) {
         reads++;
         return isStandableFloor(world, x, floorY, z) ? 3.0 : 0.0;
+    }
+
+    @Override
+    public double surfaceY(String world, double x, int floorY, double z) {
+        return floorY + tops.getOrDefault((int) Math.floor(x) + "," + floorY + "," + (int) Math.floor(z), 1.0);
     }
 
     @Override

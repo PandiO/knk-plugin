@@ -812,17 +812,52 @@ public final class CrowdControl {
 
     /**
      * Whether a queue spot's floor is on the way's own level (link J1, PandiO/knk-workspace#695): its surface at most a
-     * step ({@link NavGeometry#STEP_UP}) above or below the queue line's floor there ({@code axis}); where the queue
-     * line has no floor (a diagonal place's line carried back through a wall), at most a step above the NPC's feet. A
-     * wall top or a ledge beside a flight is no spot: Minecraft's move control jumps at a target more than a step above
-     * the feet, again and again when it cannot get there (the climb's flight 1, a queue line through its west wall).
+     * step ({@link NavGeometry#STEP_UP}) above or below the queue line's floor there ({@code axis}, null where the
+     * queue line has none), and reached from the NPC's feet by walking: along the straight line from {@code at} no
+     * cell's surface is more than a step above the one before it ({@link #walkedTo}). A wall top or a ledge beside a
+     * flight is no spot: Minecraft's move control jumps at a target more than a step above the feet, again and again
+     * when it cannot get there (the climb's flight 1: a diagonal place's queue line carried back through the flight's
+     * west wall, its side spot on the wall top).
      */
     static boolean onTheWaysLevel(NavWorld world, NavPoint floor, NavPoint axis, NavPoint at) {
         double surface = NavGeometry.surfaceY(world, floor);
-        if (axis != null) {
-            return Math.abs(surface - NavGeometry.surfaceY(world, axis)) <= NavGeometry.STEP_UP + 1e-6;
+        if (axis != null && Math.abs(surface - NavGeometry.surfaceY(world, axis)) > NavGeometry.STEP_UP + 1e-6) {
+            return false;
         }
-        return surface - at.y() <= NavGeometry.STEP_UP + 1e-6;
+        return walkedTo(world, at, floor);
+    }
+
+    /**
+     * Whether a body at {@code at} (feet) walks to {@code floor} without a jump: every cell the straight line crosses
+     * has a floor near the last one, and none is more than {@link NavGeometry#STEP_UP} above it (a drop is fine).
+     */
+    static boolean walkedTo(NavWorld world, NavPoint at, NavPoint floor) {
+        double last = at.y();
+        int refY = NavGeometry.floorYOf(at.y());
+        double len = at.horizontalDistance(floor);
+        int samples = Math.max(1, (int) Math.ceil(len / 0.25));
+        long seen = Occupancy.pack(at.blockX(), 0, at.blockZ());
+        for (int i = 1; i <= samples; i++) {
+            double t = (double) i / samples;
+            double x = at.x() + (floor.x() - at.x()) * t;
+            double z = at.z() + (floor.z() - at.z()) * t;
+            long cell = Occupancy.pack((int) Math.floor(x), 0, (int) Math.floor(z));
+            if (cell == seen) {
+                continue;
+            }
+            seen = cell;
+            NavPoint f = i == samples ? floor : HopPlanner.floorNear(world, new NavPoint(at.world(), x, refY, z), refY);
+            if (f == null) {
+                return false;
+            }
+            double surface = world.surfaceY(at.world(), x, f.blockY(), z);
+            if (surface - last > NavGeometry.STEP_UP + 1e-6) {
+                return false;
+            }
+            last = surface;
+            refY = f.blockY();
+        }
+        return true;
     }
 
     // ==================== counts ====================

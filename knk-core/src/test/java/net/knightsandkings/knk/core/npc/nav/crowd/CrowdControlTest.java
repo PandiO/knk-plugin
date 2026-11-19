@@ -166,22 +166,28 @@ class CrowdControlTest {
     }
 
     /**
-     * Where the queue line has no floor (the climb: flight 1's top has a diagonal axis, and its queue line 5.5 blocks
-     * back lies beyond the flight's west wall), a spot is judged by the NPC's feet: the wall top a block up is refused,
-     * a floor on the feet's level or below them is not.
+     * A queue spot is reached from the feet by walking (the climb: flight 1's top has a diagonal axis, its queue line
+     * 5.5 blocks back lies beyond the flight's west wall without a floor, and the side spot was the wall top). A spot
+     * a block up a ledge is refused, one on the feet's level or below them is not, nor one up a half-block step.
      */
     @Test
-    void withoutAFloorUnderTheQueueLineTheFeetDecide() {
+    void aQueueSpotIsReachedFromTheFeetByWalking() {
         CrowdWorld world = new CrowdWorld().ledges(3, 3, 3, 3);
         NavPoint feet = feet(2.3, 3.5); // floor 64, feet 65, against the ledge's face
         NavPoint ledge = new NavPoint(CrowdWorld.W, 3.45, 65, 3.5);
         NavPoint level = new NavPoint(CrowdWorld.W, 1.5, 64, 3.5);
+        NavPoint pastTheLedge = new NavPoint(CrowdWorld.W, 4.5, 64, 3.5);
 
         assertFalse(CrowdControl.onTheWaysLevel(world, ledge, null, feet), "a block above the feet");
         assertTrue(CrowdControl.onTheWaysLevel(world, level, null, feet), "on the feet's level");
-        assertTrue(CrowdControl.onTheWaysLevel(world, level, null, new NavPoint(CrowdWorld.W, 2.3, 67, 3.5)),
+        assertTrue(CrowdControl.onTheWaysLevel(world, level, null, new NavPoint(CrowdWorld.W, 2.3, 66, 3.5)),
             "below the feet: walked down to, no jump");
+        assertFalse(CrowdControl.onTheWaysLevel(world, pastTheLedge, null, feet),
+            "on the feet's level, but only over the ledge");
         assertFalse(CrowdControl.onTheWaysLevel(world, level, ledge, feet), "a level below the queue line's floor");
+
+        world.tops.put("3,65,3", 0.5); // the ledge is a slab: a half-block step
+        assertTrue(CrowdControl.onTheWaysLevel(world, ledge, null, feet), "up a half-block step");
     }
 
     /** The same queue without the ledge takes the side the ledge was on: the ledge made the difference. */
