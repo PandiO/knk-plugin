@@ -77,6 +77,26 @@ public enum ManagedRegionKind {
         });
     }
 
+    /**
+     * P2c (PandiO/knk-workspace#677, production DESIGN § 3.4): as {@link #fromDomainType(String)}, and with
+     * {@code productionKinds} (the plugin's {@code production.enabled}) the production structure subtypes get their own
+     * kinds: {@code ProductionStructure} is {@link #RESOURCE_PRODUCTION}, {@code Warehouse} a plain {@link #STRUCTURE}.
+     * Without it a {@code ProductionStructure} stays a plain {@link #STRUCTURE}, as before P2c (A21).
+     */
+    public static Optional<ManagedRegionKind> fromDomainType(String domainType, boolean productionKinds) {
+        if (productionKinds && domainType != null) {
+            switch (normalise(domainType)) {
+                case "PRODUCTIONSTRUCTURE":
+                    return Optional.of(RESOURCE_PRODUCTION);
+                case "WAREHOUSE":
+                    return Optional.of(STRUCTURE);
+                default:
+                    break;
+            }
+        }
+        return fromDomainType(domainType);
+    }
+
     /** Parses a kind name from config ({@code resource_production}, {@code Resource-Production}, ...). */
     public static Optional<ManagedRegionKind> parse(String name) {
         if (name == null || name.isBlank()) {

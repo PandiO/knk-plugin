@@ -37,8 +37,19 @@ public final class TerritoryService {
     /** The game hub method for the overview map's territory layer (OVERVIEW_MAP_DESIGN § 1 item 3.3, O15). */
     public static final String OUTLINES_METHOD = "ReportTerritoryOutlines";
 
-    /** A structure as the API lists it: its district (for its town), world and region. */
-    public record StructureRef(int id, Integer districtId, String world, String regionId) {
+    /**
+     * A structure as the API lists it: its district, its town, world and region.
+     *
+     * @param townId P2 (PandiO/knk-workspace#91, #677): the structure's effective town from the structure search (its
+     *               district's town, or a rural structure's own town); null from an API before P2, then the town comes
+     *               from the district
+     */
+    public record StructureRef(int id, Integer districtId, Integer townId, String world, String regionId) {
+
+        /** A structure from an API before P2: its town comes from its district. */
+        public StructureRef(int id, Integer districtId, String world, String regionId) {
+            this(id, districtId, null, world, regionId);
+        }
     }
 
     /** Reads every structure with a region (paged API reads). */
@@ -303,14 +314,18 @@ public final class TerritoryService {
         return chain.thenRun(() -> lastReport = lines.isEmpty() ? "no worlds" : String.join("; ", lines));
     }
 
-    /** Main thread: each structure at its region's centre column, with its town through its district. */
+    /**
+     * Main thread: each structure at its region's centre column, with its town: the structure search's {@code townId}
+     * (P2 #677: rural structures included), else through its district.
+     */
     private List<TerritoryReportBuilder.StructurePlacement> placements(TerritoryCache built, List<StructureRef> refs) {
         List<TerritoryReportBuilder.StructurePlacement> placements = new ArrayList<>();
         for (StructureRef ref : refs) {
-            if (ref.regionId() == null || ref.regionId().isBlank() || ref.districtId() == null) {
+            if (ref.regionId() == null || ref.regionId().isBlank()) {
                 continue;
             }
-            Integer town = built.inputs().townOfDistrict(ref.districtId());
+            Integer town = ref.townId() != null ? ref.townId()
+                    : ref.districtId() != null ? built.inputs().townOfDistrict(ref.districtId()) : null;
             if (town == null) {
                 continue;
             }

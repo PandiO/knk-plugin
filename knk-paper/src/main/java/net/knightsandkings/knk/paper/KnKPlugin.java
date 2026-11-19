@@ -532,7 +532,7 @@ public class KnKPlugin extends JavaPlugin {
             // built at load; false = today's per-block rotation path. Read once, at startup.
             boolean rotationKeyframesEnabled = getConfig().getBoolean("gates.rotation.keyframes-enabled", true);
             GateLoaderAdapter gateLoader = new GateLoaderAdapter(gateManager,
-                () -> getServer().getWorlds().isEmpty() ? null : getServer().getWorlds().get(0).getName(),
+                territoryDefaultWorld(),
                 rotationKeyframesEnabled);
             gateManager.setReloadAction(() -> gateLoader.loadAll(gateStructuresApi));
             this.gateLoaderAdapter = gateLoader;
@@ -707,6 +707,14 @@ public class KnKPlugin extends JavaPlugin {
             // default 127.0.0.1:8081). With api.auth.api-key set, callers must send it as X-API-Key.
             regionHttpServer = new RegionHttpServer(this, wgRegionIdHandler,
                 config.regionHttp().bindAddress(), config.regionHttp().port(), config.api().auth().apiKey());
+            // P2c (PandiO/knk-workspace#677): the territory lookup for the API's InsideTerritory rule, answered from the
+            // territory cache; 503 ("territory unavailable", a warning in the API) while production.enabled is off.
+            regionHttpServer.setTerritoryLookup(new net.knightsandkings.knk.paper.http.TerritoryLookupHandler(
+                () -> territoryModule == null ? null : territoryModule.service(),
+                new net.knightsandkings.knk.paper.regions.RegionUnionOutlines(
+                    () -> com.sk89q.worldguard.WorldGuard.getInstance().getPlatform().getRegionContainer().getLoaded()),
+                () -> getServer().getWorlds().isEmpty() ? null : getServer().getWorlds().get(0).getName(),
+                runnable -> getServer().getScheduler().runTask(this, runnable)));
             regionHttpServer.start();
 
             // Start temp region retention task (regions.temp-retention.days, default 14; never deletes a region a domain
@@ -1357,6 +1365,15 @@ public class KnKPlugin extends JavaPlugin {
     /** Item identity (PandiO/knk-workspace#141): the one item resolver; null while items.identity.enabled is off. */
     public net.knightsandkings.knk.paper.items.identity.ItemIdentityService getItemIdentityService() {
         return itemIdentityService;
+    }
+
+    /**
+     * P2c (PandiO/knk-workspace#677): the world a territory lookup without {@code world} is in: the server's first
+     * (default) world, read once on the main thread.
+     */
+    private java.util.function.Supplier<String> territoryDefaultWorld() {
+        String world = getServer().getWorlds().isEmpty() ? null : getServer().getWorlds().get(0).getName();
+        return () -> world;
     }
 
     /** Territory (PandiO/knk-workspace#689): the running module; null while production.enabled is off. */
