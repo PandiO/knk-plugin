@@ -35,7 +35,10 @@ import net.knightsandkings.knk.paper.scenario.SizedScene;
  * fell, a group leader that does not arrive and a lost follower ({@link ClimbWatch#failures}); since link B4
  * (PandiO/knk-workspace#673) also on a real jump (by upward speed) on a flight or its entry; since link B3
  * (PandiO/knk-workspace#672) also on any NPC a queue let go by the crowd's 30 s guard, with why ({@link
- * ClimbWatch#releases}); the rest stays report only. Needs Citizens.
+ * ClimbWatch#releases}); the rest stays report only. Since link J1 (PandiO/knk-workspace#695) the engine's stair hops
+ * are held back and counted ({@code engine stair hops held back (J1)}, report only), a list that climbs is walked with
+ * a reach margin under half a body's width, and no queue spot lies on the wall top beside a flight: the jumps toward a
+ * waypoint that failed CI now and then. Needs Citizens.
  */
 public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>, SizedScene {
 
@@ -205,6 +208,7 @@ public final class NpcStairhouseClimbScenario implements Scenario<ScenarioScene>
             .add("falls from the climb", watch.fallsFromClimb().size())
             .add("jumps (by upward speed)", watch.jumps().size())
             .add("engine stair hops (off a stair's step)", watch.stairHops().size())
+            .add("engine stair hops held back (J1)", movers.stream().mapToLong(NpcMover::stepHopsHeld).sum())
             .add("jumps toward a waypoint on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
             .add("why the guard let them go (B3)", ClimbWatch.first(watch.releases(npcs::nameOf), 6))

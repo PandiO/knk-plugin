@@ -278,6 +278,7 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
             .add("falls from the climb", watch.fallsFromClimb().size())
             .add("jumps (by upward speed)", watch.jumps().size())
             .add("engine stair hops (off a stair's step)", watch.stairHops().size())
+            .add("engine stair hops held back (J1)", movers.stream().mapToLong(NpcMover::stepHopsHeld).sum())
             .add("jumps toward a waypoint on the flights and their entries", ClimbWatch.first(watch.jumpsOnClimb(), 4))
             .add("queue let go by the 30 s guard", crowd.overdue())
             .add("why the guard let them go (B3)", ClimbWatch.first(watch.releases(npcs::nameOf), 6))
