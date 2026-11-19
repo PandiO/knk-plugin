@@ -322,6 +322,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.items.identity.ItemIdentityService itemIdentityService;
     /** Territory (PandiO/knk-workspace#689): null unless production.enabled. */
     private net.knightsandkings.knk.paper.territory.TerritoryModule territoryModule;
+    /** Yield-area surveys (PandiO/knk-workspace#679): null unless production.enabled. */
+    private net.knightsandkings.knk.paper.production.SurveyModule surveyModule;
+    private net.knightsandkings.knk.paper.production.AreaOutlineRenderer areaOutlineRenderer;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
     /** Overview map reports (PandiO/knk-workspace#735); off unless map.reporting.enabled. */
@@ -754,6 +757,21 @@ public class KnKPlugin extends JavaPlugin {
                     apiClient.getTerritoryApi(), structuresQueryApi,
                     (method, argument) -> realtimeService != null && realtimeService.send(method, argument));
                 territoryModule.start();
+            }
+
+            // Yield-area surveys (PandiO/knk-workspace#679): the survey queue, async chunk snapshot surveys, notable-change
+            // requests and the CaptureRadius world task; only with production.enabled (default false, A21).
+            var surveySettings = net.knightsandkings.knk.paper.production.SurveyConfig.read(getConfig());
+            areaOutlineRenderer = new net.knightsandkings.knk.paper.production.AreaOutlineRenderer(this);
+            if (surveySettings.enabled()) {
+                surveyModule = new net.knightsandkings.knk.paper.production.SurveyModule(this, surveySettings,
+                    apiClient.getProductionSurveyApi());
+                surveyModule.start();
+                if (worldTaskHandlerRegistry != null && worldTasksApi != null) {
+                    worldTaskHandlerRegistry.registerHandler(net.knightsandkings.knk.core.production.survey.CaptureRadius.TASK_TYPE,
+                        new net.knightsandkings.knk.paper.production.CaptureRadiusTaskHandler(worldTasksApi, areaOutlineRenderer,
+                            task -> getServer().getScheduler().runTask(this, task)));
+                }
             }
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
@@ -1381,8 +1399,20 @@ public class KnKPlugin extends JavaPlugin {
         return territoryModule;
     }
 
+    /** Yield-area surveys (PandiO/knk-workspace#679): the running module; null while production.enabled is off. */
+    public net.knightsandkings.knk.paper.production.SurveyModule getSurveyModule() {
+        return surveyModule;
+    }
+
     @Override
     public void onDisable() {
+        if (surveyModule != null) {
+            surveyModule.stop();
+            surveyModule = null;
+        }
+        if (areaOutlineRenderer != null) {
+            areaOutlineRenderer.stopAll();
+        }
         if (territoryModule != null) {
             territoryModule.stop();
             territoryModule = null;
@@ -3286,6 +3316,13 @@ public class KnKPlugin extends JavaPlugin {
                 net.knightsandkings.knk.paper.commands.TerritoryAdminCommand.metadata(),
                 territoryCommand::execute,
                 territoryCommand::complete);
+            // Yield-area surveys (PandiO/knk-workspace#679): /knk production survey|area show; answers "off" without production.enabled
+            var productionCommand = new net.knightsandkings.knk.paper.commands.ProductionAdminCommand(
+                () -> surveyModule, areaOutlineRenderer, this);
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.commands.ProductionAdminCommand.metadata(),
+                productionCommand::execute,
+                productionCommand::complete);
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this,
                     tempRegionRetentionTask);

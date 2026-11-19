@@ -23,7 +23,7 @@ public record SurveySettings(boolean enabled, int pollMinutes, int batch, int ch
     public static final int DEFAULT_BATCH = 20;
     public static final int DEFAULT_CHUNKS_PER_TICK = 2;
     public static final long DEFAULT_MAX_AREA_BLOCKS = 16_000_000L;
-    public static final int DEFAULT_MAX_AREA_CHUNKS = 1024;
+    public static final int DEFAULT_MAX_AREA_CHUNKS = 256;
     public static final int DEFAULT_NOTABLE_CHANGE_BLOCKS = 64;
     public static final int DEFAULT_NOTABLE_COOLDOWN_MINUTES = 30;
     public static final int DEFAULT_AREAS_REFRESH_MINUTES = 10;
