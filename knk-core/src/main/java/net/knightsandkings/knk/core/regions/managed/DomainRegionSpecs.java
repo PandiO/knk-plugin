@@ -83,6 +83,25 @@ public final class DomainRegionSpecs {
         return new Result(specs, skipped, warnings);
     }
 
+    /**
+     * PandiO/knk-workspace#689 (territory DESIGN § 2, G10): crown land anchor regions, top level like towns (no parent),
+     * each in its domain's world.
+     */
+    public static Result crownLands(List<net.knightsandkings.knk.core.domain.domains.KnkDomainSummary> crownLands) {
+        List<ManagedRegionSpec> specs = new ArrayList<>();
+        List<Skipped> skipped = new ArrayList<>();
+        for (var crownLand : nullSafe(crownLands)) {
+            String label = "CrownLand#" + crownLand.id() + " '" + crownLand.name() + "'";
+            if (isBlank(crownLand.wgRegionId())) {
+                skipped.add(new Skipped(label, "no wgRegionId"));
+                continue;
+            }
+            specs.add(new ManagedRegionSpec(crownLand.wgRegionId(), ManagedRegionKind.CROWN_LAND, null, label,
+                    isBlank(crownLand.worldName()) ? null : crownLand.worldName()));
+        }
+        return new Result(specs, skipped, List.of());
+    }
+
     private static <T> List<T> nullSafe(List<T> list) {
         return list != null ? list : List.of();
     }

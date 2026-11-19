@@ -320,6 +320,8 @@ public class KnKPlugin extends JavaPlugin {
     private ExecutorService regionLookupExecutor;
     // Item identity (PandiO/knk-workspace#141); null unless items.identity.enabled.
     private net.knightsandkings.knk.paper.items.identity.ItemIdentityService itemIdentityService;
+    /** Territory (PandiO/knk-workspace#689): null unless production.enabled. */
+    private net.knightsandkings.knk.paper.territory.TerritoryModule territoryModule;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
     /** Overview map reports (PandiO/knk-workspace#735); off unless map.reporting.enabled. */
@@ -725,6 +727,16 @@ public class KnKPlugin extends JavaPlugin {
                     getServer().getPluginManager().registerEvents(
                         new net.knightsandkings.knk.paper.items.identity.ItemConversionListener(itemIdentityService), this);
                 }
+            }
+
+            // Territory (PandiO/knk-workspace#689): chunk cache, lookup on chunk crossings, conflict report; only with
+            // production.enabled (default false, A21). Off, nothing is built, listened to or sent.
+            var territorySettings = net.knightsandkings.knk.paper.territory.TerritoryConfig.read(getConfig());
+            if (territorySettings.enabled()) {
+                territoryModule = new net.knightsandkings.knk.paper.territory.TerritoryModule(this, territorySettings,
+                    apiClient.getTerritoryApi(), structuresQueryApi,
+                    (method, argument) -> realtimeService != null && realtimeService.send(method, argument));
+                territoryModule.start();
             }
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
@@ -1338,8 +1350,17 @@ public class KnKPlugin extends JavaPlugin {
         return itemIdentityService;
     }
 
+    /** Territory (PandiO/knk-workspace#689): the running module; null while production.enabled is off. */
+    public net.knightsandkings.knk.paper.territory.TerritoryModule getTerritoryModule() {
+        return territoryModule;
+    }
+
     @Override
     public void onDisable() {
+        if (territoryModule != null) {
+            territoryModule.stop();
+            territoryModule = null;
+        }
         if (itemIdentityService != null) {
             itemIdentityService.stop();
             itemIdentityService = null;
@@ -2622,6 +2643,7 @@ public class KnKPlugin extends JavaPlugin {
             registerErasureSync(hooks);
             registerModerationSync();
             registerGateCommandSync(); // overview map L7 (#741): web gate commands (API flag Map:GateCommands:Enabled)
+            registerTerritorySync(hooks); // territory (#689): TerritoryChanged, only with production.enabled
             if (metricsService != null) {
                 metricsService.register(realtimeStats);
             }
@@ -2873,6 +2895,20 @@ public class KnKPlugin extends JavaPlugin {
      * lootbox, teleport, navigation, road and telemetry settings; the entity caches by type); the worlds report goes over
      * the hub while connected; and a resync step re-runs the siege's startup-only work that failed at start (#31).
      */
+    /**
+     * Territory (PandiO/knk-workspace#689): {@code TerritoryChanged} → a debounced refresh of the chunk cache, and one more
+     * after every hub (re)connect (an event missed while disconnected). Nothing is registered without production.enabled.
+     */
+    private void registerTerritorySync(net.knightsandkings.knk.core.realtime.ResyncHooks hooks) {
+        var territory = territoryModule;
+        if (territory == null) {
+            return;
+        }
+        realtimeService.dispatcher().register(net.knightsandkings.knk.api.realtime.ConfigEvents.TERRITORY_CHANGED, 1,
+            Runnable::run, envelope -> territory.onTerritoryChanged());
+        hooks.register("territory cache", territory::onTerritoryChanged);
+    }
+
     /** PandiO/knk-workspace#724: the NPC trespass guards look under the held domain answers before the switch. */
     private void npcGuardsLookBeforeRulesChange() {
         if (npcNavigation != null) {
@@ -3217,6 +3253,13 @@ public class KnKPlugin extends JavaPlugin {
                 net.knightsandkings.knk.paper.commands.LandmarkAdminCommand.metadata(),
                 landmarkCommand::execute,
                 landmarkCommand::complete);
+            // Territory (PandiO/knk-workspace#689): /knk territory here|status|rebuild; answers "off" without production.enabled
+            var territoryCommand = new net.knightsandkings.knk.paper.commands.TerritoryAdminCommand(
+                () -> territoryModule == null ? null : territoryModule.service(), this);
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.commands.TerritoryAdminCommand.metadata(),
+                territoryCommand::execute,
+                territoryCommand::complete);
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this,
                     tempRegionRetentionTask);

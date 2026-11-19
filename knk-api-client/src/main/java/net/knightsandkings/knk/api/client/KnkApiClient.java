@@ -149,6 +149,7 @@ public class KnkApiClient {
     /** PandiO/knk-workspace#269: temp regions the API released for removal. */
     private final net.knightsandkings.knk.core.ports.api.TempRegionReleasesApi tempRegionReleasesApi;
     private final net.knightsandkings.knk.core.ports.api.ItemIdentityApi itemIdentityApi;
+    private final net.knightsandkings.knk.core.ports.api.TerritoryApi territoryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
@@ -233,6 +234,8 @@ public class KnkApiClient {
                 objectMapper, authProvider, executor, debugLogging);
         this.itemIdentityApi = new net.knightsandkings.knk.api.impl.ItemIdentityApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
+        this.territoryApi = new net.knightsandkings.knk.api.impl.TerritoryApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -283,6 +286,11 @@ public class KnkApiClient {
     /** Item identity, PandiO/knk-workspace#141. */
     public net.knightsandkings.knk.core.ports.api.ItemIdentityApi getItemIdentityApi() {
         return itemIdentityApi;
+    }
+
+    /** Territory V1 (PandiO/knk-workspace#689): the inputs read and the report. */
+    public net.knightsandkings.knk.core.ports.api.TerritoryApi getTerritoryApi() {
+        return territoryApi;
     }
 
     /** PandiO/knk-workspace#269. */

@@ -30,6 +30,13 @@ public final class ConfigEvents {
         GAME_SETTINGS_CHANGED, SIEGE_CONFIG_CHANGED, LOOTBOX_CONFIG_CHANGED, TELEPORT_DESTINATIONS_CHANGED,
         NAVIGATION_SETTINGS_CHANGED, ROAD_NETWORK_CHANGED, TELEMETRY_CONFIG_CHANGED);
 
+    /**
+     * Territory V1 (PandiO/knk-workspace#326, #689): an input of the territory chunk cache changed (payload
+     * {@code {scope: "territory"}}). Handled by the territory module only while {@code production.enabled} is on, so it is
+     * not in {@link #TYPES}.
+     */
+    public static final String TERRITORY_CHANGED = "TerritoryChanged";
+
     /** Game server → API: the loaded worlds, the body of {@code PUT api/GameSettings/runtime-worlds}. */
     public static final String REPORT_WORLDS = "ReportWorlds";
 

@@ -26,10 +26,22 @@ public class ManagedRegionSpecSource {
     private final StructuresQueryApi structures;
     private final DomainCatalogQueryApi domainCatalog;
     private final int pageSize;
+    /** PandiO/knk-workspace#689: crown land regions as {@link ManagedRegionKind#CROWN_LAND}, only with production.enabled. */
+    private final boolean includeCrownLand;
 
     /** @param domainCatalog optional: without it every Structure is a plain STRUCTURE (Gates not told apart). */
     public ManagedRegionSpecSource(TownsQueryApi towns, DistrictsQueryApi districts, StructuresQueryApi structures,
                                    DomainCatalogQueryApi domainCatalog, int pageSize) {
+        this(towns, districts, structures, domainCatalog, pageSize, false);
+    }
+
+    /**
+     * @param includeCrownLand PandiO/knk-workspace#689: also manage the crown land regions of the domain catalog (domain
+     *                         type {@code CrownLand}) as top-level {@link ManagedRegionKind#CROWN_LAND} regions
+     */
+    public ManagedRegionSpecSource(TownsQueryApi towns, DistrictsQueryApi districts, StructuresQueryApi structures,
+                                   DomainCatalogQueryApi domainCatalog, int pageSize, boolean includeCrownLand) {
+        this.includeCrownLand = includeCrownLand;
         this.towns = towns;
         this.districts = districts;
         this.structures = structures;
@@ -43,6 +55,7 @@ public class ManagedRegionSpecSource {
         CompletableFuture<List<net.knightsandkings.knk.core.domain.districts.DistrictSummary>> districtsFuture = fetchAll(districts::search);
         CompletableFuture<List<net.knightsandkings.knk.core.domain.structures.StructureSummary>> structuresFuture = fetchAll(structures::search);
         List<String> extraWarnings = Collections.synchronizedList(new ArrayList<>());
+        List<KnkDomainSummary> crownLands = Collections.synchronizedList(new ArrayList<>());
         CompletableFuture<Map<Integer, String>> typesFuture = domainCatalog == null
                 ? CompletableFuture.completedFuture(Map.<Integer, String>of())
                 : fetchAll(domainCatalog::search).thenApply(all -> {
@@ -50,6 +63,10 @@ public class ManagedRegionSpecSource {
                     for (KnkDomainSummary domain : all) {
                         if (domain.id() != null && domain.domainType() != null) {
                             types.put(domain.id(), domain.domainType());
+                            if (includeCrownLand && ManagedRegionKind.fromDomainType(domain.domainType())
+                                    .filter(kind -> kind == ManagedRegionKind.CROWN_LAND).isPresent()) {
+                                crownLands.add(domain);
+                            }
                         }
                     }
                     return types;
@@ -63,7 +80,15 @@ public class ManagedRegionSpecSource {
                     townsFuture.join(), districtsFuture.join(), structuresFuture.join(), typesFuture.join());
             List<String> warnings = new ArrayList<>(built.warnings());
             warnings.addAll(extraWarnings);
-            return new DomainRegionSpecs.Result(built.specs(), built.skipped(), warnings);
+            if (crownLands.isEmpty()) {
+                return new DomainRegionSpecs.Result(built.specs(), built.skipped(), warnings);
+            }
+            DomainRegionSpecs.Result crown = DomainRegionSpecs.crownLands(crownLands);
+            List<ManagedRegionSpec> specs = new ArrayList<>(built.specs());
+            specs.addAll(crown.specs());
+            List<DomainRegionSpecs.Skipped> skipped = new ArrayList<>(built.skipped());
+            skipped.addAll(crown.skipped());
+            return new DomainRegionSpecs.Result(specs, skipped, warnings);
         });
     }
 
