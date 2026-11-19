@@ -305,6 +305,8 @@ public class KnKPlugin extends JavaPlugin {
     private ExecutorService regionLookupExecutor;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
+    /** Overview map reports (PandiO/knk-workspace#735); off unless map.reporting.enabled. */
+    private net.knightsandkings.knk.core.map.MapReportingService mapReporting;
     /** KNG-56: domain AllowEntry/AllowExit as WorldGuard flags (synced from the API, enforced by a WG session handler). */
     private net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync domainAccessSync;
     private net.knightsandkings.knk.paper.regions.access.DomainAccessService domainAccess;
@@ -601,6 +603,16 @@ public class KnKPlugin extends JavaPlugin {
             WgRegionIdTaskHandler wgRegionIdHandler = new WgRegionIdTaskHandler(worldTasksApi, this);
             worldTaskHandlerRegistry.registerHandler(wgRegionIdHandler);
 
+            // Overview map L4 (PandiO/knk-workspace#738): the live player snapshot reads these services when it runs.
+            this.mapReporting = net.knightsandkings.knk.paper.map.MapReporting.create(getConfig(), () -> realtimeService,
+                new net.knightsandkings.knk.paper.map.PaperOnlinePlayerSnapshot(() -> getServer().getOnlinePlayers(),
+                    uuid -> statisticsService != null && statisticsService.isAfk(uuid),
+                    player -> modeService != null ? modeService.getActiveMode(player)
+                        : net.knightsandkings.knk.core.domain.users.ActiveMode.NONE,
+                    uuid -> siegeService == null || siegeService.runningMatchOf(uuid).isEmpty() ? null
+                        : new net.knightsandkings.knk.paper.map.PaperOnlinePlayerSnapshot.MinigameMatch("siege",
+                            siegeService.runningMatchApiId(uuid))),
+                getLogger());
             // Managed WorldGuard regions: parent + priority + category flags for Town/District/Structure/Gate regions,
             // applied when a world task's region gets its final name and repaired at every startup
             // (docs/architecture/managed-worldguard-regions.md).
@@ -620,6 +632,15 @@ public class KnKPlugin extends JavaPlugin {
             // before that would see a region with access flags that no domain lists yet and clear them.
             wgRegionIdHandler.setSubRegionFinalizer((subRegionId, mainRegionId, world) ->
                 getServer().getScheduler().runTaskLater(this, () -> domainAccessSync.syncNow().exceptionally(error -> null), 100L));
+            // Overview map L1 (PandiO/knk-workspace#735): domain region outlines to the API, only with map.reporting.enabled.
+            if (mapReporting.enabled()) {
+                managedRegions.afterRepair(specs -> mapReporting.reportDomainRegions(
+                    net.knightsandkings.knk.paper.map.MapReporting.domainRegions(specs)));
+                wgRegionIdHandler.setRenameListener(mapReporting::regionRenamed);
+                // PandiO/knk-workspace#750: the repair never sees sub-regions; every access sync lists them.
+                domainAccessSync.afterSync(rules -> mapReporting.reportSubRegions(
+                    net.knightsandkings.knk.paper.map.MapReporting.subRegions(rules)));
+            }
             managedRegions.scheduleStartupRepair();
             domainAccessSync.setFallbackPolling(fallbackPolling); // S3 (#182): DomainAccessChanged is pushed
             domainAccessSync.schedule();
@@ -1252,6 +1273,8 @@ public class KnKPlugin extends JavaPlugin {
 
             // Last, so every refresh path the resync calls exists (PandiO/knk-workspace#178).
             initializeRealtime();
+            // Overview map L4 (PandiO/knk-workspace#738): live player report, only with map.reporting.enabled.
+            net.knightsandkings.knk.paper.map.MapReporting.startPlayerReports(this, mapReporting);
 
             getLogger().info("KnightsAndKings Plugin Enabled!");
             
@@ -2357,6 +2380,9 @@ public class KnKPlugin extends JavaPlugin {
             if (lootboxRuntime != null) {
                 hooks.register("lootbox runtime", () -> lootboxRuntime.refresh().exceptionally(error -> null));
             }
+            if (mapReporting != null && mapReporting.enabled()) {
+                hooks.register("map region outlines", mapReporting::resendAll);
+            }
             realtimePollMultiplier = settings.fallbackPollMultiplier();
             realtimeService = new net.knightsandkings.knk.paper.realtime.RealtimeService(this, settings,
                 config.api().baseUrl(), createAuthProvider(config.api().auth()), hooks, realtimeStats,
@@ -2367,6 +2393,7 @@ public class KnKPlugin extends JavaPlugin {
             registerConfigSync(hooks);
             registerErasureSync(hooks);
             registerModerationSync();
+            registerGateCommandSync(); // overview map L7 (#741): web gate commands (API flag Map:GateCommands:Enabled)
             if (metricsService != null) {
                 metricsService.register(realtimeStats);
             }
@@ -2433,6 +2460,37 @@ public class KnKPlugin extends JavaPlugin {
             net.knightsandkings.knk.paper.realtime.ModerationSettings.fromConfig(getConfig()),
             new net.knightsandkings.knk.core.realtime.RecentActionIds(), getLogger())
             .register(realtimeService.dispatcher());
+    }
+
+    /**
+     * Overview map L7 (PandiO/knk-workspace#741, OVERVIEW_MAP_DESIGN § 7.1.3, O17): {@code GateCommand} from the web app
+     * runs the existing gate operations (open, close, toggle, the {@code /gate repair} repair) with the normal animation
+     * and answers {@code GateCommandResult}. A gate held by a siege lockdown refuses. The API's
+     * {@code Map:GateCommands:Enabled} (off by default) decides whether commands are sent at all; no plugin key.
+     */
+    private void registerGateCommandSync() {
+        if (gateManager == null) {
+            getLogger().warning("Realtime: web gate commands not handled (gates not loaded)");
+            return;
+        }
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        var gateSupport = new net.knightsandkings.knk.paper.commands.GateCommandSupport(gateManager, gateStructuresApi,
+            gateDoorsApi, new net.knightsandkings.knk.paper.gates.GateTargeting(gateManager));
+        var handler = new net.knightsandkings.knk.core.gates.command.GateCommandHandler(gateManager,
+            structureId -> siegeGates != null && siegeGates.lobbyIdOf(structureId) != null, gateSupport::repair);
+        var service = realtimeService;
+        new net.knightsandkings.knk.paper.realtime.GateCommandRealtimeSync(main, handler, service::send,
+            new net.knightsandkings.knk.core.realtime.RecentActionIds(), getLogger())
+            .register(service.dispatcher());
     }
 
     /**
