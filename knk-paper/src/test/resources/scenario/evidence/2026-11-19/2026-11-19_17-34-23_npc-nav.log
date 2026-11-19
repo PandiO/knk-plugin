@@ -1,0 +1,842 @@
+17:34:23 route: from world_KNK-DEV 1498 52 -399 -> to world_KNK-DEV 1421 85 -516
+17:34:35 run: a group of 20 NPCs, formation ranks, profile default, route from world_KNK-DEV 1498 52 -399 -> to world_KNK-DEV 1421 85 -516
+17:34:35 group 1: leader knk-nav-1, 19 followers, ranks 2 wide, spacing 1.5, lateral spacing 1.0, group-formation from assignment, group-followers-finish-trip false (global)
+17:34:36 knk-nav-1 off-road walk from 1496 51 -397 joins the road at 1494 51 -401: 4 cells (4 blocks walked, 7 expansions, cap 53 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 50 -397, 1495 50 -398, 1495 50 -399, 1494 50 -400
+17:34:38 group 1 (knk-nav-1, 20 NPCs) merges its lanes for 1.1 blocks: the path is too narrow for 2 abreast (stair) at 1478 45 -405
+17:36:34 group 1 (knk-nav-1, 20 NPCs) merges its lanes for 1.1 blocks: the path is too narrow for 2 abreast (stair) at 1405 82 -530
+17:36:57 knk-nav-18 (group 1) stuck at 1421.04 82.00 -531.02, 1.04 blocks behind its slot at 1421.13 82.00 -529.98 (1.04 away), sent 0.93 ahead, moving
+17:36:57 knk-nav-18 (group 1) stuck (no progress 40 ticks) at 1421 82 -532, no wall next to it: step 1 of 3 back-off to 1420 82 -534
+17:36:57 knk-nav-19 waits behind another NPC at 1420 82 -531 (not stuck)
+17:36:59 knk-nav-18 (group 1) freed at 1421 82 -531 by back-off (1 step, 1.5 s)
+17:37:11 stats:
+17:37:11 NPCs 20 (spawns queued 0) states {world_KNK-DEV={IDLE=20}} | planning queue 0, in flight 0
+17:37:11 tick: mean 2.43 ms, p95 3.17 ms (last 1200 ticks) | baseline not set (/knk npc nav baseline before spawning) -> - ms per NPC
+17:37:11 K&K navigation on the main thread: mean 92.6 µs per tick, p95 326.7 µs (0.0046 ms per NPC)
+17:37:11 trips 0 (mean 0.0 s), stretches 17 | orders failed 0
+17:37:11 stuck near a wall: 0, freed by: back-off 0 / side-step 0 / local leg 0 / replan 0, not freed 0 | stuck elsewhere: 1 (back-off 1 / side-step 0 / local leg 0 / replan 0, not freed 0) | steps per stuck: mean 1.0, max 1 | engine found no path 0 | longest still 1.5 s at 1421 82 -531 | falls 0
+17:37:11 local legs: k&k 0, engine 0, none 0
+17:37:11 crowd: waits 1, yields 0, longest queue 1
+17:37:11 pushes: 0 (players 0, attacks 0), returned 0, exempted 0 (now 0), teleported 0
+17:37:11 waits: no allowed route 0 (reported blocked 0), way ahead not loaded 0 | chunk-unload pauses 0, resumes 0
+17:37:11 rules: trespasses 0 (must be 0) | rule checks 72, replans: recheck 0, event 0 | walked to the blocking element 0, woken by its event 0, waiting there now 0
+17:37:11 examiner: 0 cells asked, 0 blocked by K&K rules | engine block rules removed 0 (must be 0)
+17:37:11 distance from the road line: mean 0.42, max 2.76 blocks, over 2 blocks 2.2% of 139 samples
+17:37:11 groups 1 (20 NPCs, ranks): trips 0 | widths: narrows 0, widens 0, merges 2 (stair 2) | folds 0, reforms 0, folded now 0 | abreast now 2 | finished trips 0 (finishing now 0) | own legs back 0 (now 0), left behind 0 (now 0), leader waited 0 (now 0), furthest behind its slot 1.0 blocks | road plans per group event: max 1 | local legs at once: max 0
+17:37:11 failures: none
+17:37:11 route: from world_KNK-DEV 1498 52 -399 -> to world_KNK-DEV 1421 85 -516 | log npc-logs/2026-11-19_17-34-23_npc-nav.log
+17:37:17 knk-nav-1 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:37:36 group 1 (knk-nav-1, 20 NPCs) merges its lanes for 1.2 blocks: the path is too narrow for 2 abreast (stair) at 1401 78 -551
+17:37:38 group 1 (knk-nav-1, 20 NPCs) merges its lanes for 1.3 blocks: the path is too narrow for 2 abreast (stair) at 1407 76 -551
+17:37:53 clear: removed 20 NPCs
+17:37:56 run: 20 NPCs, profile default, route from world_KNK-DEV 1498 52 -399 -> to world_KNK-DEV 1421 85 -516
+17:37:56 knk-nav-23 off-road walk from 1500 52 -397 joins the road at 1497 52 -401: 5 cells (5 blocks walked, 6 expansions, cap 54 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1500 51 -397, 1499 51 -398, 1498 51 -399, 1497 51 -400, 1497 51 -401
+17:37:56 knk-nav-22 off-road walk from 1496 51 -396 joins the road at 1494 51 -401: 5 cells (5 blocks walked, 9 expansions, cap 54 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 50 -396, 1495 50 -397, 1495 50 -398, 1495 50 -399, 1494 50 -400
+17:37:56 knk-nav-25 off-road walk from 1499 52 -396 joins the road at 1497 52 -401: 6 cells (6 blocks walked, 9 expansions, cap 54 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1499 51 -396, 1499 51 -397, 1498 51 -398, 1498 51 -399, 1497 51 -400, 1497 51 -401
+17:37:56 knk-nav-26 off-road walk from 1498 52 -397 joins the road at 1497 52 -401: 5 cells (4 blocks walked, 7 expansions, cap 53 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1498 51 -397, 1498 51 -398, 1498 51 -399, 1497 51 -400, 1497 51 -401
+17:37:56 knk-nav-31 off-road walk from 1500 52 -402 joins the road at 1497 52 -403: 3 cells (2 blocks walked, 3 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1500 51 -402, 1499 51 -402, 1498 51 -403
+17:37:56 knk-nav-33 off-road walk from 1499 52 -396 joins the road at 1497 52 -401: 6 cells (6 blocks walked, 9 expansions, cap 54 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1499 51 -396, 1499 51 -397, 1498 51 -398, 1498 51 -399, 1497 51 -400, 1497 51 -401
+17:37:57 knk-nav-37 off-road walk from 1501 52 -396 joins the road at 1497 52 -401: 6 cells (7 blocks walked, 5 expansions, cap 55 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1501 51 -396, 1500 51 -397, 1499 51 -398, 1498 51 -399, 1497 51 -400, 1497 51 -401
+17:37:57 knk-nav-40 off-road walk from 1497 52 -397 joins the road at 1497 52 -401: 5 cells (4 blocks walked, 4 expansions, cap 53 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1497 51 -397, 1497 51 -398, 1497 51 -399, 1497 51 -400, 1497 51 -401
+17:38:02 run: a group of 20 NPCs, formation ranks, profile default, route from world_KNK-DEV 1498 52 -399 -> to world_KNK-DEV 1421 85 -516
+17:38:03 group 2: leader knk-nav-41, 19 followers, ranks 2 wide, spacing 1.5, lateral spacing 1.0, group-formation from assignment, group-followers-finish-trip false (global)
+17:38:03 group 2 (knk-nav-41, 20 NPCs) merges its lanes for 1.1 blocks: the path is too narrow for 2 abreast (stair) at 1478 45 -405
+17:38:03 knk-nav-43 (group 2) is off its lane at 1501 52 -399: its own leg back to the group's path at 1497 52 -403
+17:38:05 knk-nav-47 (group 2) is off its lane at 1498 52 -398: its own leg back to the group's path at 1497 52 -403
+17:38:08 knk-nav-51 (group 2) stuck at 1496.11 52.00 -403.31, 4.13 blocks behind its slot at 1492.02 51.00 -401.41 (4.50 away), sent 11.15 ahead, moving
+17:38:08 knk-nav-51 (group 2) stuck (no progress 40 ticks) at 1496 52 -404, no wall next to it: step 1 of 3 back-off to 1496 51 -400
+17:38:09 knk-nav-56 (group 2) stuck at 1496.14 52.00 -402.22, 4.58 blocks behind its slot at 1491.58 51.00 -401.40 (4.63 away), sent 11.63 ahead, moving
+17:38:09 knk-nav-56 (group 2) stuck (no progress 40 ticks) at 1496 52 -403, no wall next to it: step 1 of 3 local leg
+17:38:09 knk-nav-56 (group 2) is stuck at 1496 52 -403: its own leg back to the group's path at 1492 51 -403
+17:38:10 knk-nav-56 (group 2) freed at 1493 51 -403 by local leg (1 step, 1.1 s)
+17:38:11 knk-nav-51 (group 2) stuck (no progress 40 ticks) at 1496 52 -402, no wall next to it: step 2 of 3 local leg
+17:38:11 knk-nav-51 (group 2) is stuck at 1496 52 -402: its own leg back to the group's path at 1492 51 -403
+17:38:12 knk-nav-51 (group 2) freed at 1493 51 -402 by local leg (2 steps, 4.1 s)
+17:39:27 knk-nav-24 waits for its turn at the narrow place at 1412 74 -536 (queue 1)
+17:39:27 knk-nav-29 waits for its turn at the narrow place at 1412 74 -536 (queue 2)
+17:39:27 knk-nav-28 waits for its turn at the narrow place at 1412 74 -536 (queue 2)
+17:39:27 knk-nav-39 waits for its turn at the narrow place at 1412 74 -536 (queue 3)
+17:39:28 knk-nav-21 waits for its turn at the narrow place at 1412 74 -536 (queue 4)
+17:39:28 knk-nav-30 waits for its turn at the narrow place at 1412 74 -536 (queue 5)
+17:39:28 knk-nav-34 waits for its turn at the narrow place at 1412 74 -536 (queue 6)
+17:39:28 knk-nav-38 waits for its turn at the narrow place at 1412 74 -536 (queue 7)
+17:39:28 knk-nav-32 waits for its turn at the narrow place at 1412 74 -536 (queue 8)
+17:39:28 knk-nav-35 waits for its turn at the narrow place at 1412 74 -536 (queue 9)
+17:39:30 group 2 (knk-nav-41, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1414 66 -530
+17:39:57 knk-nav-36 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:57 stats:
+17:39:57 NPCs 40 (spawns queued 0) states {world_KNK-DEV={IDLE=21, MOVING=19}} | planning queue 0, in flight 0
+17:39:57 tick: mean 3.07 ms, p95 4.12 ms (last 1200 ticks) | baseline not set (/knk npc nav baseline before spawning) -> - ms per NPC
+17:39:57 K&K navigation on the main thread: mean 237.0 µs per tick, p95 1040.8 µs (0.0059 ms per NPC)
+17:39:57 trips 3 (mean 120.2 s), stretches 341 | orders failed 0
+17:39:57 stuck near a wall: 0, freed by: back-off 0 / side-step 0 / local leg 0 / replan 0, not freed 0 | stuck elsewhere: 2 (back-off 0 / side-step 0 / local leg 2 / replan 0, not freed 0) | steps per stuck: mean 1.5, max 2 | engine found no path 0 | longest still 4.1 s at 1493 51 -402 | falls 0
+17:39:57 local legs: k&k 4, engine 0, none 0
+17:39:57 crowd: waits 10, yields 0, longest queue 9
+17:39:57 pushes: 0 (players 0, attacks 0), returned 0, exempted 0 (now 0), teleported 0
+17:39:57 waits: no allowed route 0 (reported blocked 0), way ahead not loaded 0 | chunk-unload pauses 0, resumes 0
+17:39:57 rules: trespasses 0 (must be 0) | rule checks 1248, replans: recheck 0, event 0 | walked to the blocking element 0, woken by its event 0, waiting there now 0
+17:39:57 examiner: 0 cells asked, 0 blocked by K&K rules | engine block rules removed 0 (must be 0)
+17:39:57 distance from the road line: mean 0.37, max 3.80 blocks, over 2 blocks 4.1% of 2450 samples
+17:39:57 groups 1 (20 NPCs, ranks): trips 0 | widths: narrows 0, widens 0, merges 2 (stair 2) | folds 0, reforms 0, folded now 0 | abreast now 2 | finished trips 0 (finishing now 0) | own legs back 4 (now 0), left behind 0 (now 0), leader waited 0 (now 0), furthest behind its slot 0.9 blocks | road plans per group event: max 1 | local legs at once: max 1
+17:39:57 failures: none
+17:39:57 route: from world_KNK-DEV 1498 52 -399 -> to world_KNK-DEV 1421 85 -516 | log npc-logs/2026-11-19_17-34-23_npc-nav.log
+17:39:58 knk-nav-27 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:58 knk-nav-24 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:58 knk-nav-26 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:59 knk-nav-22 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:59 knk-nav-29 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:59 knk-nav-25 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:59 knk-nav-33 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:59 knk-nav-23 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:39:59 knk-nav-40 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:00 knk-nav-31 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:00 knk-nav-37 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:00 group 2 (knk-nav-41, 20 NPCs) merges its lanes for 1.2 blocks: the path is too narrow for 2 abreast (stair) at 1404 82 -530
+17:40:00 knk-nav-28 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:02 knk-nav-39 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:03 knk-nav-21 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:05 knk-nav-30 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:06 knk-nav-34 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:07 knk-nav-38 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:09 knk-nav-32 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:10 knk-nav-35 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:23 knk-nav-59 waits behind another NPC at 1420 82 -531 (not stuck)
+17:40:24 knk-nav-44 waits behind another NPC at 1421 85 -521 (not stuck)
+17:40:24 knk-nav-46 waits behind another NPC at 1421 85 -522 (not stuck)
+17:40:24 knk-nav-58 (group 2) stuck at 1421.04 82.00 -531.07, 1.09 blocks behind its slot at 1421.13 82.00 -529.99 (1.09 away), sent 0.98 ahead, moving
+17:40:24 knk-nav-58 (group 2) stuck (no progress 40 ticks) at 1421 82 -532, no wall next to it: step 1 of 3 back-off to 1420 82 -534
+17:40:24 knk-nav-60 (group 2) stuck at 1420.91 82.00 -532.54, 1.06 blocks behind its slot at 1421.00 82.00 -531.48 (1.06 away), sent 0.96 ahead, moving
+17:40:24 knk-nav-60 (group 2) stuck (no progress 40 ticks) at 1420 82 -533, no wall next to it: step 1 of 3 back-off to 1420 82 -535
+17:40:24 knk-nav-42 (group 2) stuck at 1421.65 85.00 -518.97, 1.01 blocks behind its slot at 1421.50 85.00 -517.96 (1.02 away), sent 0.97 ahead, moving
+17:40:24 knk-nav-42 (group 2) stuck (no progress 40 ticks) at 1421 85 -519, no wall next to it: step 1 of 3 local leg
+17:40:25 knk-nav-42 (group 2) not freed at 1421 85 -519: replanning (steps used up)
+17:40:25 knk-nav-42 (group 2) not freed at 1421 85 -519: its own leg back failed (no point ahead on its floor to aim at)
+17:40:25 knk-nav-58 (group 2) freed at 1421 82 -531 by back-off (1 step, 1.5 s)
+17:40:27 knk-nav-60 (group 2) stuck (no progress 40 ticks) at 1420 82 -533, no wall next to it: step 2 of 3 local leg
+17:40:28 knk-nav-60 (group 2) not freed at 1420 82 -533: replanning (steps used up)
+17:40:28 knk-nav-60 (group 2) not freed at 1420 82 -533: its own leg back failed (no point ahead on its floor to aim at)
+17:40:29 knk-nav-42 (group 2) stuck at 1421.65 85.00 -518.97, 1.01 blocks behind its slot at 1421.50 85.00 -517.96 (1.02 away), sent 0.97 ahead, moving
+17:40:29 knk-nav-42 (group 2) not freed at 1421 85 -519: replanning (steps used up)
+17:40:29 knk-nav-42 (group 2) not freed at 1421 85 -519: its own leg back failed (no point ahead on its floor to aim at)
+17:40:32 knk-nav-60 (group 2) stuck at 1420.94 82.00 -532.50, 1.02 blocks behind its slot at 1421.00 82.00 -531.48 (1.02 away), sent 0.92 ahead, moving
+17:40:32 knk-nav-60 (group 2) not freed at 1420 82 -533: replanning (steps used up)
+17:40:32 knk-nav-60 (group 2) not freed at 1420 82 -533: its own leg back failed (no point ahead on its floor to aim at)
+17:40:34 knk-nav-42 (group 2) stuck at 1421.65 85.00 -518.97, 1.01 blocks behind its slot at 1421.50 85.00 -517.96 (1.02 away), sent 0.97 ahead, moving
+17:40:34 knk-nav-42 (group 2) not freed at 1421 85 -519: replanning (steps used up)
+17:40:34 knk-nav-42 (group 2) not freed at 1421 85 -519: its own leg back failed (no point ahead on its floor to aim at)
+17:40:34 knk-nav-42 (group 2) could not get back to the group's path (no point ahead on its floor to aim at): the group goes on without it, it keeps trying
+17:40:36 knk-nav-44 (group 2) stuck at 1421.79 85.00 -520.47, 1.01 blocks behind its slot at 1421.80 85.00 -519.46 (1.01 away), sent 0.97 ahead, moving
+17:40:36 knk-nav-44 (group 2) stuck (no progress 40 ticks) at 1421 85 -521, no wall next to it: step 1 of 3 back-off to 1421 84 -523
+17:40:36 knk-nav-60 (group 2) stuck at 1420.94 82.00 -532.50, 1.02 blocks behind its slot at 1421.00 82.00 -531.48 (1.02 away), sent 0.92 ahead, moving
+17:40:36 knk-nav-60 (group 2) not freed at 1420 82 -533: replanning (steps used up)
+17:40:36 knk-nav-60 (group 2) not freed at 1420 82 -533: its own leg back failed (no point ahead on its floor to aim at)
+17:40:36 knk-nav-60 (group 2) could not get back to the group's path (no point ahead on its floor to aim at): the group goes on without it, it keeps trying
+17:40:39 knk-nav-44 (group 2) stuck (no progress 40 ticks) at 1421 85 -521, no wall next to it: step 2 of 3 local leg
+17:40:39 knk-nav-22 waits for its turn at the narrow place at 1414 65 -534 (queue 1)
+17:40:40 knk-nav-33 waits for its turn at the narrow place at 1414 65 -534 (queue 2)
+17:40:40 knk-nav-44 (group 2) not freed at 1421 85 -521: replanning (steps used up)
+17:40:40 knk-nav-44 (group 2) not freed at 1421 85 -521: its own leg back failed (no point ahead on its floor to aim at)
+17:40:40 knk-nav-23 waits for its turn at the narrow place at 1414 65 -534 (queue 3)
+17:40:41 knk-nav-28 waits for its turn at the narrow place at 1414 65 -534 (queue 3)
+17:40:41 knk-nav-37 waits for its turn at the narrow place at 1414 65 -534 (queue 4)
+17:40:43 knk-nav-41 off-road walk to the goal 1498 52 -399 from the road at 1497 52 -401: 3 cells (2 blocks walked, 2 expansions, cap 51 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1496 51 -402, 1497 51 -401, 1497 51 -400
+17:40:48 knk-nav-38 waits for its turn at the narrow place at 1414 65 -534 (queue 2)
+17:40:49 knk-nav-32 waits for its turn at the narrow place at 1414 65 -534 (queue 3)
+17:41:03 group 2 (knk-nav-41, 20 NPCs) merges its lanes for 1.2 blocks: the path is too narrow for 2 abreast (stair) at 1401 78 -551
+17:41:04 group 2 (knk-nav-41, 20 NPCs) merges its lanes for 1.3 blocks: the path is too narrow for 2 abreast (stair) at 1407 76 -551
+17:41:40 route: from world_KNK-DEV 1279 64 -621 -> to world_KNK-DEV 1401 113 -503
+17:41:45 clear: removed 40 NPCs
+17:41:55 run: 1 NPCs, profile default, route from world_KNK-DEV 1279 64 -621 -> to world_KNK-DEV 1401 113 -503
+17:41:56 knk-nav-61 off-road walk from 1278 64 -619 joins the road at 1309 51 -621: 31 cells (44 blocks walked, 627 expansions, cap 146 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1278 63 -619, 1279 63 -619, 1280 63 -619, 1281 63 -619, 1282 63 -619, 1283 63 -619, 1284 63 -619, 1285 63 -619, 1286 63 -619, 1287 63 -619, 1288 63 -619, 1289 63 -619, 1290 62 -619, 1291 61 -619, 1292 61 -620, 1293 60 -620, 1294 60 -620, 1295 59 -620, 1296 59 -621, 1297 58 -621, 1298 57 -621, 1299 57 -621, 1300 57 -621, 1301 56 -621, 1302 55 -622, 1303 55 -623, 1304 54 -623, 1305 54 -622, 1306 53 -622, 1307 52 -622, 1308 51 -622
+17:41:56 knk-nav-61 off-road walk to the goal 1401 113 -503 from the road at 1409 85 -516: 126 cells (180 blocks walked, 4492 expansions, cap 220 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1408 84 -517, 1409 84 -517, 1410 84 -517, 1411 84 -517, 1412 84 -517, 1413 84 -517, 1414 84 -517, 1415 84 -517, 1416 84 -517, 1417 84 -517, 1418 84 -516, 1419 84 -515, 1420 84 -514, 1420 84 -513, 1421 85 -512, 1421 85 -511, 1421 85 -510, 1421 85 -509, 1421 85 -508, 1421 85 -507, 1421 85 -506, 1420 85 -505, 1419 85 -504, 1418 85 -503, 1417 85 -502, 1416 85 -501, 1415 85 -501, 1414 85 -501, 1413 85 -501, 1412 85 -501, 1411 85 -502, 1410 85 -503, 1409 86 -504, 1408 86 -504, 1407 87 -505, 1406 87 -505, 1405 88 -504, 1404 89 -503, 1403 89 -503, 1402 89 -502, 1402 90 -501, 1401 90 -500, 1400 91 -499, 1401 91 -498, 1402 91 -497, 1403 91 -498, 1404 91 -499, 1405 91 -500, 1406 91 -501, 1406 91 -502, 1406 92 -503, 1405 93 -504, 1404 93 -504, 1403 94 -503, 1402 95 -502, 1401 95 -501, 1400 95 -500, 1400 95 -499, 1400 95 -498, 1401 95 -497, 1402 95 -497, 1403 95 -497, 1404 95 -498, 1404 95 -499, 1405 95 -500, 1406 95 -501, 1406 95 -502, 1406 96 -503, 1405 97 -504, 1404 98 -503, 1403 98 -503, 1402 99 -502, 1401 99 -501, 1400 100 -500, 1400 100 -499, 1400 101 -498, 1401 102 -497, 1402 102 -496, 1403 103 -495, 1404 103 -494, 1405 103 -494, 1406 103 -494, 1407 103 -495, 1407 103 -496, 1407 103 -497, 1407 103 -498, 1408 103 -499, 1409 103 -500, 1410 103 -501, 1411 104 -502, 1410 105 -503, 1409 105 -503, 1408 106 -503, 1407 106 -504, 1406 107 -505, 1405 107 -505, 1404 107 -504, 1403 107 -503, 1402 107 -502, 1402 107 -501, 1402 107 -500, 1403 107 -499, 1404 107 -499, 1405 107 -499, 1406 107 -498, 1406 107 -497, 1407 107 -496, 1408 108 -495, 1409 109 -496, 1410 109 -496, 1411 110 -497, 1412 111 -498, 1413 112 -499, 1412 112 -500, 1412 112 -501, 1412 112 -502, 1411 112 -503, 1410 112 -503, 1409 112 -503, 1408 112 -503, 1407 112 -503, 1406 112 -503, 1405 112 -503, 1404 112 -504, 1403 112 -504, 1402 112 -503
+17:45:03 knk-nav-61 off-road walk from 1402 113 -503 joins the road at 1417 85 -516: 116 cells (170 blocks walked, 1653 expansions, cap 220 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1402 112 -503, 1403 112 -503, 1404 112 -504, 1405 112 -504, 1406 112 -504, 1407 112 -504, 1408 112 -503, 1409 112 -503, 1410 112 -503, 1411 112 -503, 1412 112 -502, 1412 112 -501, 1412 112 -500, 1413 112 -499, 1412 111 -498, 1411 110 -497, 1410 109 -496, 1409 108 -495, 1408 108 -495, 1407 107 -496, 1406 107 -497, 1406 107 -498, 1405 107 -499, 1404 107 -499, 1403 107 -499, 1402 107 -500, 1402 107 -501, 1402 107 -502, 1403 107 -503, 1404 107 -504, 1405 107 -504, 1406 107 -505, 1407 106 -505, 1408 106 -505, 1409 105 -504, 1410 105 -503, 1411 104 -502, 1411 103 -501, 1411 103 -500, 1411 103 -499, 1410 103 -498, 1409 103 -497, 1408 103 -496, 1407 103 -495, 1406 103 -494, 1405 103 -494, 1404 103 -494, 1403 103 -495, 1402 102 -496, 1402 102 -497, 1401 101 -498, 1401 100 -499, 1400 100 -500, 1401 99 -501, 1402 99 -502, 1403 98 -503, 1404 97 -504, 1405 97 -504, 1406 96 -503, 1406 95 -502, 1406 95 -501, 1406 95 -500, 1405 95 -499, 1404 95 -498, 1403 95 -497, 1402 95 -497, 1401 95 -497, 1400 95 -498, 1400 95 -499, 1400 95 -500, 1401 95 -501, 1402 95 -502, 1403 94 -503, 1404 93 -504, 1405 93 -504, 1406 92 -503, 1406 91 -502, 1406 91 -501, 1405 91 -500, 1404 91 -499, 1403 91 -498, 1402 91 -497, 1401 91 -498, 1400 91 -499, 1401 90 -500, 1401 90 -501, 1402 89 -502, 1403 89 -503, 1404 88 -504, 1405 88 -505, 1406 87 -505, 1407 87 -505, 1408 86 -505, 1409 86 -504, 1410 85 -503, 1411 85 -502, 1412 85 -501, 1413 85 -501, 1414 85 -501, 1415 85 -501, 1416 85 -501, 1417 85 -502, 1417 85 -503, 1417 85 -504, 1417 85 -505, 1417 85 -506, 1418 85 -507, 1419 85 -508, 1420 85 -509, 1421 85 -510, 1421 85 -511, 1421 85 -512, 1420 84 -513, 1420 84 -514, 1419 84 -515, 1418 84 -516
+17:45:03 knk-nav-61 off-road walk to the goal 1279 64 -621 from the road at 1309 51 -621: 33 cells (51 blocks walked, 586 expansions, cap 145 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -622, 1305 54 -623, 1304 55 -624, 1303 55 -624, 1302 56 -625, 1301 56 -625, 1300 56 -626, 1299 56 -626, 1298 57 -627, 1297 57 -628, 1296 57 -628, 1295 57 -629, 1294 57 -629, 1293 57 -628, 1292 58 -628, 1291 58 -628, 1290 59 -628, 1289 60 -627, 1288 60 -626, 1288 61 -625, 1287 61 -624, 1287 61 -623, 1287 62 -622, 1286 62 -621, 1285 63 -620, 1284 63 -620, 1283 63 -620, 1282 63 -620, 1281 63 -620, 1280 63 -621
+17:45:19 stats:
+17:45:19 NPCs 1 (spawns queued 0) states {world_KNK-DEV={MOVING=1}} | planning queue 0, in flight 0
+17:45:19 tick: mean 2.04 ms, p95 2.72 ms (last 1200 ticks) | baseline not set (/knk npc nav baseline before spawning) -> - ms per NPC
+17:45:19 K&K navigation on the main thread: mean 17.4 µs per tick, p95 58.5 µs (0.0174 ms per NPC)
+17:45:19 trips 1 (mean 186.2 s), stretches 30 | orders failed 0
+17:45:19 stuck near a wall: 0, freed by: back-off 0 / side-step 0 / local leg 0 / replan 0, not freed 0 | stuck elsewhere: 0 (back-off 0 / side-step 0 / local leg 0 / replan 0, not freed 0) | steps per stuck: mean 0.0, max 0 | engine found no path 0 | longest still 0.0 s | falls 0
+17:45:19 local legs: k&k 0, engine 0, none 0
+17:45:19 crowd: waits 0, yields 0, longest queue 1
+17:45:19 pushes: 0 (players 0, attacks 0), returned 0, exempted 0 (now 0), teleported 0
+17:45:19 waits: no allowed route 0 (reported blocked 0), way ahead not loaded 0 | chunk-unload pauses 0, resumes 0
+17:45:19 rules: trespasses 0 (must be 0) | rule checks 101, replans: recheck 0, event 0 | walked to the blocking element 0, woken by its event 0, waiting there now 0
+17:45:19 examiner: 0 cells asked, 0 blocked by K&K rules | engine block rules removed 0 (must be 0)
+17:45:19 distance from the road line: mean 0.28, max 3.07 blocks, over 2 blocks 2.0% of 201 samples
+17:45:19 groups 0 (0 NPCs): trips 0 | widths: narrows 0, widens 0, merges 0 | folds 0, reforms 0, folded now 0 | abreast now - | finished trips 0 (finishing now 0) | own legs back 0 (now 0), left behind 0 (now 0), leader waited 0 (now 0), furthest behind its slot 0.0 blocks | road plans per group event: max 0 | local legs at once: max 0
+17:45:19 failures: none
+17:45:19 route: from world_KNK-DEV 1279 64 -621 -> to world_KNK-DEV 1401 113 -503 | log npc-logs/2026-11-19_17-34-23_npc-nav.log
+17:47:38 clear: removed 1 NPCs
+17:47:45 run: a group of 20 NPCs, formation ranks, profile default, route from world_KNK-DEV 1279 64 -621 -> to world_KNK-DEV 1401 113 -503
+17:47:46 group 3: leader knk-nav-62, 19 followers, ranks 2 wide, spacing 1.5, lateral spacing 1.0, group-formation from assignment, group-followers-finish-trip false (global)
+17:47:46 knk-nav-62 off-road walk from 1281 63 -623 joins the road at 1309 51 -621: 28 cells (42 blocks walked, 601 expansions, cap 138 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1281 62 -623, 1282 62 -624, 1283 62 -624, 1284 61 -625, 1285 61 -625, 1286 61 -626, 1287 61 -626, 1288 61 -625, 1289 60 -625, 1290 59 -625, 1291 59 -625, 1292 58 -625, 1293 58 -625, 1294 58 -625, 1295 58 -625, 1296 58 -625, 1297 57 -625, 1298 57 -625, 1299 56 -625, 1300 56 -626, 1301 56 -625, 1302 56 -625, 1303 55 -624, 1304 55 -624, 1305 54 -623, 1306 53 -622, 1307 52 -622, 1308 51 -622
+17:47:46 knk-nav-62 off-road walk to the goal 1401 113 -503 from the road at 1409 85 -516: 126 cells (180 blocks walked, 4492 expansions, cap 220 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1408 84 -517, 1409 84 -517, 1410 84 -517, 1411 84 -517, 1412 84 -517, 1413 84 -517, 1414 84 -517, 1415 84 -517, 1416 84 -517, 1417 84 -517, 1418 84 -516, 1419 84 -515, 1420 84 -514, 1420 84 -513, 1421 85 -512, 1421 85 -511, 1421 85 -510, 1421 85 -509, 1421 85 -508, 1421 85 -507, 1421 85 -506, 1420 85 -505, 1419 85 -504, 1418 85 -503, 1417 85 -502, 1416 85 -501, 1415 85 -501, 1414 85 -501, 1413 85 -501, 1412 85 -501, 1411 85 -502, 1410 85 -503, 1409 86 -504, 1408 86 -504, 1407 87 -505, 1406 87 -505, 1405 88 -504, 1404 89 -503, 1403 89 -503, 1402 89 -502, 1402 90 -501, 1401 90 -500, 1400 91 -499, 1401 91 -498, 1402 91 -497, 1403 91 -498, 1404 91 -499, 1405 91 -500, 1406 91 -501, 1406 91 -502, 1406 92 -503, 1405 93 -504, 1404 93 -504, 1403 94 -503, 1402 95 -502, 1401 95 -501, 1400 95 -500, 1400 95 -499, 1400 95 -498, 1401 95 -497, 1402 95 -497, 1403 95 -497, 1404 95 -498, 1404 95 -499, 1405 95 -500, 1406 95 -501, 1406 95 -502, 1406 96 -503, 1405 97 -504, 1404 98 -503, 1403 98 -503, 1402 99 -502, 1401 99 -501, 1400 100 -500, 1400 100 -499, 1400 101 -498, 1401 102 -497, 1402 102 -496, 1403 103 -495, 1404 103 -494, 1405 103 -494, 1406 103 -494, 1407 103 -495, 1407 103 -496, 1407 103 -497, 1407 103 -498, 1408 103 -499, 1409 103 -500, 1410 103 -501, 1411 104 -502, 1410 105 -503, 1409 105 -503, 1408 106 -503, 1407 106 -504, 1406 107 -505, 1405 107 -505, 1404 107 -504, 1403 107 -503, 1402 107 -502, 1402 107 -501, 1402 107 -500, 1403 107 -499, 1404 107 -499, 1405 107 -499, 1406 107 -498, 1406 107 -497, 1407 107 -496, 1408 108 -495, 1409 109 -496, 1410 109 -496, 1411 110 -497, 1412 111 -498, 1413 112 -499, 1412 112 -500, 1412 112 -501, 1412 112 -502, 1411 112 -503, 1410 112 -503, 1409 112 -503, 1408 112 -503, 1407 112 -503, 1406 112 -503, 1405 112 -503, 1404 112 -504, 1403 112 -504, 1402 112 -503
+17:47:47 knk-nav-70 (group 3) is off its lane at 1278 64 -619: its own leg back to the group's path at 1281 63 -623
+17:47:50 knk-nav-64 (group 3) stuck at 1283.70 63.00 -624.18, 5.37 blocks behind its slot at 1288.18 62.00 -624.60 (4.50 away), sent 7.62 ahead, moving
+17:47:50 knk-nav-64 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 back-off to 1281 64 -623
+17:47:50 knk-nav-66 waits behind another NPC at 1283 63 -625 (not stuck)
+17:47:51 knk-nav-68 (group 3) stuck at 1283.70 63.00 -624.18, 6.21 blocks behind its slot at 1288.58 62.00 -623.68 (4.90 away), sent 7.34 ahead, not moving
+17:47:51 knk-nav-68 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 side-step to 1282 63 -625
+17:47:52 knk-nav-70 waits behind another NPC at 1283 63 -625 (not stuck)
+17:47:52 knk-nav-70 (group 3) stuck at 1283.70 63.00 -624.18, 8.65 blocks behind its slot at 1291.38 60.00 -624.00 (7.68 away), sent 9.41 ahead, not moving
+17:47:52 knk-nav-70 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 back-off to 1282 63 -623
+17:47:52 knk-nav-66 (group 3) stuck at 1283.70 63.00 -624.18, 11.62 blocks behind its slot at 1294.35 59.00 -624.00 (10.65 away), sent 17.24 ahead, moving
+17:47:52 knk-nav-66 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 back-off to 1281 64 -622
+17:47:52 knk-nav-72 (group 3) stuck at 1283.70 63.00 -624.18, 8.62 blocks behind its slot at 1291.35 60.00 -624.00 (7.65 away), sent 7.23 ahead, moving
+17:47:52 knk-nav-72 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 back-off to 1282 63 -623
+17:47:53 knk-nav-64 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 2 of 3 side-step to 1282 63 -625
+17:47:53 knk-nav-74 (group 3) stuck at 1283.70 63.00 -624.18, 9.68 blocks behind its slot at 1292.40 59.00 -624.00 (8.71 away), sent 8.74 ahead, moving
+17:47:53 knk-nav-74 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 side-step to 1282 63 -625
+17:47:54 knk-nav-76 (group 3) stuck at 1283.70 63.00 -624.18, 10.45 blocks behind its slot at 1293.17 59.00 -624.00 (9.47 away), sent 6.34 ahead, not moving
+17:47:54 knk-nav-76 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 back-off to 1282 63 -623
+17:47:54 knk-nav-78 (group 3) stuck at 1283.70 63.00 -624.18, 10.09 blocks behind its slot at 1292.82 59.00 -624.00 (9.12 away), sent 4.84 ahead, moving
+17:47:54 knk-nav-78 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 back-off to 1282 63 -623
+17:47:54 knk-nav-80 (group 3) stuck at 1283.70 63.00 -624.18, 9.09 blocks behind its slot at 1291.82 60.00 -624.00 (8.12 away), sent 4.24 ahead, not moving
+17:47:54 knk-nav-80 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 1 of 3 back-off to 1281 64 -623
+17:47:55 knk-nav-68 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 2 of 3 local leg
+17:47:55 knk-nav-68 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:47:55 knk-nav-70 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 2 of 3 side-step to 1282 63 -625
+17:47:55 knk-nav-66 (group 3) stuck (no progress 40 ticks) at 1283 63 -624, wall at 1284 63 -624 (east): step 2 of 3 side-step to 1282 63 -624
+17:47:55 knk-nav-72 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 2 of 3 side-step to 1282 63 -625
+17:47:56 knk-nav-64 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 3 of 3 local leg
+17:47:56 knk-nav-64 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:47:56 knk-nav-74 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 2 of 3 local leg
+17:47:56 knk-nav-74 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:47:56 knk-nav-68 (group 3) freed at 1286 62 -626 by local leg (2 steps, 4.8 s)
+17:47:56 knk-nav-74 waits for its turn at the narrow place at 1285 62 -625 (queue 1)
+17:47:57 knk-nav-76 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 2 of 3 side-step to 1282 63 -625
+17:47:57 knk-nav-78 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 2 of 3 side-step to 1282 63 -625
+17:47:57 knk-nav-80 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 2 of 3 side-step to 1282 63 -625
+17:47:57 group 3 (knk-nav-62) waits: a follower is 24 blocks behind its slot
+17:47:57 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.2 blocks: the path is too narrow for 2 abreast (narrow) at 1306 53 -622
+17:47:58 knk-nav-64 (group 3) freed at 1286 61 -626 by local leg (3 steps, 7.5 s)
+17:47:58 knk-nav-70 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 3 of 3 local leg
+17:47:58 knk-nav-70 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:47:58 knk-nav-66 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 3 of 3 local leg
+17:47:58 knk-nav-66 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:47:58 knk-nav-72 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 3 of 3 local leg
+17:47:58 knk-nav-72 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:47:58 knk-nav-74 (group 3) freed at 1286 62 -626 by local leg (2 steps, 5.4 s)
+17:48:00 knk-nav-70 (group 3) freed at 1286 62 -626 by local leg (3 steps, 7.7 s)
+17:48:00 knk-nav-76 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 3 of 3 local leg
+17:48:00 knk-nav-76 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:48:00 knk-nav-78 (group 3) stuck (no progress 40 ticks) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 3 of 3 local leg
+17:48:00 knk-nav-78 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:48:00 knk-nav-80 (group 3) stuck (stationary) at 1283 63 -625, wall at 1284 63 -624 (south-east): step 3 of 3 local leg
+17:48:00 knk-nav-80 (group 3) is stuck at 1283 63 -625: its own leg back to the group's path at 1286 62 -626
+17:48:00 knk-nav-66 (group 3) freed at 1286 62 -626 by local leg (3 steps, 7.6 s)
+17:48:00 knk-nav-72 (group 3) freed at 1286 62 -626 by local leg (3 steps, 7.6 s)
+17:48:00 knk-nav-78 waits for its turn at the narrow place at 1285 62 -625 (queue 1)
+17:48:00 knk-nav-80 waits for its turn at the narrow place at 1285 62 -625 (queue 2)
+17:48:01 knk-nav-76 (group 3) freed at 1286 61 -626 by local leg (3 steps, 7.7 s)
+17:48:02 knk-nav-78 (group 3) freed at 1286 62 -626 by local leg (3 steps, 8.4 s)
+17:48:03 knk-nav-62 off-road walk to the goal 1401 113 -503 from the road at 1409 85 -516: 126 cells (180 blocks walked, 4492 expansions, cap 220 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1408 84 -517, 1409 84 -517, 1410 84 -517, 1411 84 -517, 1412 84 -517, 1413 84 -517, 1414 84 -517, 1415 84 -517, 1416 84 -517, 1417 84 -517, 1418 84 -516, 1419 84 -515, 1420 84 -514, 1420 84 -513, 1421 85 -512, 1421 85 -511, 1421 85 -510, 1421 85 -509, 1421 85 -508, 1421 85 -507, 1421 85 -506, 1420 85 -505, 1419 85 -504, 1418 85 -503, 1417 85 -502, 1416 85 -501, 1415 85 -501, 1414 85 -501, 1413 85 -501, 1412 85 -501, 1411 85 -502, 1410 85 -503, 1409 86 -504, 1408 86 -504, 1407 87 -505, 1406 87 -505, 1405 88 -504, 1404 89 -503, 1403 89 -503, 1402 89 -502, 1402 90 -501, 1401 90 -500, 1400 91 -499, 1401 91 -498, 1402 91 -497, 1403 91 -498, 1404 91 -499, 1405 91 -500, 1406 91 -501, 1406 91 -502, 1406 92 -503, 1405 93 -504, 1404 93 -504, 1403 94 -503, 1402 95 -502, 1401 95 -501, 1400 95 -500, 1400 95 -499, 1400 95 -498, 1401 95 -497, 1402 95 -497, 1403 95 -497, 1404 95 -498, 1404 95 -499, 1405 95 -500, 1406 95 -501, 1406 95 -502, 1406 96 -503, 1405 97 -504, 1404 98 -503, 1403 98 -503, 1402 99 -502, 1401 99 -501, 1400 100 -500, 1400 100 -499, 1400 101 -498, 1401 102 -497, 1402 102 -496, 1403 103 -495, 1404 103 -494, 1405 103 -494, 1406 103 -494, 1407 103 -495, 1407 103 -496, 1407 103 -497, 1407 103 -498, 1408 103 -499, 1409 103 -500, 1410 103 -501, 1411 104 -502, 1410 105 -503, 1409 105 -503, 1408 106 -503, 1407 106 -504, 1406 107 -505, 1405 107 -505, 1404 107 -504, 1403 107 -503, 1402 107 -502, 1402 107 -501, 1402 107 -500, 1403 107 -499, 1404 107 -499, 1405 107 -499, 1406 107 -498, 1406 107 -497, 1407 107 -496, 1408 108 -495, 1409 109 -496, 1410 109 -496, 1411 110 -497, 1412 111 -498, 1413 112 -499, 1412 112 -500, 1412 112 -501, 1412 112 -502, 1411 112 -503, 1410 112 -503, 1409 112 -503, 1408 112 -503, 1407 112 -503, 1406 112 -503, 1405 112 -503, 1404 112 -504, 1403 112 -504, 1402 112 -503
+17:48:03 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.7 blocks: the path is too narrow for 2 abreast (stair) at 1310 51 -623
+17:48:03 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.9 blocks: the path is too narrow for 2 abreast (narrow) at 1307 54 -622
+17:48:03 knk-nav-80 (group 3) freed at 1286 61 -626 by local leg (3 steps, 9.5 s)
+17:48:04 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.7 blocks: the path is too narrow for 2 abreast (stair) at 1310 51 -623
+17:48:13 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.3 blocks: the path is too narrow for 2 abreast (stair) at 1348 46 -615
+17:48:18 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.6 blocks: the path is too narrow for 2 abreast (stair) at 1361 47 -602
+17:48:19 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.2 blocks: the path is too narrow for 2 abreast (stair) at 1363 46 -600
+17:48:35 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.4 blocks: the path is too narrow for 2 abreast (narrow) at 1381 43 -577
+17:48:40 knk-nav-80 (group 3) stuck at 1381.28 45.00 -580.30, 7.54 blocks behind its slot at 1379.61 43.00 -573.52 (6.98 away), sent 18.64 ahead, moving
+17:48:40 knk-nav-80 (group 3) stuck (no progress 40 ticks) at 1381 45 -581, wall at 1380 45 -580 (south-west): step 1 of 3 back-off to 1379 45 -583
+17:48:41 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.9 blocks: the path is too narrow for 2 abreast (stair) at 1386 44 -540
+17:48:43 knk-nav-80 (group 3) stuck (no progress 40 ticks) at 1381 45 -580, wall at 1380 45 -580 (west): step 2 of 3 side-step to 1382 45 -579
+17:48:44 knk-nav-80 (group 3) freed at 1381 44 -579 by side-step (2 steps, 3.8 s)
+17:49:11 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1414 56 -499
+17:49:59 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.1 blocks: the path is too narrow for 2 abreast (stair) at 1405 82 -530
+17:50:31 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (narrow) at 1409 87 -504
+17:50:32 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1404 90 -503
+17:50:38 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (narrow) at 1405 94 -504
+17:50:40 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1402 96 -502
+17:50:46 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1404 99 -503
+17:50:50 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1401 103 -497
+17:50:52 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.0 blocks: the path is too narrow for 2 abreast (narrow) at 1405 104 -494
+17:51:02 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1409 110 -496
+17:51:16 knk-nav-62 off-road walk from 1402 113 -503 joins the road at 1417 85 -516: 116 cells (170 blocks walked, 1653 expansions, cap 220 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1402 112 -503, 1403 112 -503, 1404 112 -504, 1405 112 -504, 1406 112 -504, 1407 112 -504, 1408 112 -503, 1409 112 -503, 1410 112 -503, 1411 112 -503, 1412 112 -502, 1412 112 -501, 1412 112 -500, 1413 112 -499, 1412 111 -498, 1411 110 -497, 1410 109 -496, 1409 108 -495, 1408 108 -495, 1407 107 -496, 1406 107 -497, 1406 107 -498, 1405 107 -499, 1404 107 -499, 1403 107 -499, 1402 107 -500, 1402 107 -501, 1402 107 -502, 1403 107 -503, 1404 107 -504, 1405 107 -504, 1406 107 -505, 1407 106 -505, 1408 106 -505, 1409 105 -504, 1410 105 -503, 1411 104 -502, 1411 103 -501, 1411 103 -500, 1411 103 -499, 1410 103 -498, 1409 103 -497, 1408 103 -496, 1407 103 -495, 1406 103 -494, 1405 103 -494, 1404 103 -494, 1403 103 -495, 1402 102 -496, 1402 102 -497, 1401 101 -498, 1401 100 -499, 1400 100 -500, 1401 99 -501, 1402 99 -502, 1403 98 -503, 1404 97 -504, 1405 97 -504, 1406 96 -503, 1406 95 -502, 1406 95 -501, 1406 95 -500, 1405 95 -499, 1404 95 -498, 1403 95 -497, 1402 95 -497, 1401 95 -497, 1400 95 -498, 1400 95 -499, 1400 95 -500, 1401 95 -501, 1402 95 -502, 1403 94 -503, 1404 93 -504, 1405 93 -504, 1406 92 -503, 1406 91 -502, 1406 91 -501, 1405 91 -500, 1404 91 -499, 1403 91 -498, 1402 91 -497, 1401 91 -498, 1400 91 -499, 1401 90 -500, 1401 90 -501, 1402 89 -502, 1403 89 -503, 1404 88 -504, 1405 88 -505, 1406 87 -505, 1407 87 -505, 1408 86 -505, 1409 86 -504, 1410 85 -503, 1411 85 -502, 1412 85 -501, 1413 85 -501, 1414 85 -501, 1415 85 -501, 1416 85 -501, 1417 85 -502, 1417 85 -503, 1417 85 -504, 1417 85 -505, 1417 85 -506, 1418 85 -507, 1419 85 -508, 1420 85 -509, 1421 85 -510, 1421 85 -511, 1421 85 -512, 1420 84 -513, 1420 84 -514, 1419 84 -515, 1418 84 -516
+17:51:16 knk-nav-62 off-road walk to the goal 1279 64 -621 from the road at 1309 51 -621: 33 cells (51 blocks walked, 586 expansions, cap 145 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -622, 1305 54 -623, 1304 55 -624, 1303 55 -624, 1302 56 -625, 1301 56 -625, 1300 56 -626, 1299 56 -626, 1298 57 -627, 1297 57 -628, 1296 57 -628, 1295 57 -629, 1294 57 -629, 1293 57 -628, 1292 58 -628, 1291 58 -628, 1290 59 -628, 1289 60 -627, 1288 60 -626, 1288 61 -625, 1287 61 -624, 1287 61 -623, 1287 62 -622, 1286 62 -621, 1285 63 -620, 1284 63 -620, 1283 63 -620, 1282 63 -620, 1281 63 -620, 1280 63 -621
+17:51:16 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (narrow) at 1410 110 -496
+17:51:17 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1409 109 -495
+17:51:20 stats:
+17:51:20 NPCs 20 (spawns queued 0) states {world_KNK-DEV={IDLE=19, MOVING=1}} | planning queue 0, in flight 0
+17:51:20 tick: mean 2.53 ms, p95 3.29 ms (last 1200 ticks) | baseline not set (/knk npc nav baseline before spawning) -> - ms per NPC
+17:51:20 K&K navigation on the main thread: mean 72.6 µs per tick, p95 332.3 µs (0.0036 ms per NPC)
+17:51:20 trips 0 (mean 0.0 s), stretches 28 | orders failed 0
+17:51:20 stuck near a wall: 0, freed by: back-off 0 / side-step 0 / local leg 0 / replan 0, not freed 0 | stuck elsewhere: 10 (back-off 0 / side-step 1 / local leg 9 / replan 0, not freed 0) | steps per stuck: mean 2.7, max 3 | engine found no path 0 | longest still 9.5 s at 1286 61 -626 | falls 0
+17:51:20 local legs: k&k 10, engine 0, none 0
+17:51:20 crowd: waits 5, yields 0, longest queue 2
+17:51:20 pushes: 0 (players 0, attacks 0), returned 0, exempted 0 (now 0), teleported 0
+17:51:20 waits: no allowed route 0 (reported blocked 0), way ahead not loaded 0 | chunk-unload pauses 0, resumes 0
+17:51:20 rules: trespasses 0 (must be 0) | rule checks 106, replans: recheck 0, event 0 | walked to the blocking element 0, woken by its event 0, waiting there now 0
+17:51:20 examiner: 0 cells asked, 0 blocked by K&K rules | engine block rules removed 0 (must be 0)
+17:51:20 distance from the road line: mean 0.31, max 3.39 blocks, over 2 blocks 0.5% of 205 samples
+17:51:20 groups 1 (20 NPCs, ranks): trips 1 | widths: narrows 0, widens 0, merges 21 (stair 14, narrow 7) | folds 0, reforms 0, folded now 0 | abreast now 2 | finished trips 0 (finishing now 0) | own legs back 10 (now 0), left behind 0 (now 0), leader waited 1 (now 0), furthest behind its slot 0.6 blocks | road plans per group event: max 1 | local legs at once: max 3
+17:51:20 failures: none
+17:51:20 route: from world_KNK-DEV 1279 64 -621 -> to world_KNK-DEV 1401 113 -503 | log npc-logs/2026-11-19_17-34-23_npc-nav.log
+17:51:22 knk-nav-62: no walk from 1411 111 -496 to 1410 110 -496 on the line, a local leg takes that step
+17:51:28 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.0 blocks: the path is too narrow for 2 abreast (narrow) at 1405 104 -494
+17:51:34 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1404 98 -504
+17:51:43 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (edge) at 1404 94 -504
+17:52:16 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.0 blocks: the path is too narrow for 2 abreast (stair) at 1405 82 -530
+17:53:12 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.2 blocks: the path is too narrow for 2 abreast (stair) at 1415 56 -500
+17:53:42 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.3 blocks: the path is too narrow for 2 abreast (stair) at 1386 44 -541
+17:54:00 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.9 blocks: the path is too narrow for 2 abreast (narrow) at 1381 43 -577
+17:54:03 group 3 (knk-nav-62, 20 NPCs) folds into a column: the path is too narrow for 2 abreast (stair) at 1364 45 -599
+17:54:12 route from set at world_KNK-DEV 1411 81 -486
+17:54:17 group 3 (knk-nav-62, 20 NPCs) takes up 2 abreast again at 1347 45 -616
+17:54:17 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.0 blocks: the path is too narrow for 2 abreast (stair) at 1348 46 -615
+17:54:17 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1347 45 -616
+17:54:23 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 1.8 blocks: the path is too narrow for 2 abreast (stair) at 1312 49 -624
+17:54:27 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1304 56 -624
+17:54:27 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1302 57 -625
+17:54:29 route to set at world_KNK-DEV 1419 82 -551
+17:54:33 group 3 (knk-nav-62, 20 NPCs) merges its lanes for 0.7 blocks: the path is too narrow for 2 abreast (stair) at 1289 61 -627
+17:54:43 knk-nav-62 off-road walk from 1280 64 -621 joins the road at 1309 51 -621: 29 cells (43 blocks walked, 596 expansions, cap 144 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1280 63 -621, 1281 63 -621, 1282 63 -621, 1283 63 -620, 1284 63 -620, 1285 63 -620, 1286 63 -620, 1287 63 -619, 1288 63 -619, 1289 63 -619, 1290 62 -619, 1291 61 -619, 1292 61 -620, 1293 60 -620, 1294 60 -620, 1295 59 -620, 1296 59 -621, 1297 58 -621, 1298 57 -621, 1299 57 -621, 1300 57 -621, 1301 56 -621, 1302 55 -622, 1303 55 -623, 1304 54 -623, 1305 54 -622, 1306 53 -622, 1307 52 -622, 1308 51 -622
+17:54:54 clear: removed 20 NPCs
+17:55:03 run: 1 NPCs, profile default, route from world_KNK-DEV 1411 81 -486 -> to world_KNK-DEV 1419 82 -551
+17:55:03 knk-nav-82 off-road walk from 1413 81 -489 joins the road at 1419 85 -516: 36 cells (47 blocks walked, 540 expansions, cap 96 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1413 80 -489, 1412 80 -489, 1411 80 -489, 1410 80 -489, 1409 80 -489, 1408 80 -490, 1407 81 -490, 1406 82 -491, 1407 83 -492, 1408 83 -493, 1409 84 -494, 1410 85 -495, 1411 85 -496, 1411 85 -497, 1411 85 -498, 1411 85 -499, 1411 85 -500, 1412 85 -501, 1413 85 -501, 1414 85 -501, 1415 85 -501, 1416 85 -501, 1417 85 -502, 1417 85 -503, 1417 85 -504, 1417 85 -505, 1417 85 -506, 1418 85 -507, 1419 85 -508, 1420 85 -509, 1421 85 -510, 1421 85 -511, 1421 85 -512, 1420 84 -513, 1420 84 -514, 1419 84 -515
+17:55:28 knk-nav-82 off-road walk to the goal 1411 81 -486 from the road at 1411 85 -516: 36 cells (50 blocks walked, 793 expansions, cap 99 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1411 84 -517, 1410 84 -516, 1409 84 -515, 1408 84 -514, 1407 84 -514, 1406 84 -514, 1405 84 -514, 1404 84 -514, 1403 84 -514, 1402 83 -513, 1401 82 -512, 1400 82 -511, 1400 82 -510, 1400 82 -509, 1400 82 -508, 1400 82 -507, 1400 82 -506, 1400 82 -505, 1400 81 -504, 1400 81 -503, 1401 80 -502, 1401 80 -501, 1401 80 -500, 1401 80 -499, 1401 80 -498, 1401 80 -497, 1401 80 -496, 1402 80 -495, 1403 81 -494, 1404 81 -493, 1405 82 -492, 1406 82 -491, 1407 81 -490, 1408 80 -489, 1409 80 -488, 1410 80 -487
+17:55:35 stats:
+17:55:35 NPCs 1 (spawns queued 0) states {world_KNK-DEV={MOVING=1}} | planning queue 0, in flight 0
+17:55:35 tick: mean 2.05 ms, p95 2.93 ms (last 1200 ticks) | baseline not set (/knk npc nav baseline before spawning) -> - ms per NPC
+17:55:35 K&K navigation on the main thread: mean 35.3 µs per tick, p95 160.7 µs (0.0353 ms per NPC)
+17:55:35 trips 1 (mean 24.0 s), stretches 6 | orders failed 0
+17:55:35 stuck near a wall: 0, freed by: back-off 0 / side-step 0 / local leg 0 / replan 0, not freed 0 | stuck elsewhere: 0 (back-off 0 / side-step 0 / local leg 0 / replan 0, not freed 0) | steps per stuck: mean 0.0, max 0 | engine found no path 0 | longest still 0.0 s | falls 0
+17:55:35 local legs: k&k 0, engine 0, none 0
+17:55:35 crowd: waits 0, yields 0, longest queue 1
+17:55:35 pushes: 0 (players 0, attacks 0), returned 0, exempted 0 (now 0), teleported 0
+17:55:35 waits: no allowed route 0 (reported blocked 0), way ahead not loaded 0 | chunk-unload pauses 0, resumes 0
+17:55:35 rules: trespasses 0 (must be 0) | rule checks 15, replans: recheck 0, event 0 | walked to the blocking element 0, woken by its event 0, waiting there now 0
+17:55:35 examiner: 0 cells asked, 0 blocked by K&K rules | engine block rules removed 0 (must be 0)
+17:55:35 distance from the road line: mean 0.34, max 2.24 blocks, over 2 blocks 3.1% of 32 samples
+17:55:35 groups 0 (0 NPCs): trips 0 | widths: narrows 0, widens 0, merges 0 | folds 0, reforms 0, folded now 0 | abreast now - | finished trips 0 (finishing now 0) | own legs back 0 (now 0), left behind 0 (now 0), leader waited 0 (now 0), furthest behind its slot 0.0 blocks | road plans per group event: max 0 | local legs at once: max 0
+17:55:35 failures: none
+17:55:35 route: from world_KNK-DEV 1411 81 -486 -> to world_KNK-DEV 1419 82 -551 | log npc-logs/2026-11-19_17-34-23_npc-nav.log
+17:55:51 clear: removed 1 NPCs
+18:00:25 route from set at world_KNK-DEV 1401 43 -581
+18:01:09 route to set at world_KNK-DEV 1305 54 -621
+18:01:27 route: from world_KNK-DEV 1401 43 -581 -> to world_KNK-DEV 1305 54 -621
+18:01:38 run: 1 NPCs, profile default, route from world_KNK-DEV 1401 43 -581 -> to world_KNK-DEV 1305 54 -621
+18:01:38 knk-nav-83 off-road walk from 1400 43 -578 joins the road at 1399 43 -573: 5 cells (4 blocks walked, 7 expansions, cap 53 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1400 42 -578, 1400 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:01:38 knk-nav-83 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:02:16 knk-nav-83 stuck (no progress 40 ticks) at 1307 53 -622, no wall next to it: step 1 of 3 back-off to 1307 53 -622
+18:02:19 knk-nav-83 not freed at 1307 53 -623: replanning (steps used up)
+18:02:20 knk-nav-83 freed at 1306 54 -622 by replan (2 steps, 3.8 s)
+18:02:21 knk-nav-83 off-road walk from 1305 54 -621 joins the road at 1309 51 -621: 4 cells (6 blocks walked, 17 expansions, cap 70 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1305 53 -621, 1306 53 -620, 1307 52 -621, 1308 51 -622
+18:02:21 knk-nav-83 off-road walk to the goal 1401 43 -581 from the road at 1401 43 -584: 4 cells (3 blocks walked, 3 expansions, cap 52 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1400 42 -585, 1400 42 -584, 1400 42 -583, 1401 42 -582
+18:03:03 knk-nav-83 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:03:07 knk-nav-83 way ahead is closed by exit district_1000002 (event) at 1393 43 -582: route planned again
+18:03:07 knk-nav-83 blocked: you may not leave Merchant's District [domain Merchant's District (2)]
+18:03:47 knk-nav-83 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:01 stats:
+18:04:01 NPCs 1 (spawns queued 0) states {world_KNK-DEV={MOVING=1}} | planning queue 0, in flight 0
+18:04:01 tick: mean 1.80 ms, p95 2.28 ms (last 1200 ticks) | baseline not set (/knk npc nav baseline before spawning) -> - ms per NPC
+18:04:01 K&K navigation on the main thread: mean 33.0 µs per tick, p95 74.4 µs (0.0330 ms per NPC)
+18:04:01 trips 2 (mean 42.1 s), stretches 14 | orders failed 0
+18:04:01 stuck near a wall: 0, freed by: back-off 0 / side-step 0 / local leg 0 / replan 0, not freed 0 | stuck elsewhere: 1 (back-off 0 / side-step 0 / local leg 0 / replan 1, not freed 0) | steps per stuck: mean 2.0, max 2 | engine found no path 0 | longest still 3.8 s at 1306 54 -622 | falls 0
+18:04:01 local legs: k&k 1, engine 0, none 0
+18:04:01 crowd: waits 0, yields 0, longest queue 1
+18:04:01 pushes: 0 (players 0, attacks 0), returned 0, exempted 0 (now 0), teleported 0
+18:04:01 waits: no allowed route 7 (reported blocked 1), way ahead not loaded 0 | chunk-unload pauses 0, resumes 0
+18:04:01 rules: trespasses 0 (must be 0) | rule checks 57, replans: recheck 0, event 2 | walked to the blocking element 1, woken by its event 1, waiting there now 0
+18:04:01 examiner: 0 cells asked, 0 blocked by K&K rules | engine block rules removed 0 (must be 0)
+18:04:01 distance from the road line: mean 0.36, max 3.86 blocks, over 2 blocks 2.9% of 102 samples
+18:04:01 groups 0 (0 NPCs): trips 0 | widths: narrows 0, widens 0, merges 0 | folds 0, reforms 0, folded now 0 | abreast now - | finished trips 0 (finishing now 0) | own legs back 0 (now 0), left behind 0 (now 0), leader waited 0 (now 0), furthest behind its slot 0.0 blocks | road plans per group event: max 0 | local legs at once: max 1
+18:04:01 failures: {blocked: you may not leave Merchant's District [domain Merchant's District (2)]=1}
+18:04:01 route: from world_KNK-DEV 1401 43 -581 -> to world_KNK-DEV 1305 54 -621 | log npc-logs/2026-11-19_17-34-23_npc-nav.log
+18:04:04 clear: removed 1 NPCs
+18:04:17 run: a group of 20 NPCs, formation from the settings, profile default, route from world_KNK-DEV 1401 43 -581 -> to world_KNK-DEV 1305 54 -621
+18:04:17 group 4: leader knk-nav-84, 19 followers, column, spacing 1.5, lateral spacing 1.0, group-formation from global, group-followers-finish-trip false (global)
+18:04:18 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:18 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:18 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:18 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:18 knk-nav-84 stuck (engine found no path) at 1403 45 -578, wall at 1403 45 -577 (south): step 1 of 3 local leg to 1402 43 -578
+18:04:18 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:18 knk-nav-84 local leg found no path at 1403 45 -578
+18:04:19 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:19 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:19 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:19 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:19 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:19 knk-nav-84 replan found no path at 1403 45 -578
+18:04:20 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:20 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:20 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:20 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:20 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:20 knk-nav-84 replan found no path at 1403 45 -578
+18:04:21 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:21 knk-nav-84 not freed at 1403 45 -578: retries and replans used up
+18:04:21 group 4 (knk-nav-84, 20 NPCs) order failed: stuck at 1403 45 -578: retries and replans used up
+18:04:26 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:26 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:26 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:27 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:27 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:27 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:27 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:27 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:27 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:27 knk-nav-84 replan found no path at 1403 45 -578
+18:04:28 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:28 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:28 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:28 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:28 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:28 knk-nav-84 replan found no path at 1403 45 -578
+18:04:29 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:29 knk-nav-84 not freed at 1403 45 -578: retries and replans used up
+18:04:29 group 4 (knk-nav-84, 20 NPCs) order failed: stuck at 1403 45 -578: retries and replans used up
+18:04:34 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:34 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:34 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:35 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:35 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:35 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:35 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:35 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:35 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:35 knk-nav-84 replan found no path at 1403 45 -578
+18:04:36 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:36 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:36 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:36 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:36 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:36 knk-nav-84 replan found no path at 1403 45 -578
+18:04:37 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:37 knk-nav-84 not freed at 1403 45 -578: retries and replans used up
+18:04:37 group 4 (knk-nav-84, 20 NPCs) order failed: stuck at 1403 45 -578: retries and replans used up
+18:04:42 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:42 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:42 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:43 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:43 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:43 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:43 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:43 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:43 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:43 knk-nav-84 replan found no path at 1403 45 -578
+18:04:44 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:44 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:44 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:44 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:44 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:44 knk-nav-84 replan found no path at 1403 45 -578
+18:04:45 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:45 knk-nav-84 not freed at 1403 45 -578: retries and replans used up
+18:04:45 group 4 (knk-nav-84, 20 NPCs) order failed: stuck at 1403 45 -578: retries and replans used up
+18:04:50 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:50 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:50 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:50 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:50 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:50 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:50 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:50 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:50 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:50 knk-nav-84 replan found no path at 1403 45 -578
+18:04:51 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:52 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 6 cells (9 blocks walked, 69 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -578, 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:04:52 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:52 knk-nav-84: no walk from 1403 46 -578 to 1402 43 -578 on the line, a local leg takes that step
+18:04:52 knk-nav-84 local leg from 1403 45 -578 to 1402 43 -578: K&K found no path (target unreachable, 54 cells), the engine searches
+18:04:52 knk-nav-84 replan found no path at 1403 45 -578
+18:04:53 knk-nav-84 not freed at 1403 45 -578: replanning (steps used up)
+18:04:53 knk-nav-84 not freed at 1403 45 -578: retries and replans used up
+18:04:53 group 4 (knk-nav-84, 20 NPCs) order failed: stuck at 1403 45 -578: retries and replans used up
+18:04:58 knk-nav-84 off-road walk from 1403 45 -578 joins the road at 1399 43 -573: 15 cells (23 blocks walked, 87 expansions, cap 67 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1404 45 -578, 1404 46 -577, 1405 47 -576, 1405 47 -575, 1406 46 -574, 1407 45 -573, 1407 42 -572, 1406 42 -572, 1405 42 -572, 1404 42 -572, 1403 42 -573, 1402 42 -574, 1401 42 -574, 1400 42 -574, 1399 42 -574
+18:04:58 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:04:58 knk-nav-84: no walk from 1407 46 -573 to 1407 43 -572 on the line, a local leg takes that step
+18:05:02 knk-nav-86 (group 4) stuck at 1402.70 43.00 -581.50, 4.13 blocks behind its slot at 1405.59 48.00 -575.63 (6.54 away), sent 11.04 ahead, moving
+18:05:02 knk-nav-86 (group 4) stuck (no progress 40 ticks) at 1402 43 -582, no wall next to it: step 1 of 3 back-off to 1402 43 -583
+18:05:02 knk-nav-90 (group 4) is off its lane at 1400 43 -582: its own leg back to the group's path at 1403 45 -578
+18:05:02 knk-nav-90 local leg from 1400 43 -582 to 1403 46 -578: K&K found no path (target unreachable, 113 cells), the engine searches
+18:05:02 knk-nav-84 local leg from 1407 46 -573 to 1407 43 -572: K&K found no path (target unreachable, 34 cells), the engine searches
+18:05:03 knk-nav-89 (group 4) is off its lane at 1400 43 -581: its own leg back to the group's path at 1403 45 -578
+18:05:03 knk-nav-89 local leg from 1400 43 -581 to 1403 46 -578: K&K found no path (target unreachable, 114 cells), the engine searches
+18:05:03 knk-nav-85 (group 4) stuck at 1403.73 44.00 -578.30, 4.58 blocks behind its slot at 1405.82 48.00 -574.21 (4.59 away), sent 10.57 ahead, not moving
+18:05:03 knk-nav-85 (group 4) stuck (stationary) at 1403 44 -579, wall at 1404 44 -579 (east): step 1 of 3 side-step to 1402 43 -579
+18:05:05 knk-nav-89 stuck (stationary) at 1400 43 -581, no wall next to it: step 1 of 3 local leg to 1403 46 -578
+18:05:05 knk-nav-89 local leg from 1400 43 -581 to 1403 46 -578: K&K found no path (target unreachable, 105 cells), the engine searches
+18:05:05 knk-nav-86 (group 4) stuck (no progress 40 ticks) at 1402 43 -582, no wall next to it: step 2 of 3 local leg
+18:05:05 knk-nav-86 (group 4) is stuck at 1402 43 -582: its own leg back to the group's path at 1403 45 -578
+18:05:05 knk-nav-86 local leg from 1402 43 -582 to 1403 46 -578: K&K found no path (target unreachable, 99 cells), the engine searches
+18:05:05 group 4 (knk-nav-84): the leader is 2.8 blocks below the group path; its fall is kept out of the path
+18:05:05 knk-nav-86 stuck (engine found no path) at 1402 43 -582, no wall next to it: step 1 of 3 local leg to 1403 46 -578
+18:05:05 knk-nav-86 local leg from 1402 43 -582 to 1403 46 -578: K&K found no path (target unreachable, 99 cells), the engine searches
+18:05:06 knk-nav-86 local leg found no path at 1402 43 -582
+18:05:06 knk-nav-85 (group 4) stuck (stationary) at 1403 43 -578, wall at 1404 43 -578 (east): step 2 of 3 local leg
+18:05:07 knk-nav-86 not freed at 1402 43 -582: replanning (steps used up)
+18:05:07 knk-nav-86 local leg from 1402 43 -582 to 1403 46 -578: K&K found no path (target unreachable, 99 cells), the engine searches
+18:05:07 knk-nav-90 waits for its turn at the narrow place at 1403 45 -578 (queue 1)
+18:05:07 knk-nav-86 replan found no path at 1402 43 -582
+18:05:07 knk-nav-89 freed at 1402 44 -579 by local leg (1 step, 2.3 s)
+18:05:07 knk-nav-89 waits for its turn at the narrow place at 1403 45 -578 (queue 1)
+18:05:07 knk-nav-85 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:07 knk-nav-85 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:08 knk-nav-86 not freed at 1402 43 -582: replanning (steps used up)
+18:05:08 knk-nav-86 local leg from 1402 43 -582 to 1403 46 -578: K&K found no path (target unreachable, 98 cells), the engine searches
+18:05:08 knk-nav-86 replan found no path at 1402 43 -582
+18:05:08 knk-nav-87 (group 4) stuck at 1403.70 43.00 -577.93, 1.54 blocks behind its slot at 1404.50 46.00 -577.50 (0.91 away), sent 8.04 ahead, moving
+18:05:08 knk-nav-87 (group 4) stuck (no progress 40 ticks) at 1403 43 -578, wall at 1404 43 -578 (east): step 1 of 3 side-step to 1402 43 -579
+18:05:09 knk-nav-88 (group 4) stuck at 1403.50 43.00 -577.93, 1.00 blocks behind its slot at 1404.50 46.00 -577.50 (1.08 away), sent 9.21 ahead, not moving
+18:05:09 knk-nav-88 (group 4) stuck (stationary) at 1403 43 -578, wall at 1404 43 -578 (east): step 1 of 3 side-step to 1402 43 -578
+18:05:09 knk-nav-86 not freed at 1402 43 -582: replanning (steps used up)
+18:05:09 knk-nav-86 not freed at 1402 43 -582: retries and replans used up
+18:05:09 knk-nav-91 (group 4) stuck at 1403.07 43.12 -577.50, -2.52 blocks behind its slot at 1403.50 46.00 -577.50 (0.43 away), sent 8.14 ahead, not moving
+18:05:09 knk-nav-91 (group 4) stuck (stationary) at 1403 43 -578, wall at 1404 43 -578 (east): step 1 of 3 side-step to 1402 43 -578
+18:05:10 knk-nav-86 (group 4) not freed at 1402 43 -582: replanning (steps used up)
+18:05:10 knk-nav-86 (group 4) is still stuck (steps used up) at 1402 43 -582: its own leg back to the group's path at 1403 45 -578
+18:05:10 knk-nav-86 local leg from 1402 43 -582 to 1403 46 -578: K&K found no path (target unreachable, 97 cells), the engine searches
+18:05:10 knk-nav-86 not freed at 1402 43 -582: replanning (steps used up)
+18:05:11 knk-nav-86 local leg from 1402 43 -582 to 1403 46 -578: K&K found no path (target unreachable, 97 cells), the engine searches
+18:05:11 knk-nav-86 replan found no path at 1402 43 -582
+18:05:11 knk-nav-87 (group 4) stuck (no progress 40 ticks) at 1403 43 -578, wall at 1404 43 -578 (east): step 2 of 3 local leg
+18:05:12 knk-nav-86 not freed at 1402 43 -582: replanning (steps used up)
+18:05:12 knk-nav-86 local leg from 1402 43 -582 to 1403 46 -578: K&K found no path (target unreachable, 97 cells), the engine searches
+18:05:12 knk-nav-85 (group 4) stuck at 1403.70 43.00 -577.93, 13.48 blocks behind its slot at 1403.50 43.00 -572.50 (5.43 away), sent 16.87 ahead, not moving
+18:05:12 knk-nav-85 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:12 knk-nav-85 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:12 knk-nav-86 replan found no path at 1402 43 -582
+18:05:12 knk-nav-88 (group 4) stuck (stationary) at 1403 43 -578, wall at 1404 43 -578 (east): step 2 of 3 local leg
+18:05:12 knk-nav-91 (group 4) stuck (stationary) at 1403 43 -578, wall at 1404 43 -578 (east): step 2 of 3 local leg
+18:05:12 knk-nav-87 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:12 knk-nav-87 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:13 knk-nav-86 not freed at 1402 43 -582: replanning (steps used up)
+18:05:13 knk-nav-86 not freed at 1402 43 -582: retries and replans used up
+18:05:13 knk-nav-86 (group 4) not freed at 1402 43 -582: its own leg back failed (stuck at 1402 43 -582: retries and replans used up)
+18:05:13 knk-nav-84 stuck (no progress 40 ticks) at 1401 43 -573, wall at 1401 43 -574 (north): step 1 of 3 back-off to 1404 43 -572
+18:05:13 knk-nav-88 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:13 knk-nav-88 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:13 knk-nav-91 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:13 knk-nav-91 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:13 knk-nav-93 (group 4) stuck at 1403.50 43.20 -577.93, 0.68 blocks behind its slot at 1404.18 46.00 -577.50 (0.80 away), sent 13.68 ahead, not moving
+18:05:13 knk-nav-93 (group 4) stuck (stationary) at 1403 43 -578, wall at 1404 43 -578 (east): step 1 of 3 side-step to 1402 43 -579
+18:05:14 knk-nav-92 (group 4) stuck at 1404.50 44.00 -578.93, 1.07 blocks behind its slot at 1404.53 47.00 -576.44 (2.49 away), sent 13.07 ahead, moving
+18:05:14 knk-nav-92 (group 4) stuck (no progress 40 ticks) at 1404 44 -579, wall at 1405 44 -579 (east): step 1 of 3 side-step to 1403 43 -580
+18:05:14 knk-nav-94 (group 4) stuck at 1403.07 43.20 -577.50, -0.50 blocks behind its slot at 1403.50 46.00 -577.50 (0.43 away), sent 11.61 ahead, moving
+18:05:14 knk-nav-94 (group 4) stuck (no progress 40 ticks) at 1403 43 -578, wall at 1404 43 -578 (east): step 1 of 3 side-step to 1402 43 -578
+18:05:16 knk-nav-85 (group 4) stuck at 1403.70 43.00 -577.93, 12.37 blocks behind its slot at 1403.31 43.00 -572.09 (5.84 away), sent 12.37 ahead, moving
+18:05:16 knk-nav-85 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:16 knk-nav-85 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:16 knk-nav-85 (group 4) could not get back to the group's path (no point ahead on its floor to aim at): the group goes on without it, it keeps trying
+18:05:16 knk-nav-84 stuck (no progress 40 ticks) at 1402 43 -573, wall at 1401 43 -574 (north-west): step 2 of 3 side-step to 1403 43 -572
+18:05:17 knk-nav-93 (group 4) stuck (stationary) at 1403 43 -578, wall at 1404 43 -578 (east): step 2 of 3 local leg
+18:05:17 knk-nav-87 (group 4) stuck at 1403.07 43.00 -577.50, 10.00 blocks behind its slot at 1406.17 43.00 -571.50 (6.75 away), sent 10.00 ahead, moving
+18:05:17 knk-nav-87 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:17 knk-nav-87 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:17 knk-nav-92 (group 4) stuck (no progress 40 ticks) at 1404 44 -579, wall at 1405 44 -579 (east): step 2 of 3 local leg
+18:05:17 knk-nav-94 (group 4) stuck (no progress 40 ticks) at 1403 43 -578, wall at 1404 43 -578 (east): step 2 of 3 local leg
+18:05:17 knk-nav-88 (group 4) stuck at 1403.07 43.16 -577.50, 8.50 blocks behind its slot at 1407.50 46.00 -572.03 (7.04 away), sent 8.50 ahead, not moving
+18:05:17 knk-nav-88 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:18 knk-nav-88 (group 4) is still stuck (steps used up) at 1403 43 -578: its own leg back to the group's path at 1405 48 -576
+18:05:18 knk-nav-91 (group 4) stuck at 1403.07 43.14 -577.50, 4.00 blocks behind its slot at 1405.57 48.00 -575.36 (3.29 away), sent 16.00 ahead, moving
+18:05:18 knk-nav-91 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:18 knk-nav-91 (group 4) is still stuck (steps used up) at 1403 43 -578: its own leg back to the group's path at 1405 48 -576
+18:05:18 knk-nav-93 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:18 knk-nav-93 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:18 knk-nav-88 off-road walk from 1403 43 -578 joins the road at 1399 43 -573: 5 cells (5 blocks walked, 5 expansions, cap 55 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1402 42 -578, 1401 42 -577, 1400 42 -576, 1399 42 -575, 1399 42 -574
+18:05:18 knk-nav-88 off-road walk to the goal 1405 48 -576: NO_PATH (FALLBACK: length cap, 2322 expansions, cap 83 blocks), walked in hops
+18:05:18 knk-nav-91 off-road walk from 1403 43 -578 joins the road at 1401 43 -584: 5 cells (6 blocks walked, 27 expansions, cap 55 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1404 43 -580, 1404 43 -581, 1403 42 -582, 1402 42 -583, 1401 42 -584
+18:05:18 knk-nav-91 off-road walk to the goal 1405 48 -576: NO_PATH (FALLBACK: length cap, 2322 expansions, cap 83 blocks), walked in hops
+18:05:18 knk-nav-86 (group 4) stuck at 1403.50 43.12 -577.93, 11.07 blocks behind its slot at 1404.67 43.00 -571.50 (6.53 away), sent 11.07 ahead, moving
+18:05:18 knk-nav-86 (group 4) stuck (no progress 40 ticks) at 1403 43 -578, wall at 1404 43 -578 (east): step 1 of 3 side-step to 1402 43 -579
+18:05:18 knk-nav-92 (group 4) not freed at 1404 44 -579: replanning (steps used up)
+18:05:18 knk-nav-92 (group 4) not freed at 1404 44 -579: its own leg back failed (no point ahead on its floor to aim at)
+18:05:19 knk-nav-84 not freed at 1403 43 -573: replanning (steps used up)
+18:05:19 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:05:19 knk-nav-94 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:19 knk-nav-94 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:21 knk-nav-91 waits behind another NPC at 1403 43 -579 (not stuck)
+18:05:21 knk-nav-86 (group 4) stuck (no progress 40 ticks) at 1403 43 -578, wall at 1404 43 -578 (east): step 2 of 3 local leg
+18:05:21 knk-nav-87 (group 4) stuck at 1403.07 43.02 -577.50, 14.21 blocks behind its slot at 1403.50 43.00 -572.50 (5.02 away), sent 10.00 ahead, not moving
+18:05:21 knk-nav-87 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:21 knk-nav-87 (group 4) is still stuck (steps used up) at 1403 43 -578: its own leg back to the group's path at 1405 48 -576
+18:05:21 knk-nav-96 (group 4) stuck at 1403.70 43.20 -577.93, 0.08 blocks behind its slot at 1403.78 46.00 -577.50 (0.43 away), sent 12.08 ahead, moving
+18:05:21 knk-nav-96 (group 4) stuck (no progress 40 ticks) at 1403 43 -578, wall at 1404 43 -578 (east): step 1 of 3 side-step to 1402 43 -579
+18:05:21 knk-nav-87 off-road walk from 1403 43 -578 to the road: NO_PATH (NO_PATH: no walkable cell near the start, 0 expansions, cap 54 blocks), walked in hops
+18:05:21 knk-nav-87 off-road walk to the goal 1405 48 -576: NO_PATH (FALLBACK: length cap, 2322 expansions, cap 83 blocks), walked in hops
+18:05:21 knk-nav-87 local leg from 1403 43 -578 to 1399 43 -573: K&K found no path (no floor under the NPC, 0 cells), the engine searches
+18:05:22 knk-nav-93 (group 4) stuck at 1403.07 43.05 -577.50, 5.21 blocks behind its slot at 1405.81 48.00 -574.24 (4.25 away), sent 5.21 ahead, moving
+18:05:22 knk-nav-93 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:22 knk-nav-93 (group 4) is still stuck (steps used up) at 1403 43 -578: its own leg back to the group's path at 1405 48 -576
+18:05:22 knk-nav-93 off-road walk from 1403 43 -578 to the road: NO_PATH (NO_PATH: no walkable cell near the start, 0 expansions, cap 54 blocks), walked in hops
+18:05:22 knk-nav-93 off-road walk to the goal 1405 48 -576: NO_PATH (FALLBACK: length cap, 2322 expansions, cap 83 blocks), walked in hops
+18:05:22 knk-nav-86 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:22 knk-nav-86 (group 4) not freed at 1403 43 -578: its own leg back failed (no point ahead on its floor to aim at)
+18:05:22 knk-nav-93 local leg from 1403 43 -578 to 1399 43 -573: K&K found no path (no floor under the NPC, 0 cells), the engine searches
+18:05:22 knk-nav-84 not freed at 1403 43 -572: replanning (steps used up)
+18:05:22 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:05:22 knk-nav-92 (group 4) stuck at 1404.07 44.00 -578.30, 5.84 blocks behind its slot at 1406.85 47.00 -573.02 (5.97 away), sent 5.71 ahead, moving
+18:05:22 knk-nav-92 (group 4) not freed at 1404 44 -579: replanning (steps used up)
+18:05:22 knk-nav-92 (group 4) is still stuck (steps used up) at 1404 44 -579: its own leg back to the group's path at 1405 48 -576
+18:05:23 knk-nav-88 stuck (stationary) at 1401 43 -577, no wall next to it: step 1 of 3 local leg to 1399 43 -574
+18:05:23 knk-nav-92 off-road walk from 1404 44 -579 joins the road at 1401 43 -584: 5 cells (6 blocks walked, 5 expansions, cap 60 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1404 43 -580, 1404 43 -581, 1403 42 -582, 1402 42 -583, 1401 42 -584
+18:05:23 knk-nav-92 off-road walk to the goal 1405 48 -576: NO_PATH (FALLBACK: length cap, 2760 expansions, cap 81 blocks), walked in hops
+18:05:23 knk-nav-92: no walk from 1404 44 -579 to 1404 44 -580 on the line, a local leg takes that step
+18:05:23 knk-nav-92 local leg from 1404 44 -579 to 1404 44 -580: K&K found no path (no floor under the NPC, 0 cells), the engine searches
+18:05:23 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:23 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:23 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:23 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:23 knk-nav-94 (group 4) stuck at 1403.07 43.08 -577.50, 4.12 blocks behind its slot at 1405.63 48.00 -575.25 (3.41 away), sent 15.84 ahead, moving
+18:05:23 knk-nav-94 (group 4) not freed at 1403 43 -578: replanning (steps used up)
+18:05:23 knk-nav-94 (group 4) is still stuck (steps used up) at 1403 43 -578: its own leg back to the group's path at 1405 48 -576
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-94 off-road walk from 1403 43 -578 joins the road at 1401 43 -584: 5 cells (6 blocks walked, 27 expansions, cap 54 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1404 43 -580, 1404 43 -581, 1403 42 -582, 1402 42 -583, 1401 42 -584
+18:05:24 knk-nav-94 off-road walk to the goal 1405 48 -576: NO_PATH (FALLBACK: length cap, 2322 expansions, cap 83 blocks), walked in hops
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-96 (group 4) stuck (no progress 40 ticks) at 1402 43 -579, wall at 1403 43 -578 (south-east): step 2 of 3 local leg
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-85 (group 4) stuck at 1404.07 44.00 -578.30, 17.01 blocks behind its slot at 1401.50 43.00 -573.50 (5.45 away), sent 16.21 ahead, not moving
+18:05:24 knk-nav-85 (group 4) not freed at 1404 44 -579: replanning (steps used up)
+18:05:24 knk-nav-85 (group 4) is still stuck (steps used up) at 1404 44 -579: its own leg back to the group's path at 1405 48 -576
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-85 off-road walk from 1404 44 -579 joins the road at 1401 43 -584: 5 cells (6 blocks walked, 5 expansions, cap 60 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1404 43 -580, 1404 43 -581, 1403 42 -582, 1402 42 -583, 1401 42 -584
+18:05:24 knk-nav-85 off-road walk to the goal 1405 48 -576: NO_PATH (FALLBACK: length cap, 2760 expansions, cap 81 blocks), walked in hops
+18:05:24 knk-nav-85: no walk from 1404 44 -579 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-85 local leg from 1404 44 -579 to 1404 44 -580: K&K found no path (no floor under the NPC, 0 cells), the engine searches
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:24 knk-nav-91 stuck (stationary) at 1402 43 -583, no wall next to it: step 1 of 3 back-off to 1403 43 -582
+18:05:24 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-88 freed at 1400 43 -576 by local leg (1 step, 2.1 s)
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-88 not freed at 1400 43 -576: replanning (steps used up)
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-96 (group 4) not freed at 1402 43 -579: replanning (steps used up)
+18:05:25 knk-nav-96 (group 4) not freed at 1402 43 -579: its own leg back failed (no point ahead on its floor to aim at)
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-88 off-road walk to the goal 1405 48 -576: NO_PATH (FALLBACK: length cap, 2322 expansions, cap 83 blocks), walked in hops
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:25 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:26 knk-nav-85: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:26 knk-nav-92: no walk from 1404 44 -580 to 1404 44 -580 on the line, a local leg takes that step
+18:05:26 knk-nav-84 not freed at 1403 43 -571: replanning (steps used up)
+18:05:26 knk-nav-84 not freed at 1403 43 -571: retries and replans used up
+18:05:26 knk-nav-85 (group 4) not freed at 1404 44 -580: the group's order ended
+18:05:26 knk-nav-87 (group 4) not freed at 1401 43 -576: the group's order ended
+18:05:26 knk-nav-88 not freed at 1400 43 -576: the order ended (cancelled: the group's order ended)
+18:05:26 knk-nav-88 (group 4) not freed at 1400 43 -576: the group's order ended
+18:05:26 knk-nav-91 not freed at 1402 43 -583: the order ended (cancelled: the group's order ended)
+18:05:26 knk-nav-91 (group 4) not freed at 1402 43 -583: the group's order ended
+18:05:26 knk-nav-92 (group 4) not freed at 1404 44 -580: the group's order ended
+18:05:26 knk-nav-93 (group 4) not freed at 1401 43 -577: the group's order ended
+18:05:26 knk-nav-94 (group 4) not freed at 1403 43 -579: the group's order ended
+18:05:26 group 4 (knk-nav-84, 20 NPCs) order failed: stuck at 1403 43 -571: retries and replans used up
+18:05:31 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:05:31 knk-nav-85 (group 4) is off its lane at 1404 44 -580: its own leg back to the group's path at 1403 43 -570
+18:05:31 knk-nav-91 (group 4) is off its lane at 1402 43 -583: its own leg back to the group's path at 1403 43 -570
+18:05:31 knk-nav-92 (group 4) is off its lane at 1404 44 -580: its own leg back to the group's path at 1403 43 -570
+18:05:33 knk-nav-85 stuck (no progress 40 ticks) at 1402 43 -580, no wall next to it: step 1 of 3 back-off to 1404 44 -580
+18:05:35 knk-nav-84 stuck (no progress 40 ticks) at 1401 43 -571, wall at 1402 43 -572 (north-east): step 1 of 3 back-off to 1403 43 -572
+18:05:35 knk-nav-92 stuck (stationary) at 1401 43 -579, no wall next to it: step 1 of 3 local leg to 1403 43 -570
+18:05:38 knk-nav-85 freed at 1401 43 -579 by back-off (1 step, 4.8 s)
+18:05:38 knk-nav-84 stuck (no progress 40 ticks) at 1402 43 -570, wall at 1402 43 -569 (south): step 2 of 3 side-step to 1402 43 -571
+18:05:38 knk-nav-92 not freed at 1400 43 -578: replanning (steps used up)
+18:05:39 knk-nav-84 freed at 1400 43 -572 by side-step (2 steps, 4.3 s)
+18:05:40 knk-nav-92 freed at 1399 43 -575 by replan (2 steps, 4.4 s)
+18:05:41 knk-nav-98 (group 4) is off its lane at 1403 43 -583: its own leg back to the group's path at 1398 43 -573
+18:05:42 knk-nav-100 (group 4) is off its lane at 1402 43 -584: its own leg back to the group's path at 1397 43 -573
+18:05:42 knk-nav-86 (group 4) stuck at 1402.70 43.00 -577.57, 6.00 blocks behind its slot at 1394.09 43.00 -574.61 (9.10 away), sent 11.73 ahead, moving
+18:05:42 knk-nav-86 (group 4) not freed at 1402 43 -578: replanning (steps used up)
+18:05:42 knk-nav-86 (group 4) is still stuck (steps used up) at 1402 43 -578: its own leg back to the group's path at 1396 43 -574
+18:05:42 knk-nav-95 (group 4) is off its lane at 1406 46 -572: its own leg back to the group's path at 1403 43 -570
+18:05:42 knk-nav-95: no walk from 1406 46 -572 to 1405 43 -570 on the line, a local leg takes that step
+18:05:42 knk-nav-95 local leg from 1406 46 -572 to 1405 43 -570: K&K found no path (no floor under the NPC, 0 cells), the engine searches
+18:05:43 knk-nav-87 (group 4) stuck at 1400.66 43.00 -575.17, 5.62 blocks behind its slot at 1393.92 43.00 -574.70 (6.75 away), sent 11.50 ahead, moving
+18:05:43 knk-nav-87 (group 4) stuck (no progress 40 ticks) at 1400 43 -576, no wall next to it: step 1 of 3 local leg
+18:05:43 knk-nav-87 (group 4) is stuck at 1400 43 -576: its own leg back to the group's path at 1396 43 -574
+18:05:43 knk-nav-88 (group 4) stuck at 1399.70 43.00 -574.16, 5.83 blocks behind its slot at 1393.53 43.00 -574.90 (6.21 away), sent 11.87 ahead, moving
+18:05:43 knk-nav-88 (group 4) stuck (no progress 40 ticks) at 1399 43 -575, no wall next to it: step 1 of 3 back-off to 1401 43 -576
+18:05:43 knk-nav-103 (group 4) is off its lane at 1403 43 -581: its own leg back to the group's path at 1399 43 -572
+18:05:44 knk-nav-90 (group 4) stuck at 1401.97 43.00 -577.80, 5.67 blocks behind its slot at 1393.75 43.00 -574.79 (8.76 away), sent 11.29 ahead, moving
+18:05:44 knk-nav-90 (group 4) stuck (no progress 40 ticks) at 1401 43 -578, no wall next to it: step 1 of 3 back-off to 1401 43 -581
+18:05:45 knk-nav-93 (group 4) stuck at 1401.09 43.00 -575.57, 5.92 blocks behind its slot at 1393.81 43.00 -574.76 (7.33 away), sent 11.70 ahead, moving
+18:05:45 knk-nav-93 (group 4) stuck (no progress 40 ticks) at 1401 43 -576, no wall next to it: step 1 of 3 local leg
+18:05:45 knk-nav-93 (group 4) is stuck at 1401 43 -576: its own leg back to the group's path at 1396 43 -574
+18:05:45 knk-nav-94 waits behind another NPC at 1402 43 -578 (not stuck)
+18:05:46 knk-nav-99 (group 4) is off its lane at 1402 46 -577: its own leg back to the group's path at 1399 43 -572
+18:05:46 knk-nav-99 off-road walk from 1402 46 -577 joins the road at 1399 43 -573: 7 cells (12 blocks walked, 66 expansions, cap 72 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1403 45 -577, 1403 46 -576, 1403 46 -575, 1402 45 -574, 1401 44 -574, 1401 42 -573, 1400 42 -572
+18:05:46 knk-nav-99: no walk from 1402 46 -577 to 1403 46 -577 on the line, a local leg takes that step
+18:05:46 knk-nav-99 local leg from 1402 46 -577 to 1403 46 -577: K&K found no path (no floor under the NPC, 0 cells), the engine searches
+18:05:46 knk-nav-88 (group 4) stuck (no progress 40 ticks) at 1400 43 -576, no wall next to it: step 2 of 3 local leg
+18:05:46 knk-nav-88 (group 4) is stuck at 1400 43 -576: its own leg back to the group's path at 1395 43 -575
+18:05:46 knk-nav-89 (group 4) stuck at 1399.98 43.00 -573.10, 15.59 blocks behind its slot at 1385.30 44.00 -578.82 (15.75 away), sent 10.02 ahead, moving
+18:05:46 knk-nav-89 (group 4) stuck (no progress 40 ticks) at 1399 43 -574, no wall next to it: step 1 of 3 back-off to 1401 43 -575
+18:05:46 knk-nav-96 (group 4) is off its lane at 1402 43 -579: its own leg back to the group's path at 1396 43 -574
+18:05:47 knk-nav-97 (group 4) is off its lane at 1402 43 -578: its own leg back to the group's path at 1396 43 -574
+18:05:47 knk-nav-103 stuck (stationary) at 1402 43 -580, no wall next to it: step 1 of 3 back-off to 1403 43 -581
+18:05:47 knk-nav-90 (group 4) stuck (no progress 40 ticks) at 1402 43 -578, wall at 1403 43 -578 (east): step 2 of 3 side-step to 1401 43 -578
+18:05:48 group 4 (knk-nav-84) waits: a follower is 24 blocks behind its slot
+18:05:48 knk-nav-87 (group 4) freed at 1396 43 -574 by local leg (1 step, 5.4 s)
+18:05:48 knk-nav-99 stuck (no progress 40 ticks) at 1402 43 -577, wall at 1403 43 -578 (north-east): step 1 of 3 side-step to 1401 43 -576
+18:05:49 knk-nav-103 freed at 1402 43 -579 by back-off (1 step, 1.8 s)
+18:05:49 knk-nav-93 (group 4) freed at 1396 43 -574 by local leg (1 step, 3.4 s)
+18:05:49 knk-nav-86 (group 4) freed at 1396 43 -574 by replan (1 step, 6.5 s)
+18:05:49 knk-nav-88 (group 4) freed at 1395 43 -575 by local leg (2 steps, 5.5 s)
+18:05:49 knk-nav-90 (group 4) freed at 1398 43 -574 by side-step (2 steps, 5.0 s)
+18:05:49 knk-nav-99 freed at 1401 43 -576 by side-step (1 step, 0.8 s)
+18:05:49 knk-nav-89 (group 4) stuck (no progress 40 ticks) at 1400 43 -575, wall at 1401 43 -574 (south-east): step 2 of 3 side-step to 1400 43 -576
+18:05:51 knk-nav-89 (group 4) freed at 1398 43 -573 by side-step (2 steps, 4.3 s)
+18:05:51 knk-nav-99 stuck (no progress 40 ticks) at 1401 43 -575, wall at 1401 43 -574 (south): step 1 of 3 back-off to 1402 43 -577
+18:05:53 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:05:53 knk-nav-102 (group 4) stuck at 1398.28 43.00 -572.68, 1.66 blocks behind its slot at 1396.71 43.00 -573.28 (1.67 away), sent 13.66 ahead, moving
+18:05:53 knk-nav-102 (group 4) stuck (no progress 40 ticks) at 1398 43 -573, no wall next to it: step 1 of 3 back-off to 1400 43 -575
+18:05:54 knk-nav-99 stuck (no progress 40 ticks) at 1403 43 -575, wall at 1402 43 -574 (south-west): step 2 of 3 side-step to 1404 43 -576
+18:05:55 knk-nav-102 (group 4) freed at 1397 43 -574 by back-off (1 step, 1.8 s)
+18:05:57 knk-nav-99 not freed at 1403 43 -577: replanning (steps used up)
+18:05:58 knk-nav-97 (group 4) stuck at 1384.51 44.50 -580.42, 7.58 blocks behind its slot at 1378.14 45.00 -584.36 (7.49 away), sent 0.24 ahead, moving
+18:05:58 knk-nav-97 (group 4) stuck (no progress 40 ticks) at 1384 44 -581, wall at 1383 44 -582 (north-west): step 1 of 3 side-step to 1385 44 -581
+18:05:58 knk-nav-99 freed at 1401 43 -576 by replan (3 steps, 6.8 s)
+18:05:59 group 4 (knk-nav-84) waits: a follower is 24 blocks behind its slot
+18:05:59 knk-nav-89 waits behind another NPC at 1377 45 -585 (not stuck)
+18:05:59 knk-nav-95 (group 4) stuck at 1382.76 45.00 -581.21, 11.84 blocks behind its slot at 1374.57 45.00 -588.56 (11.00 away), sent 0.98 ahead, moving
+18:05:59 knk-nav-95 (group 4) stuck (no progress 40 ticks) at 1382 45 -582, wall at 1383 45 -583 (north-east): step 1 of 3 back-off to 1385 44 -580
+18:06:01 knk-nav-97 (group 4) stuck (no progress 40 ticks) at 1385 44 -581, no wall next to it: step 2 of 3 local leg
+18:06:01 knk-nav-97 (group 4) is stuck at 1385 44 -581: its own leg back to the group's path at 1381 45 -582
+18:06:02 knk-nav-97 (group 4) freed at 1382 45 -582 by local leg (2 steps, 4.2 s)
+18:06:02 knk-nav-95 (group 4) stuck (no progress 40 ticks) at 1384 45 -581, no wall next to it: step 2 of 3 local leg
+18:06:02 knk-nav-95 (group 4) is stuck at 1384 45 -581: its own leg back to the group's path at 1379 45 -583
+18:06:04 knk-nav-95 (group 4) freed at 1379 45 -583 by local leg (2 steps, 4.6 s)
+18:06:29 group 4 (knk-nav-84) walks on: a follower did not close up in 600 ticks
+18:06:29 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:06:31 knk-nav-89 (group 4) stuck at 1377.58 45.00 -584.96, 21.78 blocks behind its slot at 1362.44 47.00 -599.63 (21.07 away), sent 0.84 ahead, moving
+18:06:31 knk-nav-89 (group 4) stuck (no progress 40 ticks) at 1377 45 -585, wall at 1376 45 -584 (south-west): step 1 of 3 back-off to 1379 45 -584
+18:06:34 knk-nav-89 (group 4) stuck (no progress 40 ticks) at 1377 45 -585, wall at 1376 45 -584 (south-west): step 2 of 3 side-step to 1378 45 -586
+18:06:37 knk-nav-89 (group 4) stuck (no progress 40 ticks) at 1377 45 -586, no wall next to it: step 3 of 3 local leg
+18:06:37 group 4 (knk-nav-84) waits: a follower is 35 blocks behind its slot
+18:06:38 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:06:39 knk-nav-89 (group 4) not freed at 1377 45 -586: replanning (steps used up)
+18:06:39 knk-nav-89 (group 4) not freed at 1377 45 -586: its own leg back failed (no point ahead on its floor to aim at)
+18:06:39 group 4 (knk-nav-84) waits: a follower is 36 blocks behind its slot
+18:06:40 knk-nav-92 (group 4) stuck at 1377.48 45.00 -585.06, 35.52 blocks behind its slot at 1353.45 48.00 -609.71 (34.42 away), sent 0.70 ahead, moving
+18:06:40 knk-nav-92 (group 4) stuck (no progress 40 ticks) at 1377 45 -586, no wall next to it: step 1 of 3 back-off to 1379 45 -584
+18:06:40 knk-nav-94 waits behind another NPC at 1379 45 -583 (not stuck)
+18:06:40 knk-nav-96 (group 4) stuck at 1382.65 45.00 -581.27, 36.02 blocks behind its slot at 1357.58 48.00 -605.36 (34.77 away), sent 0.85 ahead, moving
+18:06:40 knk-nav-96 (group 4) stuck (no progress 40 ticks) at 1382 45 -582, wall at 1383 45 -583 (north-east): step 1 of 3 back-off to 1384 45 -581
+18:06:43 knk-nav-89 (group 4) stuck at 1377.85 45.00 -585.55, 39.92 blocks behind its slot at 1350.73 47.00 -613.33 (38.82 away), sent 0.60 ahead, moving
+18:06:43 knk-nav-89 (group 4) not freed at 1377 45 -586: replanning (steps used up)
+18:06:43 knk-nav-89 (group 4) not freed at 1377 45 -586: its own leg back failed (no point ahead on its floor to aim at)
+18:06:43 knk-nav-92 (group 4) stuck (no progress 40 ticks) at 1379 45 -584, no wall next to it: step 2 of 3 local leg
+18:06:43 knk-nav-96 (group 4) stuck (no progress 40 ticks) at 1384 45 -581, no wall next to it: step 2 of 3 local leg
+18:06:43 knk-nav-96 (group 4) is stuck at 1384 45 -581: its own leg back to the group's path at 1379 45 -583
+18:06:44 knk-nav-92 (group 4) not freed at 1379 45 -584: replanning (steps used up)
+18:06:44 knk-nav-92 (group 4) not freed at 1379 45 -584: its own leg back failed (no point ahead on its floor to aim at)
+18:06:44 knk-nav-94 waits behind another NPC at 1379 45 -583 (not stuck)
+18:06:45 knk-nav-96 (group 4) freed at 1379 45 -583 by local leg (2 steps, 4.7 s)
+18:06:47 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:06:47 group 4 (knk-nav-84) waits: a follower is 39 blocks behind its slot
+18:06:54 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:07:09 knk-nav-99 (group 4) stuck at 1325.48 45.00 -623.67, 1.14 blocks behind its slot at 1324.36 45.00 -623.78 (1.13 away), sent 0.98 ahead, moving
+18:07:09 knk-nav-99 (group 4) stuck (no progress 40 ticks) at 1325 45 -624, no wall next to it: step 1 of 3 back-off to 1327 45 -624
+18:07:09 knk-nav-90 (group 4) stuck at 1312.94 49.00 -623.72, 1.04 blocks behind its slot at 1311.87 50.00 -623.82 (1.08 away), sent 0.89 ahead, moving
+18:07:09 knk-nav-90 (group 4) stuck (no progress 40 ticks) at 1312 49 -624, no wall next to it: step 1 of 3 local leg
+18:07:09 knk-nav-97 waits behind another NPC at 1322 45 -624 (not stuck)
+18:07:09 knk-nav-100 (group 4) stuck at 1326.89 45.00 -623.39, 1.08 blocks behind its slot at 1325.86 45.00 -623.74 (1.08 away), sent 0.92 ahead, moving
+18:07:09 knk-nav-100 (group 4) stuck (no progress 40 ticks) at 1326 45 -624, no wall next to it: step 1 of 3 local leg
+18:07:09 knk-nav-101 waits behind another NPC at 1328 45 -623 (not stuck)
+18:07:09 knk-nav-102 waits behind another NPC at 1329 45 -623 (not stuck)
+18:07:11 knk-nav-90 (group 4) not freed at 1312 49 -624: replanning (steps used up)
+18:07:11 knk-nav-90 (group 4) not freed at 1312 49 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:11 knk-nav-100 (group 4) not freed at 1326 45 -624: replanning (steps used up)
+18:07:11 knk-nav-100 (group 4) not freed at 1326 45 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:12 knk-nav-99 (group 4) stuck (no progress 40 ticks) at 1325 45 -624, no wall next to it: step 2 of 3 local leg
+18:07:13 knk-nav-99 (group 4) not freed at 1325 45 -624: replanning (steps used up)
+18:07:13 knk-nav-99 (group 4) not freed at 1325 45 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:15 knk-nav-90 (group 4) stuck at 1312.94 49.00 -623.72, 1.04 blocks behind its slot at 1311.87 50.00 -623.82 (1.08 away), sent 0.89 ahead, moving
+18:07:15 knk-nav-90 (group 4) not freed at 1312 49 -624: replanning (steps used up)
+18:07:15 knk-nav-90 (group 4) not freed at 1312 49 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:15 knk-nav-100 waits behind another NPC at 1326 45 -624 (not stuck)
+18:07:17 knk-nav-99 (group 4) stuck at 1325.46 45.00 -623.77, 1.10 blocks behind its slot at 1324.36 45.00 -623.78 (1.10 away), sent 0.94 ahead, moving
+18:07:17 knk-nav-99 (group 4) not freed at 1325 45 -624: replanning (steps used up)
+18:07:17 knk-nav-99 (group 4) not freed at 1325 45 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:19 knk-nav-90 (group 4) stuck at 1312.94 49.00 -623.72, 1.04 blocks behind its slot at 1311.87 50.00 -623.82 (1.08 away), sent 0.89 ahead, moving
+18:07:19 knk-nav-90 (group 4) not freed at 1312 49 -624: replanning (steps used up)
+18:07:19 knk-nav-90 (group 4) not freed at 1312 49 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:19 knk-nav-90 (group 4) could not get back to the group's path (no point ahead on its floor to aim at): the group goes on without it, it keeps trying
+18:07:22 knk-nav-99 (group 4) stuck at 1325.46 45.00 -623.77, 1.10 blocks behind its slot at 1324.36 45.00 -623.78 (1.10 away), sent 0.94 ahead, moving
+18:07:22 knk-nav-99 (group 4) not freed at 1325 45 -624: replanning (steps used up)
+18:07:22 knk-nav-99 (group 4) not freed at 1325 45 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:22 knk-nav-99 (group 4) could not get back to the group's path (no point ahead on its floor to aim at): the group goes on without it, it keeps trying
+18:07:23 knk-nav-100 (group 4) stuck at 1326.89 45.00 -623.39, 1.08 blocks behind its slot at 1325.86 45.00 -623.74 (1.08 away), sent 0.92 ahead, moving
+18:07:23 knk-nav-100 (group 4) not freed at 1326 45 -624: replanning (steps used up)
+18:07:23 knk-nav-100 (group 4) not freed at 1326 45 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:27 knk-nav-100 (group 4) stuck at 1326.89 45.00 -623.39, 1.08 blocks behind its slot at 1325.86 45.00 -623.74 (1.08 away), sent 0.92 ahead, moving
+18:07:27 knk-nav-100 (group 4) not freed at 1326 45 -624: replanning (steps used up)
+18:07:27 knk-nav-100 (group 4) not freed at 1326 45 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:07:27 knk-nav-100 (group 4) could not get back to the group's path (no point ahead on its floor to aim at): the group goes on without it, it keeps trying
+18:07:27 knk-nav-101 (group 4) stuck at 1328.28 45.00 -622.90, 1.06 blocks behind its slot at 1327.28 45.00 -623.25 (1.06 away), sent 0.96 ahead, moving
+18:07:27 knk-nav-101 (group 4) stuck (no progress 40 ticks) at 1328 45 -623, no wall next to it: step 1 of 3 back-off to 1330 45 -623
+18:07:27 knk-nav-101 (group 4) not freed at 1328 45 -623: the group's order ended
+18:07:29 knk-nav-84 off-road walk to the goal 1401 43 -581 from the road at 1401 43 -584: 4 cells (3 blocks walked, 3 expansions, cap 52 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1400 42 -585, 1400 42 -584, 1400 42 -583, 1401 42 -582
+18:07:37 stats:
+18:07:37 NPCs 20 (spawns queued 0) states {world_KNK-DEV={IDLE=19, MOVING=1}} | planning queue 0, in flight 0
+18:07:37 tick: mean 2.28 ms, p95 3.02 ms (last 1200 ticks) | baseline not set (/knk npc nav baseline before spawning) -> - ms per NPC
+18:07:37 K&K navigation on the main thread: mean 107.0 µs per tick, p95 271.5 µs (0.0053 ms per NPC)
+18:07:37 trips 0 (mean 0.0 s), stretches 86 | orders failed 8
+18:07:37 stuck near a wall: 28, freed by: back-off 0 / side-step 0 / local leg 1 / replan 2, not freed 25 | stuck elsewhere: 33 (back-off 3 / side-step 4 / local leg 7 / replan 1, not freed 18) | steps per stuck: mean 2.0, max 5 | engine found no path 23 | longest still 12.5 s at 1403 43 -571 | falls 0
+18:07:37 local legs: k&k 67, engine 10, none 23
+18:07:37 crowd: waits 11, yields 0, longest queue 2
+18:07:37 pushes: 0 (players 0, attacks 0), returned 0, exempted 0 (now 0), teleported 0
+18:07:37 waits: no allowed route 0 (reported blocked 0), way ahead not loaded 0 | chunk-unload pauses 0, resumes 0
+18:07:37 rules: trespasses 0 (must be 0) | rule checks 116, replans: recheck 0, event 0 | walked to the blocking element 0, woken by its event 0, waiting there now 0
+18:07:37 examiner: 447612 cells asked, 2419 blocked by K&K rules | engine block rules removed 0 (must be 0)
+18:07:37 distance from the road line: mean 0.53, max 3.33 blocks, over 2 blocks 4.1% of 98 samples
+18:07:37 groups 1 (20 NPCs, column): trips 1 | widths: narrows 0, widens 0, merges 0 | folds 0, reforms 0, folded now 0 | abreast now 1 | finished trips 0 (finishing now 0) | own legs back 28 (now 0), left behind 5 (now 0), leader waited 5 (now 0), furthest behind its slot 1.1 blocks | road plans per group event: max 1 | local legs at once: max 3
+18:07:37 failures: {failed: stuck at <x y z>: retries and replans used up=6}
+18:07:37 route: from world_KNK-DEV 1401 43 -581 -> to world_KNK-DEV 1305 54 -621 | log npc-logs/2026-11-19_17-34-23_npc-nav.log
+18:08:11 knk-nav-103 (group 4) stuck at 1377.16 45.00 -585.44, 1.22 blocks behind its slot at 1378.01 45.00 -584.56 (1.22 away), sent 1.22 ahead, moving
+18:08:11 knk-nav-103 (group 4) stuck (no progress 40 ticks) at 1377 45 -586, no wall next to it: step 1 of 3 back-off to 1375 45 -588
+18:08:14 knk-nav-103 (group 4) stuck (no progress 40 ticks) at 1377 45 -586, no wall next to it: step 2 of 3 local leg
+18:08:16 knk-nav-103 (group 4) not freed at 1377 45 -586: replanning (steps used up)
+18:08:16 knk-nav-103 (group 4) not freed at 1377 45 -586: its own leg back failed (no point ahead on its floor to aim at)
+18:08:20 knk-nav-103 waits behind another NPC at 1377 45 -586 (not stuck)
+18:08:30 knk-nav-84 off-road walk to the goal 1305 54 -621 from the road at 1309 51 -621: 4 cells (7 blocks walked, 10 expansions, cap 68 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1309 50 -623, 1308 51 -623, 1307 52 -622, 1306 53 -621
+18:08:36 knk-nav-99 (group 4) is off its lane at 1382 45 -582: its own leg back to the group's path at 1383 45 -582
+18:08:36 knk-nav-100 (group 4) is off its lane at 1381 45 -582: its own leg back to the group's path at 1383 45 -582
+18:09:08 knk-nav-90 (group 4) stuck at 1312.32 49.00 -623.66, 1.26 blocks behind its slot at 1311.24 50.00 -623.14 (1.20 away), sent 1.26 ahead, moving
+18:09:08 knk-nav-90 (group 4) stuck (no progress 40 ticks) at 1312 49 -624, no wall next to it: step 1 of 3 back-off to 1314 49 -624
+18:09:11 knk-nav-90 (group 4) stuck (no progress 40 ticks) at 1312 49 -624, no wall next to it: step 2 of 3 local leg
+18:09:12 knk-nav-90 (group 4) not freed at 1312 49 -624: replanning (steps used up)
+18:09:12 knk-nav-90 (group 4) not freed at 1312 49 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:09:17 knk-nav-90 (group 4) stuck at 1312.19 49.50 -623.70, 1.14 blocks behind its slot at 1311.24 50.00 -623.14 (1.10 away), sent 1.14 ahead, moving
+18:09:17 knk-nav-90 (group 4) not freed at 1312 49 -624: replanning (steps used up)
+18:09:17 knk-nav-90 (group 4) not freed at 1312 49 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:09:21 knk-nav-90 (group 4) stuck at 1312.19 49.50 -623.70, 1.14 blocks behind its slot at 1311.24 50.00 -623.14 (1.10 away), sent 1.14 ahead, moving
+18:09:21 knk-nav-90 (group 4) not freed at 1312 49 -624: replanning (steps used up)
+18:09:21 knk-nav-90 (group 4) not freed at 1312 49 -624: its own leg back failed (no point ahead on its floor to aim at)
+18:09:21 knk-nav-90 (group 4) could not get back to the group's path (no point ahead on its floor to aim at): the group goes on without it, it keeps trying
+18:09:22 knk-nav-84 off-road walk to the goal 1401 43 -581 from the road at 1401 43 -584: 4 cells (3 blocks walked, 3 expansions, cap 52 blocks, body check: 0 cells closed in 0 searches again); cells (floors): 1400 42 -585, 1400 42 -584, 1400 42 -583, 1401 42 -582
