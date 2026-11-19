@@ -656,6 +656,9 @@ public class KnKPlugin extends JavaPlugin {
                 managedRegions.afterRepair(specs -> mapReporting.reportDomainRegions(
                     net.knightsandkings.knk.paper.map.MapReporting.domainRegions(specs)));
                 wgRegionIdHandler.setRenameListener(mapReporting::regionRenamed);
+                // PandiO/knk-workspace#750: the repair never sees sub-regions; every access sync lists them.
+                domainAccessSync.afterSync(rules -> mapReporting.reportSubRegions(
+                    net.knightsandkings.knk.paper.map.MapReporting.subRegions(rules)));
             }
             managedRegions.scheduleStartupRepair();
             domainAccessSync.setFallbackPolling(fallbackPolling); // S3 (#182): DomainAccessChanged is pushed
@@ -693,6 +696,12 @@ public class KnKPlugin extends JavaPlugin {
             KitScanTaskHandler kitScanHandler = new KitScanTaskHandler(worldTasksApi, this);
             worldTaskHandlerRegistry.registerHandler(kitScanHandler);
             worldTaskHandlerRegistry.registerHandler("KitScan", kitScanHandler);
+
+            // Siege weapons phase 2 (PandiO/knk-workspace#783, #799): the SiegeWeaponSpot world task of the weapon spot
+            // form, only with siege.weapons.enabled (default off); off registers nothing.
+            net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsModule.register(this,
+                net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsSettings.from(getConfig()),
+                worldTaskHandlerRegistry, worldTasksApi);
 
             // Start lightweight HTTP server for the API's region callbacks (region-http.bind-address/port,
             // default 127.0.0.1:8081). With api.auth.api-key set, callers must send it as X-API-Key.
@@ -3344,18 +3353,6 @@ public class KnKPlugin extends JavaPlugin {
             // PandiO/knk-workspace#421: /knk scenario exists only on a test server (testing.scenarios.enabled, default
             // off); a real server registers nothing and behaves as before.
             registerScenarioCommand(knkAdminCommand);
-            // Siege weapons phase 2 (PandiO/knk-workspace#783): /knk weaponspot and its chat task, only with
-            // siege.weapons.enabled (default off); off registers nothing.
-            net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsModule.register(this,
-                net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsSettings.from(getConfig()), knkAdminCommand,
-                apiClient != null ? apiClient.getSiegeWeaponSpotsApi() : null,
-                player -> {
-                    if (gateDoorRegionCaptureHandler != null && gateDoorRegionCaptureHandler.isHandling(player)) {
-                        return java.util.Optional.of("Finish your gate region capture first ('save' or 'cancel').");
-                    }
-                    return worldTaskHandlerRegistry != null ? worldTaskHandlerRegistry.openTaskRefusal(player)
-                        : java.util.Optional.empty();
-                });
             // Road navigation Phase 4: /navigate (/nav), DESIGN §6.1. The services are read lazily - they
             // exist only when navigation.enabled and the road cache started (initializeNavigation).
             var navigateCommand = new net.knightsandkings.knk.paper.navigation.NavigateCommand(
