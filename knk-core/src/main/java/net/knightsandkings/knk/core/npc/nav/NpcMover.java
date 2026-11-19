@@ -44,6 +44,15 @@ public interface NpcMover {
     }
 
     /**
+     * How many of the engine's jumps the mover held back since it was spawned because the body walks on instead (link
+     * J1, PandiO/knk-workspace#695): the hop on a stair's lower half, and a jump toward a waypoint a block up when the
+     * next cell toward it is at most a step up. 0 for an engine that does not hold them back.
+     */
+    default long stepHopsHeld() {
+        return 0;
+    }
+
+    /**
      * Walk the given points in order without the engine's own path search (NAV-15 trail mode). The engine's block
      * rules are not consulted, so K&K's recheck keeps access rules binding (NAV-02).
      */

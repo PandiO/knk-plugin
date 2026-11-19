@@ -150,6 +150,64 @@ class CrowdControlTest {
         assertEquals(1, crowd.yields(), "counted once");
     }
 
+    /**
+     * Link J1 (PandiO/knk-workspace#695): the climb's queue below flight 1 had its spot on the wall top beside the
+     * flight, a block above the NPC's floor, and the engine jumped at it. A spot to the side lies on the queue line's
+     * own level: the ledge on the right is passed over for the left.
+     */
+    @Test
+    void aQueueSpotIsNeverOnALedgeBesideTheWay() {
+        Decision a = queueBehindAWestwardHolder(CrowdWorld.doorway(10, 5).ledges(0, 6, 9, 6));
+
+        assertEquals(Kind.WAIT, a.kind());
+        assertNotNull(a.spot());
+        assertEquals(4.5, a.spot().z(), 0.01, "on the other side, not on the ledge at z 6: " + a.spot());
+        assertEquals(65, a.spot().y(), 1e-9, "on the line's own floor");
+    }
+
+    /**
+     * A queue spot is reached from the feet by walking (the climb: flight 1's top has a diagonal axis, its queue line
+     * 5.5 blocks back lies beyond the flight's west wall without a floor, and the side spot was the wall top). A spot
+     * a block up a ledge is refused, one on the feet's level or below them is not, nor one up a half-block step.
+     */
+    @Test
+    void aQueueSpotIsReachedFromTheFeetByWalking() {
+        CrowdWorld world = new CrowdWorld().ledges(3, 3, 3, 3);
+        NavPoint feet = feet(2.3, 3.5); // floor 64, feet 65, against the ledge's face
+        NavPoint ledge = new NavPoint(CrowdWorld.W, 3.45, 65, 3.5);
+        NavPoint level = new NavPoint(CrowdWorld.W, 1.5, 64, 3.5);
+        NavPoint pastTheLedge = new NavPoint(CrowdWorld.W, 4.5, 64, 3.5);
+
+        assertFalse(CrowdControl.onTheWaysLevel(world, ledge, null, feet), "a block above the feet");
+        assertTrue(CrowdControl.onTheWaysLevel(world, level, null, feet), "on the feet's level");
+        assertTrue(CrowdControl.onTheWaysLevel(world, level, null, new NavPoint(CrowdWorld.W, 2.3, 66, 3.5)),
+            "below the feet: walked down to, no jump");
+        assertFalse(CrowdControl.onTheWaysLevel(world, pastTheLedge, null, feet),
+            "on the feet's level, but only over the ledge");
+        assertFalse(CrowdControl.onTheWaysLevel(world, level, ledge, feet), "a level below the queue line's floor");
+
+        world.tops.put("3,65,3", 0.5); // the ledge is a slab: a half-block step
+        assertTrue(CrowdControl.onTheWaysLevel(world, ledge, null, feet), "up a half-block step");
+    }
+
+    /** The same queue without the ledge takes the side the ledge was on: the ledge made the difference. */
+    @Test
+    void withoutTheLedgeTheSpotIsOnThatSide() {
+        Decision a = queueBehindAWestwardHolder(CrowdWorld.doorway(10, 5));
+
+        assertEquals(6.5, a.spot().z(), 0.01, a.spot().toString());
+    }
+
+    /** NPC 9 holds the doorway going west; NPC 1 arrives going east and queues. */
+    private Decision queueBehindAWestwardHolder(CrowdWorld world) {
+        where.put(9, feet(13.5, 5.5));
+        update();
+        assertEquals(Kind.GO, decide(world, 9, feet(4.5, 5.5)).kind());
+        where.put(1, feet(8.0, 5.5));
+        update();
+        return decide(world, 1, feet(16.5, 5.5));
+    }
+
     @Test
     void theSameDirectionQueuesFirstComeABlockApartToTheSide() {
         CrowdWorld world = CrowdWorld.doorway(10, 5);

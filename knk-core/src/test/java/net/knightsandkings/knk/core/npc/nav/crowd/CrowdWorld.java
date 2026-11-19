@@ -12,6 +12,10 @@ final class CrowdWorld implements NavWorld {
     static final String W = "w";
 
     final Set<Long> walls = new HashSet<>();
+    /** Columns whose floor is a block higher (65): a wall top or a ledge beside the way, with room above it. */
+    final Set<Long> ledges = new HashSet<>();
+    /** A floor block's top where it is not a whole block ("x,y,z" to 0..1), as {@code FakeNavWorld}. */
+    final java.util.Map<String, Double> tops = new java.util.HashMap<>();
     long reads;
 
     static long key(int x, int z) {
@@ -23,6 +27,16 @@ final class CrowdWorld implements NavWorld {
         for (int x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) {
             for (int z = Math.min(z1, z2); z <= Math.max(z1, z2); z++) {
                 walls.add(key(x, z));
+            }
+        }
+        return this;
+    }
+
+    /** A ledge (floor at 65) on every column from (x1, z1) to (x2, z2), both included. */
+    CrowdWorld ledges(int x1, int z1, int x2, int z2) {
+        for (int x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) {
+            for (int z = Math.min(z1, z2); z <= Math.max(z1, z2); z++) {
+                ledges.add(key(x, z));
             }
         }
         return this;
@@ -48,13 +62,18 @@ final class CrowdWorld implements NavWorld {
     @Override
     public boolean isStandableFloor(String world, int x, int floorY, int z) {
         reads++;
-        return floorY == 64 && !walls.contains(key(x, z));
+        return floorY == (ledges.contains(key(x, z)) ? 65 : 64) && !walls.contains(key(x, z));
     }
 
     @Override
     public double freeHeight(String world, int x, int floorY, int z) {
         reads++;
         return isStandableFloor(world, x, floorY, z) ? 3.0 : 0.0;
+    }
+
+    @Override
+    public double surfaceY(String world, double x, int floorY, double z) {
+        return floorY + tops.getOrDefault((int) Math.floor(x) + "," + floorY + "," + (int) Math.floor(z), 1.0);
     }
 
     @Override
@@ -65,7 +84,7 @@ final class CrowdWorld implements NavWorld {
     @Override
     public boolean blocksBody(String world, int x, int y, int z) {
         reads++;
-        return walls.contains(key(x, z)) && (y == 65 || y == 66);
+        return walls.contains(key(x, z)) && (y == 65 || y == 66) || ledges.contains(key(x, z)) && y == 65;
     }
 
     static NavPoint feet(double x, double z) {

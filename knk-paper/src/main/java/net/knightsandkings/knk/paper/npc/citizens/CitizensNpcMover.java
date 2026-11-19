@@ -49,6 +49,18 @@ final class CitizensNpcMover implements NpcMover {
         return npc;
     }
 
+    /** Engine jumps held back since spawn ({@link CitizensNpcRuntime#jumpPower}). */
+    private long stepHopsHeld;
+
+    void stepHopHeld() {
+        stepHopsHeld++;
+    }
+
+    @Override
+    public long stepHopsHeld() {
+        return stepHopsHeld;
+    }
+
     MoverListener listener() {
         return listener;
     }

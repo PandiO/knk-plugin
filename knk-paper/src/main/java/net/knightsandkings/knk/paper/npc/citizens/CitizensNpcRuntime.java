@@ -104,6 +104,8 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
             params.avoidWater(true).clearExaminers().examiner(dry);
         }
         CitizensNpcMover mover = new CitizensNpcMover(npc, this::forget, dry);
+        npc.data().set(NPC.Metadata.JUMP_POWER_SUPPLIER,
+            (java.util.function.Function<NPC, Float>) n -> jumpPower(n, mover));
         movers.put(npc.getId(), mover);
         return mover;
     }
@@ -159,6 +161,82 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
             mover.listener().contact(mover, new NpcMover.Contact(NpcMover.ContactKind.ATTACK,
                 by == null ? null : contactId(by), by instanceof Player && !by.hasMetadata("NPC")));
         }
+    }
+
+    /**
+     * The jump power Citizens asks for whenever one of K&K's NPCs jumps ({@code NPC.Metadata.JUMP_POWER_SUPPLIER}):
+     * none for the engine's stair hop (link J1, PandiO/knk-workspace#695, {@link StepHop}), so a body on a stair's
+     * lower half walks onto the upper half instead of hopping; and none for a jump toward a waypoint more than a step up
+     * within a block when the next cell toward it is at most a half-block step up ({@link #walksOn}): the body steps up
+     * instead.
+     * Otherwise the body's own (its jump strength, halved on a honey block as in vanilla). Citizens' human NPC jumps
+     * through its own code, not Paper's {@code EntityJumpEvent}.
+     */
+    static float jumpPower(NPC npc, CitizensNpcMover mover) {
+        Entity entity = npc.getEntity();
+        if (!(entity instanceof org.bukkit.entity.LivingEntity body)) {
+            return 0.42f;
+        }
+        Location at = body.getLocation();
+        org.bukkit.block.Block block = at.getBlock();
+        // Citizens' move control judges its target by the body's step height (1.0 for its NPCs); a jump is held back
+        // only where the body walks up at most a half-block step (StepHop.WALK_STEP)
+        double walk = Math.min(stepHeight(body), StepHop.WALK_STEP);
+        net.citizensnpcs.api.ai.PathStrategy strategy = npc.getNavigator().getPathStrategy();
+        Location target = strategy == null ? null : strategy.getCurrentDestination();
+        boolean forTarget = target != null && StepHop.jumpsForTarget(target.getX() - at.getX(),
+            target.getY() - at.getY(), target.getZ() - at.getZ(), stepHeight(body), Math.max(1.0, body.getWidth()));
+        boolean held = forTarget ? walksOn(at, target, walk)
+            : StepHop.isStepHop(at.getY(), block.getY(), block.getCollisionShape().getBoundingBoxes(), walk);
+        if (held) {
+            if (mover != null) {
+                mover.stepHopHeld();
+            }
+            return 0f;
+        }
+        org.bukkit.attribute.AttributeInstance strength = body.getAttribute(org.bukkit.attribute.Attribute.JUMP_STRENGTH);
+        double power = strength == null ? 0.42 : strength.getValue();
+        // vanilla's block jump factor: the block at the feet, else the one under them (only honey has one)
+        boolean honey = block.getType() == org.bukkit.Material.HONEY_BLOCK
+            || at.clone().subtract(0, 0.5000001, 0).getBlock().getType() == org.bukkit.Material.HONEY_BLOCK;
+        return (float) (honey ? power * 0.5 : power);
+    }
+
+    /**
+     * Whether the body walks on toward {@code target} without a jump ({@link StepHop#walksOn}): the first cell the
+     * line to it enters is at most a step above the feet. A target in the body's own cell keeps its jump.
+     */
+    static boolean walksOn(Location at, Location target, double step) {
+        int cx = at.getBlockX();
+        int cz = at.getBlockZ();
+        double dx = target.getX() - at.getX();
+        double dz = target.getZ() - at.getZ();
+        double len = Math.sqrt(dx * dx + dz * dz);
+        for (double d = 0.05; d <= len + 1e-9; d += 0.05) {
+            int x = (int) Math.floor(at.getX() + dx * d / len);
+            int z = (int) Math.floor(at.getZ() + dz * d / len);
+            if (x == cx && z == cz) {
+                continue;
+            }
+            org.bukkit.World world = at.getWorld();
+            int y = (int) Math.floor(at.getY() + 1e-3);
+            return StepHop.walksOn(at.getY(), StepHop.nextSurface(at.getY(), top(world.getBlockAt(x, y - 1, z)),
+                top(world.getBlockAt(x, y, z)), top(world.getBlockAt(x, y + 1, z))), step);
+        }
+        return false;
+    }
+
+    /** A block's absolute step top ({@code BukkitNavWorld.surfaceTop}), NaN without a collision box. */
+    private static double top(org.bukkit.block.Block block) {
+        java.util.Collection<org.bukkit.util.BoundingBox> boxes = block.getCollisionShape().getBoundingBoxes();
+        return boxes.isEmpty() ? Double.NaN
+            : block.getY() + net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld.surfaceTop(boxes);
+    }
+
+    /** The body's step height (its attribute: Citizens' NPCs have 1.0, a player 0.6). */
+    static double stepHeight(org.bukkit.entity.LivingEntity body) {
+        org.bukkit.attribute.AttributeInstance step = body.getAttribute(org.bukkit.attribute.Attribute.STEP_HEIGHT);
+        return step == null ? 0.6 : step.getValue();
     }
 
     /** A body's contact: a player (not a Citizens NPC), an NPC (any Citizens NPC), or any other entity. */
