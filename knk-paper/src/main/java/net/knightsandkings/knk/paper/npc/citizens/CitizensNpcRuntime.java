@@ -230,7 +230,7 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
             : block.getY() + net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld.surfaceTop(boxes);
     }
 
-    /** The body's step height (a player's 0.6 unless an attribute changed it). */
+    /** The body's step height (its attribute: Citizens' NPCs have 1.0, a player 0.6). */
     static double stepHeight(org.bukkit.entity.LivingEntity body) {
         org.bukkit.attribute.AttributeInstance step = body.getAttribute(org.bukkit.attribute.Attribute.STEP_HEIGHT);
         return step == null ? 0.6 : step.getValue();

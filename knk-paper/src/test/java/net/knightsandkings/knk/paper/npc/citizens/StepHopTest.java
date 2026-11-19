@@ -58,6 +58,14 @@ class StepHopTest {
     }
 
     @Test
+    void citizensJumpsForATargetExactlyAStepUp() {
+        // the replay's hall entry (link J1's print): Citizens' NPCs step 1.0, the waypoint 1.000 up, 0.94 across
+        assertTrue(StepHop.jumpsForTarget(-0.67, 1.0, -0.70, 1.0, 1.0));
+        assertTrue(StepHop.walksOn(115.0, StepHop.nextSurface(115.0, 115.0, 115.5, Double.NaN), 1.0),
+            "the stair beside it is walked onto");
+    }
+
+    @Test
     void aJumpForATargetAWholeBlockUpWithinABlockIsNeeded() {
         // on a stair's lower half (feet 53.5), a waypoint at 55 (a full block past the stair) 0.8 across: vanilla jumps
         assertTrue(StepHop.jumpsForTarget(0.0, 1.5, -0.8, STEP, 1.0));

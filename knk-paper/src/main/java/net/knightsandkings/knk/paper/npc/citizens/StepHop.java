@@ -10,8 +10,8 @@ import org.bukkit.util.BoundingBox;
  * than a step above. On a stair's lower half that block is the stair itself: the body has just stepped up half a
  * block, and the hop lifts it a further 0.4 or so before it lands on the upper half. The developer saw it as "already
  * walked up a stair block and then seemed to jump up a bit". When that top is at most the body's step height above the
- * feet, the body walks up onto it by itself (a player's step height is 0.6, a stair's upper half is 0.5 up), so the
- * hop is not needed. The move control's other jump, for a target more than a step above the feet within a block
+ * feet, the body walks up onto it by itself (Citizens gives its NPCs a step height of 1.0; a stair's upper half is 0.5
+ * up), so the hop is not needed. The move control's other jump, for a target more than a step above the feet within a block
  * ({@link #jumpsForTarget}), is not needed either when the next cell toward that target is at most a step up
  * ({@link #walksOn}): Citizens moves on to the next waypoint once the body is within the list's margin of the current
  * one, so from beside a stair the next waypoint can already be a block up (the replay's hall entry). A full block in the
@@ -47,9 +47,9 @@ final class StepHop {
     }
 
     /**
-     * Whether the move control also jumps for its target: one more than {@code stepHeight} above the feet and less than
-     * {@code reach} (the larger of a block and the body's width) away across, as vanilla's move control decides. Such a
-     * jump is needed (a whole block up just past a stair's lower half) and is never held back.
+     * Whether the move control also jumps for its target: one at least {@code stepHeight} above the feet and less than
+     * a block away across (the squared distance under {@code reach}, the larger of 1 and the body's width), as
+     * Citizens' move control decides ({@code >=}, where vanilla's has {@code >}).
      *
      * @param dx         target x minus the body's x
      * @param dy         target y minus the feet
@@ -58,7 +58,7 @@ final class StepHop {
      * @param reach      {@code max(1, body width)}
      */
     static boolean jumpsForTarget(double dx, double dy, double dz, double stepHeight, double reach) {
-        return dy > stepHeight && dx * dx + dz * dz < reach;
+        return dy >= stepHeight - 1e-9 && dx * dx + dz * dz < reach;
     }
 
     /**
