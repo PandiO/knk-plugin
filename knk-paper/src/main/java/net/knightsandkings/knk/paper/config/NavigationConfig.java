@@ -63,6 +63,9 @@ import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
  * @param walkLinks          {@code navigation.walk-links} and the {@code walk-link-*} and {@code road-first-*} keys
  *                           (off-road navigation phase 2, PandiO/knk-workspace#705): walk links in the middle of a
  *                           route and the road-first rule. Default off: routes, trails and sessions exactly as before
+ * @param routeEnds          {@code navigation.road-goal-reachable}, {@code road-goal-candidates} and
+ *                           {@code road-to-its-end} (off-road fix link F2, PandiO/knk-workspace#780, #771 items 4 and 5):
+ *                           where a route's road part ends. Default off: routes and sessions exactly as before
  */
 public record NavigationConfig(
     boolean enabled,
@@ -87,7 +90,8 @@ public record NavigationConfig(
     boolean guidanceV2,
     double cursorJump,
     PlazaLinesConfig plazaLines,
-    WalkLinksConfig walkLinks
+    WalkLinksConfig walkLinks,
+    RouteEndsConfig routeEnds
 ) {
     /** Default for {@code destination-snap-vertical-weight}: plain 3D (finding N15). */
     public static final double DEFAULT_DESTINATION_SNAP_VERTICAL_WEIGHT = 1;
@@ -110,7 +114,7 @@ public record NavigationConfig(
      * @param periodTicks ticks between two trail redraws
      * @param particle    a Bukkit {@code Particle} name (DUST takes the colour)
      * @param color       {@code #RRGGBB}
-     * @param legSpacing  {@code navigation.trail-leg-spacing} (phase 6.2, #711; with {@code guidance-v2} only): blocks
+     * @param legSpacing  {@code navigation.trail-leg-spacing} (phase 6.2, #711; since F2, #771 item 3, also with {@code guidance-v2} off): blocks
      *                    between the fixed anchors of a walk trail. Default 3.0, today's spacing (O20, DESIGN § 7.2.2)
      */
     public record TrailConfig(int length, int periodTicks, String particle, String color, double legSpacing) {
@@ -423,6 +427,50 @@ public record NavigationConfig(
         walk = walk == null ? WalkConfig.defaults() : walk;
         plazaLines = plazaLines == null ? PlazaLinesConfig.defaults() : plazaLines;
         walkLinks = walkLinks == null ? WalkLinksConfig.defaults() : walkLinks;
+        routeEnds = routeEnds == null ? RouteEndsConfig.defaults() : routeEnds;
+    }
+
+    /**
+     * Where a player's route leaves the road (off-road fix link F2, PandiO/knk-workspace#780 option (b), #771 items 4 and
+     * 5). Both switches are off by default: routes, trails and sessions exactly as before.
+     *
+     * @param reachableGoal  {@code navigation.road-goal-reachable}: a point destination's road goal is chosen among the
+     *                       nearest road points by walk reachability (a walk search from each, within the shipped
+     *                       {@code walk:} limits, off the main thread), the least road plus walk length winning; none
+     *                       reachable: the straight-line nearest point, as today. The first route is today's; the chosen
+     *                       goal replaces it when the searches answer. Default false
+     * @param goalCandidates {@code navigation.road-goal-candidates}: the most road points (nearest first, one per road
+     *                       edge, within {@code max-snap-distance} of the destination) searched (1..32, default 12)
+     * @param roadToItsEnd   {@code navigation.road-to-its-end}: a running road route is never replaced by direct mode
+     *                       when the road network is swapped while the player is within {@code max-snap-distance} of the
+     *                       destination; the last walk leg starts at the road's end. Default false (today: direct mode)
+     */
+    public record RouteEndsConfig(boolean reachableGoal, int goalCandidates, boolean roadToItsEnd) {
+        public static final int DEFAULT_GOAL_CANDIDATES = 12;
+
+        public static RouteEndsConfig defaults() {
+            return new RouteEndsConfig(false, DEFAULT_GOAL_CANDIDATES, false);
+        }
+
+        public void validate() {
+            if (goalCandidates < 1 || goalCandidates > 32) {
+                throw new IllegalArgumentException("navigation.road-goal-candidates must be 1..32 (got: " + goalCandidates + ")");
+            }
+        }
+    }
+
+    /** Without the route-end keys (callers from before F2): the defaults, both off. */
+    public NavigationConfig(boolean enabled, Map<RoadClass, Double> classCost, List<String> overlayMaterials,
+                            boolean seedFromDomains, double maxSnapDistance, double snapVerticalWeight,
+                            double destinationSnapVerticalWeight, double maxStartDistance, double maxDestinationDistance,
+                            double destinationWalkRange, TrailConfig trail, double rerouteDistance, int rerouteAfterTicks,
+                            double arriveDistance, int maxSessionMinutes, double sprintSpeed, SurveyConfig survey,
+                            BuilderConfig builder, WalkConfig walk, boolean guidanceV2, double cursorJump,
+                            PlazaLinesConfig plazaLines, WalkLinksConfig walkLinks) {
+        this(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance, snapVerticalWeight,
+            destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange, trail,
+            rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed, survey, builder, walk,
+            guidanceV2, cursorJump, plazaLines, walkLinks, null);
     }
 
     /**
@@ -607,7 +655,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks, routeEnds);
     }
 
     /** This config with {@code guidance-v2} on or off. */
@@ -615,7 +663,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks, routeEnds);
     }
 
     /** This config with another trail block ({@code trail-*} keys). */
@@ -623,7 +671,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks, routeEnds);
     }
 
     /** This config with another {@code cursor-jump}. */
@@ -631,7 +679,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks, routeEnds);
     }
 
     /** This config with other plaza-line keys. */
@@ -639,7 +687,7 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks, routeEnds);
     }
 
     /** This config with other walk-link keys. */
@@ -647,7 +695,15 @@ public record NavigationConfig(
         return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
             snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
             trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
-            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks);
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks, routeEnds);
+    }
+
+    /** This config with other route-end keys (F2). */
+    public NavigationConfig withRouteEnds(RouteEndsConfig routeEnds) {
+        return new NavigationConfig(enabled, classCost, overlayMaterials, seedFromDomains, maxSnapDistance,
+            snapVerticalWeight, destinationSnapVerticalWeight, maxStartDistance, maxDestinationDistance, destinationWalkRange,
+            trail, rerouteDistance, rerouteAfterTicks, arriveDistance, maxSessionMinutes, sprintSpeed,
+            survey, builder, walk, guidanceV2, cursorJump, plazaLines, walkLinks, routeEnds);
     }
 
     /** {@code guidance-v2}'s route cursor ({@code cursor-jump}); null with the flag off: the session as before. */
@@ -730,6 +786,7 @@ public record NavigationConfig(
         walk.validate();
         plazaLines.validate();
         walkLinks.validate();
+        routeEnds.validate();
     }
 
     /** Snapping and class costs for the router (Phases 2d/4); the snap weight is the player's start's. */
