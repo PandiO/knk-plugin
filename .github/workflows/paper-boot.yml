@@ -159,7 +159,7 @@ jobs:
         # ravine scenes): about 5.5 minutes more, 59 with the off-road chain's scenarios (L3, L4, L10).
         # Link E1 (#701) adds two (61) and link R1 (#724) one, a cache refresh with followers held (about 30 s): 62.
         env:
-          MIN_SCENARIOS: 62
+          MIN_SCENARIOS: 63
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
