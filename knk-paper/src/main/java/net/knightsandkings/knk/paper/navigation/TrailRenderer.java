@@ -218,17 +218,20 @@ public final class TrailRenderer {
      * ({@code WalkPath.points()}: block centre, floor y), so no world reads. Main thread. With
      * {@code navigation.guidance-v2} (off-road phase 6.1, #710) they are the shaped walk path's curve instead
      * ({@code WalkPathShaper.Shaped#trail()}, computed and checked against the walls on the walk thread): drawn the same
-     * way, {@link #LEG_SPACING} apart in the leg colour (O20), so its particles follow the curve.
+     * way, {@code trail-leg-spacing} apart in the leg colour (O20), so its particles follow the curve. Fix link F2
+     * (PandiO/knk-workspace#771 item 3): the spacing is {@code navigation.trail-leg-spacing} with {@code guidance-v2} off
+     * too; its default 3.0 is {@link #LEG_SPACING}, today's spacing.
      */
     public void drawPath(Player viewer, List<double[]> floorPoints) {
         double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();
+        double spacing = config.legSpacing();
         Location feet = viewer.getLocation();
         List<double[]> window = pathWindow(floorPoints, new double[] {feet.getX(), feet.getY() - 1, feet.getZ()},
-            length, LEG_SPACING);
+            length, spacing);
         if (window.isEmpty()) {
             return;
         }
-        ParticleDraw.polyline(viewer, lifted(window), LEG_SPACING, particle, legData);
+        ParticleDraw.polyline(viewer, lifted(window), spacing, particle, legData);
     }
 
     /**

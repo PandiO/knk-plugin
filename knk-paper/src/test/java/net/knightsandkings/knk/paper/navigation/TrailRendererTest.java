@@ -270,6 +270,31 @@ class TrailRendererTest {
         verify(world, never()).getBlockAt(anyInt(), anyInt(), anyInt());
     }
 
+    // ==================== fix link F2 (#771 item 3): trail-leg-spacing with guidance-v2 off ====================
+
+    private static long particlesOfTheFlagOffWalkTrail(NavigationConfig.TrailConfig config) {
+        World world = mock(World.class);
+        Player viewer = mock(Player.class);
+        when(viewer.getWorld()).thenReturn(world);
+        when(viewer.getLocation()).thenReturn(new Location(world, 0.5, 65, 0.5));
+        new TrailRenderer(config, new TickBudget(() -> 20.0)).drawPath(viewer, lPath());
+        return org.mockito.Mockito.mockingDetails(viewer).getInvocations().stream()
+            .filter(i -> i.getMethod().getName().equals("spawnParticle")).count();
+    }
+
+    @Test
+    void theFlagOffWalkTrailTakesTheLegSpacingAndItsDefaultIsTodays() {
+        // the window: the first 30 blocks of the 30-block L path from the player at its start
+        long today = particlesOfTheFlagOffWalkTrail(NavigationConfig.TrailConfig.defaults());
+        long denser = particlesOfTheFlagOffWalkTrail(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 1.5));
+        long explicitDefault = particlesOfTheFlagOffWalkTrail(
+            new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", TrailRenderer.LEG_SPACING));
+
+        assertEquals(today, explicitDefault, "3.0 is today's spacing");
+        assertTrue(today >= 10 && today <= 12, "about one particle every 3 blocks: " + today);
+        assertTrue(denser >= 2 * today - 2, "1.5 blocks: about twice as many: " + denser + " vs " + today);
+    }
+
     // ==================== off-road phase 6.2 (#711): anchored walk trails (DESIGN § 7.2, A17) ====================
 
     @Test

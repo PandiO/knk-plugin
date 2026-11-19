@@ -774,8 +774,9 @@ navigation:
   # are shaped off the main thread and drawn with checked curves (walk.curve). false = walk paths, the search and the
   # trail exactly as before. Keep false until the live test signs it off
   guidance-v2: false
-  # With guidance-v2 only (phase 6.2, #711): blocks between the fixed anchors of a walk trail's particles (0.5..16;
-  # 3.0 is today's spacing); how far along the route the cursor may move in one tick before only a player who left
+  # Blocks between a walk trail's particles (0.5..16; 3.0 is today's spacing). With guidance-v2 (phase 6.2, #711) the
+  # fixed anchors of the trail; since F2 (#771 item 3) also the spacing of the walk trail with guidance-v2 off. With
+  # guidance-v2 only: how far along the route the cursor may move in one tick before only a player who left
   # the previous stretch (farther than reroute-distance) makes it jump to another (loops, switchbacks)
   trail-leg-spacing: 3.0
   cursor-jump: 12
@@ -814,6 +815,16 @@ navigation:
   # road-first-max-ratio times the walk path (at least 1). Defaults for the developer to confirm in the live test
   road-first-share: 0.6
   road-first-max-ratio: 1.5
+  # Where a route's road part ends (off-road fix link F2, #780, #771 items 4 and 5). Off: routes exactly as before.
+  # road-goal-reachable: a point destination's road goal is the road point (among the road-goal-candidates nearest
+  # ones, one per road, within max-snap-distance of the destination) from which a walk search reaches the destination
+  # within the walk: limits, the least road plus walk length winning; none reachable: the nearest point, as today. The
+  # first route is today's; the chosen one replaces it once the searches answer (a second or two)
+  road-goal-reachable: false
+  road-goal-candidates: 12
+  # road-to-its-end: a road route is kept to its end when the road network is swapped while the player is within
+  # max-snap-distance of the destination (today: direct mode from where the player stands)
+  road-to-its-end: false
   walk:
     # false = straight lines exactly as before (the kill switch)
     enabled: true
