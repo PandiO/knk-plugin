@@ -18,8 +18,11 @@ import java.util.logging.Logger;
  *       every domain region; the set is remembered.</li>
  *   <li>{@link #regionRenamed}: after a world task's region was renamed (or redefined in place): the new region's
  *       outline, and the old names as removed.</li>
- *   <li>{@link #resendAll}: on every (re)connect of the game hub, the remembered set again (the startup repair can finish
- *       before the hub is connected, and the API may have restarted).</li>
+ *   <li>{@link #reportSubRegions}: after every region access sync (startup, periodic, {@code /knk regions repair}) with
+ *       every domain sub-region ({@code domain_<id>_sub_<n>}) the API lists; the repair never sees those
+ *       (PandiO/knk-workspace#750). Only sub-regions not reported before are read and sent; the set is remembered.</li>
+ *   <li>{@link #resendAll}: on every (re)connect of the game hub, both remembered sets again (the startup repair can
+ *       finish before the hub is connected, and the API may have restarted).</li>
  * </ol>
  * Since L4 (PandiO/knk-workspace#738, § 5 rule 6, O07, O21) it also builds the live player report
  * ({@code ReportMapPlayers}): {@link #collectPlayers} takes the snapshot through {@link OnlinePlayerSnapshotPort} every
@@ -59,6 +62,11 @@ public final class MapReportingService {
 
         static final Summary NOTHING = new Summary(0, 0, 0, 0, 0, 0);
 
+        Summary plus(Summary other) {
+            return new Summary(outlines + other.outlines, removed + other.removed, missing + other.missing,
+                    skipped + other.skipped, messages + other.messages, failedMessages + other.failedMessages);
+        }
+
         public boolean allSent() {
             return failedMessages == 0;
         }
@@ -69,6 +77,8 @@ public final class MapReportingService {
     private final MapReportSender sender;
     private final Logger logger;
     private final Map<String, RegionRef> known = new LinkedHashMap<>();
+    /** The sub-regions the last access sync listed and that were found, by listed key (#750). */
+    private final Map<String, RegionRef> knownSubRegions = new LinkedHashMap<>();
     private final OnlinePlayerSnapshotPort players;
     private final int intervalTicks;
     /** Whether the last player report sent was empty (an empty report is sent once, not every interval). */
@@ -236,6 +246,51 @@ public final class MapReportingService {
     }
 
     /**
+     * Replaces the remembered sub-region set with {@code subRegions} (every domain sub-region the access sync listed,
+     * PandiO/knk-workspace#750) and sends the outlines of those not reported yet: on the first sync all of them, on the
+     * periodic syncs after it only new ones, so a quiet sync reads and sends nothing. A sub-region already remembered
+     * (from an earlier sync, or a rename) is kept without a read; one not found is counted as missing and tried again on
+     * the next sync. A sub-region no longer listed only leaves the set (it is not sent as removed, as with the domain
+     * regions): the orphan cleanup deletes it later.
+     */
+    public synchronized Summary reportSubRegions(Collection<RegionRef> subRegions) {
+        if (!enabled) {
+            return Summary.NOTHING;
+        }
+        Map<String, RegionRef> listed = new LinkedHashMap<>();
+        for (RegionRef ref : subRegions) {
+            if (ref != null) {
+                listed.putIfAbsent(ref.key(), ref);
+            }
+        }
+        Map<String, RegionRef> next = new LinkedHashMap<>();
+        List<RegionOutline> found = new ArrayList<>();
+        int missing = 0;
+        for (Map.Entry<String, RegionRef> entry : listed.entrySet()) {
+            RegionRef kept = knownSubRegions.get(entry.getKey());
+            if (kept == null && known.containsKey(entry.getKey())) {
+                kept = known.get(entry.getKey());
+            }
+            if (kept != null) {
+                next.put(entry.getKey(), kept);
+                continue;
+            }
+            Optional<RegionOutline> outline = read(entry.getValue());
+            if (outline.isPresent()) {
+                next.put(entry.getKey(), outline.get().ref());
+                found.add(outline.get());
+            } else {
+                missing++;
+            }
+        }
+        knownSubRegions.clear();
+        knownSubRegions.putAll(next);
+        Summary summary = send(found, List.of(), missing);
+        log("sub-regions", summary);
+        return summary;
+    }
+
+    /**
      * A world task's region {@code oldRegionId} became {@code newRegionId} in {@code worldName}; {@code replacedRegionId}
      * (or null) is the domain's previous region it replaced (KNG-103). Sends the new outline and the old names as removed.
      */
@@ -254,7 +309,10 @@ public final class MapReportingService {
                 removed.add(ref);
             }
         }
-        removed.forEach(ref -> known.remove(ref.key()));
+        removed.forEach(ref -> {
+            known.remove(ref.key());
+            knownSubRegions.remove(ref.key());
+        });
         Optional<RegionOutline> outline = read(renamed);
         outline.ifPresent(value -> known.put(value.ref().key(), value.ref()));
         Summary summary = send(outline.map(List::of).orElse(List.of()), removed, outline.isPresent() ? 0 : 1);
@@ -262,17 +320,42 @@ public final class MapReportingService {
         return summary;
     }
 
-    /** Sends the remembered regions' current outlines again (hub reconnect). Nothing before the first repair. */
+    /**
+     * Sends the remembered regions' current outlines again (hub reconnect): the domain regions and the sub-regions.
+     * Nothing before the first repair or access sync.
+     */
     public synchronized Summary resendAll() {
-        if (!enabled || known.isEmpty()) {
+        if (!enabled || (known.isEmpty() && knownSubRegions.isEmpty())) {
             return Summary.NOTHING;
         }
-        return reportDomainRegions(new ArrayList<>(known.values()));
+        Summary domains = known.isEmpty() ? Summary.NOTHING : reportDomainRegions(new ArrayList<>(known.values()));
+        List<RegionOutline> found = new ArrayList<>();
+        int missing = 0;
+        for (RegionRef ref : knownSubRegions.values()) {
+            if (known.containsKey(ref.key())) {
+                continue; // a renamed sub-region: just sent with the domain regions
+            }
+            Optional<RegionOutline> outline = read(ref);
+            if (outline.isPresent()) {
+                found.add(outline.get());
+            } else {
+                missing++;
+            }
+        }
+        Summary subs = found.isEmpty() && missing == 0 ? Summary.NOTHING : send(found, List.of(), missing);
+        log("sub-regions", subs);
+        return domains.plus(subs);
     }
 
-    /** How many regions are remembered for {@link #resendAll}. */
+    /** How many regions are remembered for {@link #resendAll} (domain regions and sub-regions). */
     public synchronized int knownRegionCount() {
-        return known.size();
+        int count = known.size();
+        for (RegionRef ref : knownSubRegions.values()) {
+            if (!known.containsKey(ref.key())) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private Optional<RegionOutline> read(RegionRef ref) {
