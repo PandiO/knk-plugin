@@ -19,6 +19,7 @@ import net.citizensnpcs.api.npc.NPC;
 import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.LocalLeg;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
+import net.knightsandkings.knk.core.npc.nav.ReachMargin;
 
 /** One K&K NPC on Citizens. Main thread. */
 final class CitizensNpcMover implements NpcMover {
@@ -49,6 +50,18 @@ final class CitizensNpcMover implements NpcMover {
         return npc;
     }
 
+    /** Engine stair hops held back since spawn ({@link CitizensNpcRuntime#jumpPower}). */
+    private long stepHopsHeld;
+
+    void stepHopHeld() {
+        stepHopsHeld++;
+    }
+
+    @Override
+    public long stepHopsHeld() {
+        return stepHopsHeld;
+    }
+
     MoverListener listener() {
         return listener;
     }
@@ -75,6 +88,16 @@ final class CitizensNpcMover implements NpcMover {
         }
         Location at = npc.getEntity().getLocation();
         return Optional.of(new NavPoint(at.getWorld().getName(), at.getX(), at.getY(), at.getZ()));
+    }
+
+    /** The body's feet, or null without a body (for {@link ReachMargin}). */
+    private NavPoint feetOrNull() {
+        Entity entity = npc.getEntity();
+        if (entity == null) {
+            return null;
+        }
+        Location at = entity.getLocation();
+        return at.getWorld() == null ? null : new NavPoint(at.getWorld().getName(), at.getX(), at.getY(), at.getZ());
     }
 
     @Override
@@ -124,6 +147,14 @@ final class CitizensNpcMover implements NpcMover {
             points.add(throughDoorway(world, p));
         }
         npc.getNavigator().setTarget(points);
+        if (npc.getNavigator().isNavigating()) {
+            // Citizens' own margin, unless the list climbs (link J1, ReachMargin)
+            NavigatorParameters local = npc.getNavigator().getLocalParameters();
+            double margin = ReachMargin.of(feetOrNull(), waypoints, local.distanceMargin());
+            if (margin != local.distanceMargin()) {
+                local.distanceMargin(margin);
+            }
+        }
     }
 
     /**
@@ -158,7 +189,9 @@ final class CitizensNpcMover implements NpcMover {
         }
         follow(waypoints);
         if (npc.getNavigator().isNavigating()) {
-            npc.getNavigator().getLocalParameters().distanceMargin(margin);
+            // a list that climbs: a step counts as reached only once the body is on it (link J1)
+            npc.getNavigator().getLocalParameters().distanceMargin(
+                ReachMargin.of(feetOrNull(), waypoints, margin));
         }
     }
 

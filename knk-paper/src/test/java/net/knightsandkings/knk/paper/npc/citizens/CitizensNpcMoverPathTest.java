@@ -79,6 +79,37 @@ class CitizensNpcMoverPathTest {
         org.mockito.Mockito.verify(defaults, org.mockito.Mockito.never()).distanceMargin(org.mockito.ArgumentMatchers.anyDouble());
     }
 
+    /**
+     * Link J1 (PandiO/knk-workspace#695): a list that climbs is handed over with a margin under half a body's width, so
+     * Citizens counts a step as reached only once the body stands on it; a flat list keeps the margin asked for.
+     */
+    @Test
+    void aListThatClimbsGetsTheClimbMargin() {
+        net.citizensnpcs.api.npc.NPC npc = org.mockito.Mockito.mock(net.citizensnpcs.api.npc.NPC.class);
+        net.citizensnpcs.api.ai.Navigator navigator = org.mockito.Mockito.mock(net.citizensnpcs.api.ai.Navigator.class);
+        net.citizensnpcs.api.ai.NavigatorParameters local =
+            org.mockito.Mockito.mock(net.citizensnpcs.api.ai.NavigatorParameters.class);
+        org.mockito.Mockito.when(npc.getNavigator()).thenReturn(navigator);
+        org.mockito.Mockito.when(navigator.getLocalParameters()).thenReturn(local);
+        org.mockito.Mockito.when(npc.isSpawned()).thenReturn(true);
+        org.mockito.Mockito.when(navigator.isNavigating()).thenReturn(true);
+        org.mockito.Mockito.when(local.distanceMargin()).thenReturn(1.0);
+        CitizensNpcMover mover = new CitizensNpcMover(npc, removed -> { });
+
+        mover.follow(List.of(new NavPoint("world", 0.5, 65, 0.5), new NavPoint("world", 1.5, 65.5, 0.5),
+            new NavPoint("world", 2.5, 66, 0.5)), 1.0);
+
+        org.mockito.Mockito.verify(local, org.mockito.Mockito.atLeastOnce())
+            .distanceMargin(net.knightsandkings.knk.core.npc.nav.ReachMargin.CLIMB);
+        org.mockito.Mockito.verify(local, org.mockito.Mockito.never()).distanceMargin(1.0);
+
+        org.mockito.Mockito.clearInvocations(local);
+        mover.follow(List.of(new NavPoint("world", 0.5, 65, 0.5), new NavPoint("world", 3.5, 65, 0.5)), 1.0);
+        org.mockito.Mockito.verify(local).distanceMargin(1.0);
+        org.mockito.Mockito.verify(local, org.mockito.Mockito.never())
+            .distanceMargin(net.knightsandkings.knk.core.npc.nav.ReachMargin.CLIMB);
+    }
+
     /** Implementation plan 4b.2 item 7.3: Citizens' cancel tells a failed path search from a stationary NPC. */
     @Test
     void aStuckWithoutAPathIsNoPathOneWithAPathIsStationary() {

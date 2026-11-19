@@ -44,6 +44,15 @@ public interface NpcMover {
     }
 
     /**
+     * How many of the engine's stair hops the mover held back since it was spawned (link J1,
+     * PandiO/knk-workspace#695): jumps whose only reason was a block at the feet with a top the body steps onto by
+     * itself. 0 for an engine that does not hold them back.
+     */
+    default long stepHopsHeld() {
+        return 0;
+    }
+
+    /**
      * Walk the given points in order without the engine's own path search (NAV-15 trail mode). The engine's block
      * rules are not consulted, so K&K's recheck keeps access rules binding (NAV-02).
      */

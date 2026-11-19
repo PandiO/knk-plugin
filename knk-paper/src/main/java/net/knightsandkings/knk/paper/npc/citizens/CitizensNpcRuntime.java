@@ -104,6 +104,8 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
             params.avoidWater(true).clearExaminers().examiner(dry);
         }
         CitizensNpcMover mover = new CitizensNpcMover(npc, this::forget, dry);
+        npc.data().set(NPC.Metadata.JUMP_POWER_SUPPLIER,
+            (java.util.function.Function<NPC, Float>) n -> jumpPower(n, mover));
         movers.put(npc.getId(), mover);
         return mover;
     }
@@ -159,6 +161,39 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
             mover.listener().contact(mover, new NpcMover.Contact(NpcMover.ContactKind.ATTACK,
                 by == null ? null : contactId(by), by instanceof Player && !by.hasMetadata("NPC")));
         }
+    }
+
+    /**
+     * The jump power Citizens asks for whenever one of K&K's NPCs jumps ({@code NPC.Metadata.JUMP_POWER_SUPPLIER}):
+     * none for the engine's stair hop (link J1, PandiO/knk-workspace#695, {@link StepHop}), so a body on a stair's
+     * lower half walks onto the upper half instead of hopping; otherwise the body's own (its jump strength, halved on
+     * a honey block as in vanilla). Citizens' human NPC jumps through its own code, not Paper's {@code EntityJumpEvent}.
+     */
+    static float jumpPower(NPC npc, CitizensNpcMover mover) {
+        Entity entity = npc.getEntity();
+        if (!(entity instanceof org.bukkit.entity.LivingEntity body)) {
+            return 0.42f;
+        }
+        Location at = body.getLocation();
+        org.bukkit.block.Block block = at.getBlock();
+        if (StepHop.isStepHop(at.getY(), block.getY(), block.getCollisionShape().getBoundingBoxes(), stepHeight(body))) {
+            if (mover != null) {
+                mover.stepHopHeld();
+            }
+            return 0f;
+        }
+        org.bukkit.attribute.AttributeInstance strength = body.getAttribute(org.bukkit.attribute.Attribute.JUMP_STRENGTH);
+        double power = strength == null ? 0.42 : strength.getValue();
+        // vanilla's block jump factor: the block at the feet, else the one under them (only honey has one)
+        boolean honey = block.getType() == org.bukkit.Material.HONEY_BLOCK
+            || at.clone().subtract(0, 0.5000001, 0).getBlock().getType() == org.bukkit.Material.HONEY_BLOCK;
+        return (float) (honey ? power * 0.5 : power);
+    }
+
+    /** The body's step height (a player's 0.6 unless an attribute changed it). */
+    static double stepHeight(org.bukkit.entity.LivingEntity body) {
+        org.bukkit.attribute.AttributeInstance step = body.getAttribute(org.bukkit.attribute.Attribute.STEP_HEIGHT);
+        return step == null ? 0.6 : step.getValue();
     }
 
     /** A body's contact: a player (not a Citizens NPC), an NPC (any Citizens NPC), or any other entity. */
