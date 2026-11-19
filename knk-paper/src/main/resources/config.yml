@@ -437,8 +437,9 @@ siege:
   # Siege weapons (knk-workspace docs/specs/siege-minigame/SIEGE_WEAPONS.md, PandiO/knk-workspace#354). Off by
   # default: with false nothing of the feature is registered and Siege matches and world tasks behave as before.
   weapons:
-    # true: /knk weaponspot (node knk.siege.admin.manage) creates weapon spots from a WorldEdit selection or a
-    # WorldGuard region (phase 2, #783). Later phases add placement and firing behind the same switch.
+    # true: the weapon spot form's world task (type SiegeWeaponSpot, claimed with /knk task-claim <code>) reads a
+    # WorldEdit selection or a WorldGuard region and fills the form (phase 2, #783/#799). Later phases add placement
+    # and firing behind the same switch.
     enabled: false
 
 # Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of

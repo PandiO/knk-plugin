@@ -1,7 +1,7 @@
 package net.knightsandkings.knk.paper.siege.weapons;
 
-import net.knightsandkings.knk.core.ports.api.SiegeWeaponSpotsApi;
-import net.knightsandkings.knk.paper.commands.KnkAdminCommand;
+import net.knightsandkings.knk.core.ports.api.WorldTasksApi;
+import net.knightsandkings.knk.paper.tasks.WorldTaskHandlerRegistry;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.Test;
@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -43,13 +42,29 @@ class SiegeWeaponsSettingsTest {
     }
 
     @Test
-    void flagOff_RegistersNoCommandNoListenerAndCallsNoApi() {
+    void flagOff_RegistersNoHandlerAndCallsNoApi() {
         JavaPlugin plugin = mock(JavaPlugin.class);
-        KnkAdminCommand admin = mock(KnkAdminCommand.class);
-        SiegeWeaponSpotsApi api = mock(SiegeWeaponSpotsApi.class);
+        WorldTaskHandlerRegistry registry = new WorldTaskHandlerRegistry();
+        WorldTasksApi api = mock(WorldTasksApi.class);
 
-        assertNull(SiegeWeaponsModule.register(plugin, SiegeWeaponsSettings.defaults(), admin, api, player -> Optional.empty()));
+        assertNull(SiegeWeaponsModule.register(plugin, SiegeWeaponsSettings.defaults(), registry, api));
 
-        verifyNoInteractions(plugin, admin, api);
+        verifyNoInteractions(plugin, api);
+        // A04: a SiegeWeaponSpot task on the spot form's MinX field finds no handler, so the plugin fails it with the
+        // reason (KnkTaskClaimCommand.startClaimed) instead of running another task type.
+        assertTrue(registry.getHandler("SiegeWeaponSpot", "MinX").isEmpty());
+    }
+
+    @Test
+    void flagOn_RegistersTheSpotHandlerByTaskTypeOnly() {
+        JavaPlugin plugin = mock(JavaPlugin.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        WorldTaskHandlerRegistry registry = new WorldTaskHandlerRegistry();
+
+        WeaponSpotTaskHandler handler = SiegeWeaponsModule.register(plugin, new SiegeWeaponsSettings(true), registry,
+                mock(WorldTasksApi.class));
+
+        assertNotNull(handler);
+        assertTrue(registry.getHandler("SiegeWeaponSpot", "MinX").orElseThrow() == handler);
+        assertTrue(registry.getHandler("SiegeWeaponSpot").isEmpty(), "not registered as a field handler");
     }
 }

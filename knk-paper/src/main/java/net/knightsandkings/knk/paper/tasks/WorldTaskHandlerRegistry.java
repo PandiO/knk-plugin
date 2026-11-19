@@ -196,6 +196,17 @@ public class WorldTaskHandlerRegistry {
     }
 
     /**
+     * PandiO/knk-workspace#799: the handlers that read chat ({@link ChatTaskInput}) and are handling this player now. Empty
+     * unless such a handler (the siege weapon spot task, only with {@code siege.weapons.enabled}) is registered.
+     */
+    public java.util.List<ChatTaskInput> activeChatInputs(Player player) {
+        return allHandlers()
+                .filter(h -> h instanceof ChatTaskInput && h.isHandling(player))
+                .map(h -> (ChatTaskInput) h)
+                .toList();
+    }
+
+    /**
      * Get the WgRegionId handler (convenience method).
      * @return The WgRegionId handler if registered, null otherwise
      */

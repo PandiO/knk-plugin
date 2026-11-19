@@ -120,6 +120,16 @@ public class WorldTaskChatListener implements Listener {
             return true;
         }
 
-        return gateDoorRegionCaptureHandler != null && gateDoorRegionCaptureHandler.onPlayerChat(player, message);
+        if (gateDoorRegionCaptureHandler != null && gateDoorRegionCaptureHandler.onPlayerChat(player, message)) {
+            return true;
+        }
+
+        // #799: handlers registered by task type that read chat (the siege weapon spot task)
+        for (var chatInput : handlerRegistry.activeChatInputs(player)) {
+            if (chatInput.onPlayerChat(player, message)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
