@@ -219,7 +219,7 @@ class NavigationServiceRouteEndsTest {
     // ===== #771 item 4: scene 2, the road part overshoots the stair =====
 
     @Test
-    void scene2WithTheKeyOnTheRoadEndsWhereTheWalkLeavesIt() {
+    void scene2WithTheKeyOnTheRoadNoLongerRunsPastTheWalksStart() {
         service(tower, NavigationConfig.defaults());
         Route today = navigateTo("Keep Tower Roof", TOWER);
         assertEquals(PAST_THE_STAIR, today.end().edgeId(), today.end().toString());
