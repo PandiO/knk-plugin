@@ -10,8 +10,8 @@ import org.bukkit.util.BoundingBox;
  * than a step above. On a stair's lower half that block is the stair itself: the body has just stepped up half a
  * block, and the hop lifts it a further 0.4 or so before it lands on the upper half. The developer saw it as "already
  * walked up a stair block and then seemed to jump up a bit". When that top is at most the body's step height above the
- * feet, the body walks up onto it by itself (Citizens gives its NPCs a step height of 1.0; a stair's upper half is 0.5
- * up), so the hop is not needed. The move control's other jump, for a target more than a step above the feet within a block
+ * feet ({@link #WALK_STEP}), the body walks up onto it by itself (a stair's upper half is 0.5 up), so the hop is not
+ * needed. The move control's other jump, for a target more than a step above the feet within a block
  * ({@link #jumpsForTarget}), is not needed either when the next cell toward that target is at most a step up
  * ({@link #walksOn}): Citizens moves on to the next waypoint once the body is within the list's margin of the current
  * one, so from beside a stair the next waypoint can already be a block up (the replay's hall entry). A full block in the
@@ -21,6 +21,12 @@ final class StepHop {
 
     /** Below this the feet stand on the top already (floating-point slack). */
     static final double ON_TOP = 1e-3;
+    /**
+     * The most a body is trusted to walk up without a jump: a half-block step and a bit (navigation's
+     * {@code NavGeometry.STEP_UP}). Citizens gives its NPCs a step height of 1.0, but its move control still jumps for
+     * a whole block, and an NPC held back there does not get up (CI {@code npc-corners-walk}, link J1).
+     */
+    static final double WALK_STEP = 0.6;
 
     private StepHop() {
     }
@@ -32,7 +38,7 @@ final class StepHop {
      * @param feetY      the body's feet height
      * @param blockY     the y of the block the feet are in
      * @param boxes      that block's collision boxes, block-relative (0 to 1, a fence's up to 1.5)
-     * @param stepHeight how far the body steps up without a jump (a player's 0.6)
+     * @param stepHeight how far the body is trusted to step up without a jump ({@link #WALK_STEP})
      */
     static boolean isStepHop(double feetY, int blockY, Collection<BoundingBox> boxes, double stepHeight) {
         if (boxes == null || boxes.isEmpty()) {
@@ -79,7 +85,7 @@ final class StepHop {
 
     /**
      * Whether the body walks on toward its target without a jump: the next cell's surface ({@link #nextSurface}) is at
-     * most a step above the feet. Then a jump the move control makes for that target is not needed either: from beside
+     * most {@code stepHeight} ({@link #WALK_STEP}) above the feet. Then a jump the move control makes for that target is not needed either: from beside
      * a stair the body steps onto the stair's lower half, and from there onto the next.
      */
     static boolean walksOn(double feetY, double nextSurface, double stepHeight) {

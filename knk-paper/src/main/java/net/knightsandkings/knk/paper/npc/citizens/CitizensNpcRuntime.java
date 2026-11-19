@@ -167,7 +167,8 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
      * The jump power Citizens asks for whenever one of K&K's NPCs jumps ({@code NPC.Metadata.JUMP_POWER_SUPPLIER}):
      * none for the engine's stair hop (link J1, PandiO/knk-workspace#695, {@link StepHop}), so a body on a stair's
      * lower half walks onto the upper half instead of hopping; and none for a jump toward a waypoint more than a step up
-     * within a block when the next cell toward it is at most a step up ({@link #walksOn}): the body steps up instead.
+     * within a block when the next cell toward it is at most a half-block step up ({@link #walksOn}): the body steps up
+     * instead.
      * Otherwise the body's own (its jump strength, halved on a honey block as in vanilla). Citizens' human NPC jumps
      * through its own code, not Paper's {@code EntityJumpEvent}.
      */
@@ -178,13 +179,15 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
         }
         Location at = body.getLocation();
         org.bukkit.block.Block block = at.getBlock();
-        double step = stepHeight(body);
+        // Citizens' move control judges its target by the body's step height (1.0 for its NPCs); a jump is held back
+        // only where the body walks up at most a half-block step (StepHop.WALK_STEP)
+        double walk = Math.min(stepHeight(body), StepHop.WALK_STEP);
         net.citizensnpcs.api.ai.PathStrategy strategy = npc.getNavigator().getPathStrategy();
         Location target = strategy == null ? null : strategy.getCurrentDestination();
         boolean forTarget = target != null && StepHop.jumpsForTarget(target.getX() - at.getX(),
-            target.getY() - at.getY(), target.getZ() - at.getZ(), step, Math.max(1.0, body.getWidth()));
-        boolean held = forTarget ? walksOn(at, target, step)
-            : StepHop.isStepHop(at.getY(), block.getY(), block.getCollisionShape().getBoundingBoxes(), step);
+            target.getY() - at.getY(), target.getZ() - at.getZ(), stepHeight(body), Math.max(1.0, body.getWidth()));
+        boolean held = forTarget ? walksOn(at, target, walk)
+            : StepHop.isStepHop(at.getY(), block.getY(), block.getCollisionShape().getBoundingBoxes(), walk);
         if (held) {
             if (mover != null) {
                 mover.stepHopHeld();
