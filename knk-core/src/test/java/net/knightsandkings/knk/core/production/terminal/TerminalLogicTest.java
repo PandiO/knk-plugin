@@ -89,6 +89,10 @@ class TerminalLogicTest {
         assertEquals(List.of(display), index.displaysInChunk("world", 1, -1));
         assertTrue(index.displaysInChunk("world", 0, 0).isEmpty());
         assertEquals(List.of(display), index.displaysOf(9));
+        assertTrue(index.anyNear("world", 1, 0));
+        assertTrue(index.anyNear("world", 16, 0)); // display at x 17, z -1: next chunk, within one block
+        assertFalse(index.anyNear("world", 40, 40));
+        assertFalse(index.anyNear("nether", 1, 0));
 
         index.remove(2);
         assertTrue(index.displays().isEmpty());

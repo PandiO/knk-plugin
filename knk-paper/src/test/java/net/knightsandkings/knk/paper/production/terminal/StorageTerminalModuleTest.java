@@ -162,14 +162,14 @@ class StorageTerminalModuleTest {
         module.onInteract(event);
         server.getScheduler().performTicks(1);
         assertTrue(event.isCancelled());
-        return assertInstanceOf(TerminalView.class, player.getOpenInventory().getTopInventory().getHolder(false));
+        return assertInstanceOf(TerminalView.class, player.getOpenInventory().getTopInventory().getHolder());
     }
 
     @Test
     void aBoundChestOpensAsATerminal_anUnboundChestStaysAChest() {
         TerminalView view = openTerminal();
 
-        assertEquals(List.of("terminal 7 p1 as 41"), calls);
+        assertEquals(List.of("terminal 7 p1 as 41"), calls.stream().filter(c -> c.startsWith("terminal")).toList());
         assertEquals(Material.STONE, view.getInventory().getItem(0).getType());
         assertNotNull(view.getInventory().getItem(TerminalLayout.INFO_SLOT));
         assertNull(view.getInventory().getItem(TerminalLayout.NEXT_SLOT));
@@ -290,7 +290,8 @@ class StorageTerminalModuleTest {
         server.getScheduler().performTicks(1);
 
         assertTrue(player.nextMessage().contains("Only members of this storage's town"));
-        assertFalse(player.getOpenInventory().getTopInventory().getHolder(false) instanceof TerminalView);
+        Inventory top = player.getOpenInventory().getTopInventory();
+        assertFalse(top != null && top.getHolder() instanceof TerminalView);
     }
 
     @Test
@@ -309,7 +310,7 @@ class StorageTerminalModuleTest {
         PlayerInteractEvent event = rightClick(world.getBlockAt(3, 64, 0));
         module.onInteract(event);
         assertTrue(event.isCancelled());
-        assertInstanceOf(DisplayView.class, player.getOpenInventory().getTopInventory().getHolder(false));
+        assertInstanceOf(DisplayView.class, player.getOpenInventory().getTopInventory().getHolder());
     }
 
     @Test

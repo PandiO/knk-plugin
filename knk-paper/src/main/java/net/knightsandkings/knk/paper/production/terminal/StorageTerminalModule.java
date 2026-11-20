@@ -231,7 +231,7 @@ public final class StorageTerminalModule implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onClick(InventoryClickEvent event) {
-        InventoryHolder holder = event.getView().getTopInventory().getHolder(false);
+        InventoryHolder holder = event.getView().getTopInventory().getHolder();
         if (holder instanceof DisplayView) {
             event.setCancelled(true);
             return;
@@ -268,7 +268,7 @@ public final class StorageTerminalModule implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onDrag(InventoryDragEvent event) {
-        InventoryHolder holder = event.getView().getTopInventory().getHolder(false);
+        InventoryHolder holder = event.getView().getTopInventory().getHolder();
         if (holder instanceof DisplayView || holder instanceof TerminalView) {
             event.setCancelled(true);
         }
@@ -446,7 +446,7 @@ public final class StorageTerminalModule implements Listener {
     }
 
     private void afterMove(Player player, TerminalView view) {
-        if (player.getOpenInventory().getTopInventory().getHolder(false) == view) {
+        if (player.getOpenInventory().getTopInventory().getHolder() == view) {
             loadPage(player, view, view.pageNumber(), false);
         }
         for (StorageContainerInfo display : index.displaysOf(view.container().storageId())) {
@@ -506,7 +506,8 @@ public final class StorageTerminalModule implements Listener {
         }
     }
 
-    CompletableFuture<Integer> refreshDisplay(StorageContainerInfo display) {
+    /** Reads a display's sample and writes it into the block (when its chunk is loaded); the stacks written. */
+    public CompletableFuture<Integer> refreshDisplay(StorageContainerInfo display) {
         return api.display(display.id())
                 .thenCompose(sample -> prefetch(sample.items().stream().map(DisplaySample.Item::itemBlueprintId).toList(),
                         sample.items().stream().map(DisplaySample.Item::itemBlueprintName).toList()).thenApply(ignored -> sample))
@@ -574,6 +575,10 @@ public final class StorageTerminalModule implements Listener {
     }
 
     private boolean bound(Inventory inventory) {
+        org.bukkit.Location at = inventory == null ? null : inventory.getLocation();
+        if (at == null || at.getWorld() == null || !index.anyNear(at.getWorld().getName(), at.getBlockX(), at.getBlockZ())) {
+            return false;
+        }
         Block block = ContainerBlocks.canonical(inventory);
         return block != null && index.at(ContainerBlocks.key(block)).isPresent();
     }

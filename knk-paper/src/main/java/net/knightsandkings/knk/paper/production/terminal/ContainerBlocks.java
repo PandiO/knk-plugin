@@ -47,10 +47,10 @@ public final class ContainerBlocks {
         if (block == null || (block.getType() != Material.CHEST && block.getType() != Material.TRAPPED_CHEST)) {
             return block;
         }
-        BlockState state = block.getState(false);
+        BlockState state = block.getState();
         if (state instanceof Chest chest) {
-            InventoryHolder holder = chest.getInventory().getHolder(false);
-            if (holder instanceof DoubleChest dbl && dbl.getLeftSide(false) instanceof Chest left) {
+            InventoryHolder holder = chest.getInventory().getHolder();
+            if (holder instanceof DoubleChest dbl && dbl.getLeftSide() instanceof Chest left) {
                 return left.getBlock();
             }
         }
@@ -59,8 +59,8 @@ public final class ContainerBlocks {
 
     /** Whether the chest at {@code block} is half of a double chest. */
     public static boolean isDouble(Block block) {
-        BlockState state = block == null ? null : block.getState(false);
-        return state instanceof Chest chest && chest.getInventory().getHolder(false) instanceof DoubleChest;
+        BlockState state = block == null ? null : block.getState();
+        return state instanceof Chest chest && chest.getInventory().getHolder() instanceof DoubleChest;
     }
 
     /** The canonical block of an inventory's holder (a container block or a double chest), or null. */
@@ -68,9 +68,9 @@ public final class ContainerBlocks {
         if (inventory == null) {
             return null;
         }
-        InventoryHolder holder = inventory.getHolder(false);
+        InventoryHolder holder = inventory.getHolder();
         if (holder instanceof DoubleChest dbl) {
-            return dbl.getLeftSide(false) instanceof Chest left ? left.getBlock() : null;
+            return dbl.getLeftSide() instanceof Chest left ? left.getBlock() : null;
         }
         if (holder instanceof Container container) {
             return canonical(container.getBlock());
@@ -80,7 +80,7 @@ public final class ContainerBlocks {
 
     /** The whole inventory of the container (both halves of a double chest), or null. */
     public static Inventory inventory(Block block) {
-        BlockState state = block == null ? null : block.getState(false);
+        BlockState state = block == null ? null : block.getState();
         return state instanceof Container container ? container.getInventory() : null;
     }
 }

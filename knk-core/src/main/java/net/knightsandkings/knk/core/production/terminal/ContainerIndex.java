@@ -15,23 +15,26 @@ import java.util.Optional;
 public final class ContainerIndex {
 
     private record Snapshot(Map<BlockKey, StorageContainerInfo> byBlock,
-                            Map<String, Map<Long, List<StorageContainerInfo>>> displaysByChunk) {
+                            Map<String, Map<Long, List<StorageContainerInfo>>> displaysByChunk,
+                            Map<String, java.util.Set<Long>> chunks) {
     }
 
-    private volatile Snapshot snapshot = new Snapshot(Map.of(), Map.of());
+    private volatile Snapshot snapshot = new Snapshot(Map.of(), Map.of(), Map.of());
 
     /** Replaces the index with {@code containers}. */
     public void replace(Collection<StorageContainerInfo> containers) {
         Map<BlockKey, StorageContainerInfo> byBlock = new HashMap<>();
         Map<String, Map<Long, List<StorageContainerInfo>>> chunks = new HashMap<>();
+        Map<String, java.util.Set<Long>> any = new HashMap<>();
         for (StorageContainerInfo info : containers) {
             byBlock.put(info.block(), info);
+            any.computeIfAbsent(info.worldName(), w -> new java.util.HashSet<>()).add(info.block().chunkKey());
             if (info.mode() == StorageContainerInfo.Mode.DISPLAY) {
                 chunks.computeIfAbsent(info.worldName(), w -> new HashMap<>())
                         .computeIfAbsent(info.block().chunkKey(), c -> new ArrayList<>()).add(info);
             }
         }
-        snapshot = new Snapshot(Map.copyOf(byBlock), chunks);
+        snapshot = new Snapshot(Map.copyOf(byBlock), chunks, any);
     }
 
     /** Adds or replaces one binding (after a bind). */
@@ -52,6 +55,25 @@ public final class ContainerIndex {
 
     public Optional<StorageContainerInfo> at(BlockKey block) {
         return Optional.ofNullable(snapshot.byBlock().get(block));
+    }
+
+    /**
+     * Whether any bound container is within one block of (x, z): a cheap first check for events that fire often (hoppers),
+     * before the block is looked at. One block of slack covers both halves of a double chest across a chunk border.
+     */
+    public boolean anyNear(String world, int x, int z) {
+        java.util.Set<Long> chunks = world == null ? null : snapshot.chunks().get(world);
+        if (chunks == null || chunks.isEmpty()) {
+            return false;
+        }
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (chunks.contains(BlockKey.chunkKey((x + dx) >> 4, (z + dz) >> 4))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public List<StorageContainerInfo> displaysInChunk(String world, int chunkX, int chunkZ) {
