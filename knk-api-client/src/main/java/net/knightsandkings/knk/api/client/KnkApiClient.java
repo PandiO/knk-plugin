@@ -143,6 +143,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.SiegeMatchHistoryApi siegeMatchHistoryApi;
     /** Siege shop L3 (PandiO/knk-workspace#868): the match catalogue and weapon unlocks. */
     private final net.knightsandkings.knk.core.ports.api.SiegeShopApi siegeShopApi;
+    private final net.knightsandkings.knk.core.ports.api.SiegeWeaponUnlocksApi siegeWeaponUnlocksApi;
     private final SiegeGatesCommandApi siegeGatesCommandApi;
     private final TitleBracketsQueryApi titleBracketsQueryApi;
     private final KitsQueryApi kitsQueryApi;
@@ -232,6 +233,7 @@ public class KnkApiClient {
         this.siegeMatchesCommandApi = new SiegeMatchesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeMatchHistoryApi = new SiegeMatchHistoryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeShopApi = new net.knightsandkings.knk.api.impl.SiegeShopApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
+        this.siegeWeaponUnlocksApi = new net.knightsandkings.knk.api.impl.SiegeWeaponUnlocksApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.siegeGatesCommandApi = new SiegeGatesCommandApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.titleBracketsQueryApi = new TitleBracketsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.kitsQueryApi = new KitsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -548,6 +550,11 @@ public class KnkApiClient {
     /** Siege shop L3 (PandiO/knk-workspace#868): the match catalogue and weapon unlocks. */
     public net.knightsandkings.knk.core.ports.api.SiegeShopApi getSiegeShopApi() {
         return siegeShopApi;
+    }
+
+    /** Siege shop L4 (PandiO/knk-workspace#869): weapon unlocks with coins (the Siege unlocks menu). */
+    public net.knightsandkings.knk.core.ports.api.SiegeWeaponUnlocksApi getSiegeWeaponUnlocksApi() {
+        return siegeWeaponUnlocksApi;
     }
 
     /** Alpha run 1 (PandiO/knk-workspace#174): a player's finished matches for {@code /siege history}. */
