@@ -845,8 +845,11 @@ public final class NpcNavigationService {
                         if (nav.state == NpcNavState.MOVING) {
                             supervise(nav);
                         }
-                        if (nav.state == NpcNavState.MOVING && nav.profile.openDoors()) {
-                            nav.mover.openHatchAhead(); // a roof hatch on the way, as a door (link H1)
+                        if (nav.state == NpcNavState.MOVING) {
+                            nav.mover.holdOnClimb(); // in its ladder column while it climbs (link H1)
+                            if (nav.profile.openDoors()) {
+                                nav.mover.openHatchAhead(); // a roof hatch on the way, as a door (link H1)
+                            }
                         }
                     }
                     default -> { }

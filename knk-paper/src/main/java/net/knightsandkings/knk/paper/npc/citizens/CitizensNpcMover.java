@@ -55,6 +55,35 @@ final class CitizensNpcMover implements NpcMover {
     private final NpcHatches hatches;
 
     /**
+     * Keeps the body in its ladder column while it climbs (link H1, {@link ClimbHold}): its feet or head in a block it
+     * climbs, Citizens' current waypoint in the same block column.
+     */
+    @Override
+    public boolean holdOnClimb() {
+        if (!npc.isSpawned() || !(npc.getEntity() instanceof org.bukkit.entity.LivingEntity body)) {
+            return false;
+        }
+        net.citizensnpcs.api.ai.PathStrategy strategy = npc.getNavigator().getPathStrategy();
+        Location dest = strategy == null ? null : strategy.getCurrentDestination();
+        if (dest == null) {
+            return false;
+        }
+        Location at = body.getLocation();
+        org.bukkit.block.Block feet = at.getBlock();
+        java.util.Set<String> climbables = net.knightsandkings.knk.core.npc.nav.NpcClimbables.DEFAULT;
+        boolean climbing = net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld.climbable(feet, climbables)
+            || net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld.climbable(
+                feet.getRelative(org.bukkit.block.BlockFace.UP), climbables);
+        double[] pull = ClimbHold.pull(climbing, at.getX(), at.getZ(), dest.getX(), dest.getZ());
+        if (pull == null) {
+            return false;
+        }
+        Vector v = body.getVelocity();
+        body.setVelocity(new Vector(pull[0], v.getY(), pull[1]));
+        return true;
+    }
+
+    /**
      * Opens a closed roof hatch the body is about to climb through (link H1, PandiO/knk-workspace#779): one in the
      * column of Citizens' current waypoint, or right above the head. Citizens' own door opener skips trapdoors.
      */

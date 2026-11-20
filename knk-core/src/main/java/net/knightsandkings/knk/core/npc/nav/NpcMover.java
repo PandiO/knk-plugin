@@ -63,6 +63,17 @@ public interface NpcMover {
     }
 
     /**
+     * Keeps a climbing body in its ladder column (link H1, PandiO/knk-workspace#779): while the body climbs and the
+     * engine's waypoint is straight above or below it, the body is drawn back to the waypoint's middle. Minecraft's move
+     * control lets a body on a ladder creep sideways when its target is right overhead; past a third of a block it
+     * catches its head on the block beside a roof hatch. Called each tick while the NPC moves. Returns whether the body
+     * was drawn back. No-op for an engine without ladders.
+     */
+    default boolean holdOnClimb() {
+        return false;
+    }
+
+    /**
      * Walk the given points in order without the engine's own path search (NAV-15 trail mode). The engine's block
      * rules are not consulted, so K&K's recheck keeps access rules binding (NAV-02).
      */
