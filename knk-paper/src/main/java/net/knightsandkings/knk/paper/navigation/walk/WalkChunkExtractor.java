@@ -166,6 +166,7 @@ public final class WalkChunkExtractor {
         int highY = Math.min((to << 4) + 15, worldMaxY - 1);
         List<long[]> floors = new ArrayList<>();
         List<Long> doors = new ArrayList<>();
+        List<Long> openDoors = new ArrayList<>();
         Map<String, Short> paletteIds = new HashMap<>();
         List<String> palette = new ArrayList<>();
         for (int lx = 0; lx < 16; lx++) {
@@ -176,6 +177,9 @@ public final class WalkChunkExtractor {
                     int f = flagsAt(sections, uniform, from, x, y, z);
                     if ((f & WalkChunk.DOOR) != 0) {
                         doors.add(BlockKey.pack(x, y, z));
+                        if (chunk.isOpen(lx, y, lz)) {
+                            openDoors.add(BlockKey.pack(x, y, z)); // F3 (#710): passed without a click
+                        }
                     }
                     if ((f & WalkChunk.SOLID) == 0 || (f & WalkChunk.HAZARD) != 0 || y + 1 >= worldMaxY) {
                         continue;
@@ -207,8 +211,10 @@ public final class WalkChunkExtractor {
         }
         long[] doorKeys = doors.stream().mapToLong(Long::longValue).toArray();
         Arrays.sort(doorKeys);
+        long[] openDoorKeys = openDoors.stream().mapToLong(Long::longValue).toArray();
+        Arrays.sort(openDoorKeys);
         return new WalkChunk(chunkX, chunkZ, from, sections, uniform, floorKeys, floorIds,
-            palette.toArray(String[]::new), doorKeys, capturedAt);
+            palette.toArray(String[]::new), doorKeys, openDoorKeys, capturedAt);
     }
 
     /**

@@ -136,14 +136,22 @@ public final class WalkSnapshotService {
      * @param doorBlocks the hand-openable door blocks inside the box (READY only) — what the door access checks
      * @param stats      what the capture cost: chunks, cache hits, main-thread µs, wait (READY only; otherwise
      *                   {@link WalkMeasurements.Capture#UNKNOWN})
+     * @param openDoorBlocks F3 (#710): the door blocks of {@code doorBlocks} that stood open at capture time
      */
     public record WalkCapture(Status status, WalkBox box, CapturedWalkTerrain terrain, List<Long> doorBlocks,
-                              WalkMeasurements.Capture stats) {
+                              WalkMeasurements.Capture stats, java.util.Set<Long> openDoorBlocks) {
         public WalkCapture {
             Objects.requireNonNull(status, "status");
             Objects.requireNonNull(box, "box");
             doorBlocks = doorBlocks == null ? List.of() : List.copyOf(doorBlocks);
             stats = stats == null ? WalkMeasurements.Capture.UNKNOWN : stats;
+            openDoorBlocks = openDoorBlocks == null ? java.util.Set.of() : java.util.Set.copyOf(openDoorBlocks);
+        }
+
+        /** Without the open doors (callers from before F3): every door block counts as closed. */
+        public WalkCapture(Status status, WalkBox box, CapturedWalkTerrain terrain, List<Long> doorBlocks,
+                           WalkMeasurements.Capture stats) {
+            this(status, box, terrain, doorBlocks, stats, null);
         }
 
         /** Without counters. */
@@ -197,17 +205,23 @@ public final class WalkSnapshotService {
                 return;
             }
             List<Long> doors = new ArrayList<>();
+            java.util.Set<Long> open = new java.util.HashSet<>();
             for (WalkChunk chunk : chunks.values()) {
                 for (long key : chunk.doorBlocks()) {
                     if (box.contains(BlockKey.x(key), BlockKey.y(key), BlockKey.z(key))) {
                         doors.add(key);
                     }
                 }
+                for (long key : chunk.openDoorBlocks()) {
+                    if (box.contains(BlockKey.x(key), BlockKey.y(key), BlockKey.z(key))) {
+                        open.add(key);
+                    }
+                }
             }
             CapturedWalkTerrain terrain = new CapturedWalkTerrain(chunks.values(), gates, world.minY(), world.maxY());
             WalkMeasurements.Capture stats = new WalkMeasurements.Capture(needed.size(), cacheHits, captureNanos,
                 Math.max(0L, clockMillis.getAsLong() - requestedAt));
-            future.complete(new WalkCapture(Status.READY, box, terrain, doors, stats));
+            future.complete(new WalkCapture(Status.READY, box, terrain, doors, stats, open));
         }
     }
 

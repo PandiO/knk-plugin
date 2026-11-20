@@ -503,7 +503,8 @@ public class ConfigLoader {
             new NavigationConfig.RouteEndsConfig(
                 section.getBoolean("road-goal-reachable", defaults.routeEnds().reachableGoal()),
                 section.getInt("road-goal-candidates", defaults.routeEnds().goalCandidates()),
-                section.getBoolean("road-to-its-end", defaults.routeEnds().roadToItsEnd())));
+                section.getBoolean("road-to-its-end", defaults.routeEnds().roadToItsEnd()),
+                section.getDouble("road-goal-walk-weight", defaults.routeEnds().goalWalkWeight())));
     }
 
     /** private-messages: every key falls back to {@link KnkConfig.PrivateMessagesConfig#defaults()}. */
