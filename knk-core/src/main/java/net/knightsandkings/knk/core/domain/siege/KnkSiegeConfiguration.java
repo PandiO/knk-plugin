@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.core.domain.siege;
 
+import net.knightsandkings.knk.core.siege.economy.SiegePointsSettings;
+
 import java.util.List;
 
 /**
@@ -29,6 +31,8 @@ import java.util.List;
  * @param postMatchSeconds                    seconds members wait at the scenario hub with the result after a match that
  *                                            ended normally, before they are restored (alpha run 1,
  *                                            PandiO/knk-workspace#198; 0 = restored at once, as before)
+ * @param points                              siege points earning and the transfer switch (siege shop, PandiO/knk-workspace#866);
+ *                                            {@link SiegePointsSettings#defaults()} when the API doesn't send them
  */
 public record KnkSiegeConfiguration(
         int captureAttackBase,
@@ -57,7 +61,8 @@ public record KnkSiegeConfiguration(
         boolean giveNavigationItem,
         int playerSkipMatchmakingSeconds,
         int adminSkipMatchmakingSeconds,
-        int postMatchSeconds
+        int postMatchSeconds,
+        SiegePointsSettings points
 ) {
     /** Seconds left after a player's {@code /siege skip} before the setting existed (developer request 2026-09-26). */
     public static final int DEFAULT_PLAYER_SKIP_MATCHMAKING_SECONDS = 60;
@@ -73,6 +78,38 @@ public record KnkSiegeConfiguration(
         allowedEnchantmentKeys = copy(allowedEnchantmentKeys);
         if (nonMemberGateView == null) nonMemberGateView = SiegeNonMemberGateView.PRE_LOCKDOWN_VIEW;
         postMatchSeconds = Math.max(0, postMatchSeconds);
+        if (points == null) points = SiegePointsSettings.defaults();
+    }
+
+    /** The tunables without the siege points settings (everything before PandiO/knk-workspace#866): the § 5.2 defaults. */
+    public KnkSiegeConfiguration(int captureAttackBase, int captureAttackPerExtra, int captureAttackPerExtraInstantVictory,
+                                 int captureDefendBase, int captureDefendPerExtra, int captureDefendPerExtraInstantVictory,
+                                 double sideCaptureReduction, int voteCloseSecondsBeforeStart, int drawSecondsBeforeStart,
+                                 int hubSecondsBeforeStart, int teamSplitSecondsBeforeStart,
+                                 List<Integer> matchmakingAnnouncementMarks, List<Integer> killAnnouncementThresholds,
+                                 int killStreakAnnounceAbove, double headshotMultiplier, List<String> allowedCommands,
+                                 int spawnPickerDelayTicks, int enchantDropChancePerMille, List<String> allowedEnchantmentKeys,
+                                 int enchantLevelMin, int enchantLevelMax, int maxBooksAlive,
+                                 SiegeNonMemberGateView nonMemberGateView, boolean giveNavigationItem,
+                                 int playerSkipMatchmakingSeconds, int adminSkipMatchmakingSeconds, int postMatchSeconds) {
+        this(captureAttackBase, captureAttackPerExtra, captureAttackPerExtraInstantVictory, captureDefendBase,
+                captureDefendPerExtra, captureDefendPerExtraInstantVictory, sideCaptureReduction, voteCloseSecondsBeforeStart,
+                drawSecondsBeforeStart, hubSecondsBeforeStart, teamSplitSecondsBeforeStart, matchmakingAnnouncementMarks,
+                killAnnouncementThresholds, killStreakAnnounceAbove, headshotMultiplier, allowedCommands, spawnPickerDelayTicks,
+                enchantDropChancePerMille, allowedEnchantmentKeys, enchantLevelMin, enchantLevelMax, maxBooksAlive,
+                nonMemberGateView, giveNavigationItem, playerSkipMatchmakingSeconds, adminSkipMatchmakingSeconds,
+                postMatchSeconds, null);
+    }
+
+    /** This configuration with other siege points settings (#866). */
+    public KnkSiegeConfiguration withPoints(SiegePointsSettings settings) {
+        return new KnkSiegeConfiguration(captureAttackBase, captureAttackPerExtra, captureAttackPerExtraInstantVictory,
+                captureDefendBase, captureDefendPerExtra, captureDefendPerExtraInstantVictory, sideCaptureReduction,
+                voteCloseSecondsBeforeStart, drawSecondsBeforeStart, hubSecondsBeforeStart, teamSplitSecondsBeforeStart,
+                matchmakingAnnouncementMarks, killAnnouncementThresholds, killStreakAnnounceAbove, headshotMultiplier,
+                allowedCommands, spawnPickerDelayTicks, enchantDropChancePerMille, allowedEnchantmentKeys, enchantLevelMin,
+                enchantLevelMax, maxBooksAlive, nonMemberGateView, giveNavigationItem, playerSkipMatchmakingSeconds,
+                adminSkipMatchmakingSeconds, postMatchSeconds, settings);
     }
 
     /**
@@ -105,7 +142,7 @@ public record KnkSiegeConfiguration(
                 matchmakingAnnouncementMarks, killAnnouncementThresholds, killStreakAnnounceAbove, headshotMultiplier,
                 allowedCommands, spawnPickerDelayTicks, enchantDropChancePerMille, allowedEnchantmentKeys, enchantLevelMin,
                 enchantLevelMax, maxBooksAlive, nonMemberGateView, giveNavigationItem, playerSkipMatchmakingSeconds,
-                adminSkipMatchmakingSeconds, seconds);
+                adminSkipMatchmakingSeconds, seconds, points);
     }
 
     /** The tunables without the skip settings (everything before the 2026-10-24 playtest): the former fixed values. */

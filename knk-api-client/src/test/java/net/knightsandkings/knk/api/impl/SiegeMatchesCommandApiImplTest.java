@@ -199,6 +199,23 @@ class SiegeMatchesCommandApiImplTest {
     }
 
     @Test
+    void complete_sendsSiegePointsOnlyWhenTheyWereCounted_866() throws Exception {
+        responseByPath.put("/api/siege-matches/45/complete", """
+                {"matchId":45,"status":"Completed","alreadyCompleted":false,"rewards":[]}""");
+        Completion completion = new Completion(SiegeEndReason.TIME_EXPIRED, null,
+                List.of(new ParticipantResult(7, 202, 1, 0, 1, 0).withContribution(0, 60, 60).withSiegePoints(415, 300),
+                        new ParticipantResult(8, 201, 0, 1, 0, 0)), List.of());
+
+        await(api.completeMatch(45, completion));
+
+        JsonNode participants = json.readTree(bodies.get("/api/siege-matches/45/complete")).get("participants");
+        assertEquals(415, participants.get(0).get("siegePointsEarned").asLong());
+        assertEquals(300, participants.get(0).get("siegePointsSpent").asLong());
+        assertFalse(participants.get(1).has("siegePointsEarned"), "siege points off: sent exactly as before");
+        assertFalse(participants.get(1).has("siegePointsSpent"));
+    }
+
+    @Test
     void httpErrors_surfaceAsApiExceptionWithTheStatus() {
         statusByPath.put("/api/siege-matches/42/complete", 409);
         responseByPath.put("/api/siege-matches/42/complete", "{\"code\":\"BusinessRuleViolation\"}");

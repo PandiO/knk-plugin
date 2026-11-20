@@ -441,6 +441,14 @@ siege:
     # WorldEdit selection or a WorldGuard region and fills the form (phase 2, #783/#799). Later phases add placement
     # and firing behind the same switch.
     enabled: false
+  # Siege points (knk-workspace docs/specs/siege-shop/DESIGN.md § 5.1-5.2, PandiO/knk-workspace#866): a per-match
+  # balance earned in PvP Siege from kills (with a capped streak multiplier), assists, deaths, gate damage, capture
+  # progress, captures and an activity trickle, shown on each member's own scoreboard line and the action bar, with
+  # /siege points and /siege pay (only when the siege settings allow teammate transfers). The amounts are the siege
+  # settings in the web app (API SiegeConfiguration). Off by default: with false nothing is earned or shown and the
+  # scoreboards stay one per team, as before.
+  points:
+    enabled: false
 
 # Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
 # meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API

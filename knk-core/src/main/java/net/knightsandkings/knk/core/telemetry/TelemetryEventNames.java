@@ -23,6 +23,8 @@ public final class TelemetryEventNames {
     public static final String SIEGE_MATCH_PHASE = "siege.match_phase";
     public static final String SIEGE_OBJECTIVE_CAPTURED = "siege.objective_captured";
     public static final String SIEGE_GATE_DESTROYED = "siege.gate_destroyed";
+    /** Siege shop L1 (PandiO/knk-workspace#866, P27): siege points earned, with the source. */
+    public static final String SIEGE_POINTS_EARNED = "siege.points_earned";
     public static final String DISCOVERY_GRANTED = "discovery.granted";
     public static final String API_CALL_FAILED = "api.call_failed";
     public static final String TELEMETRY_DROPPED = "telemetry.dropped";

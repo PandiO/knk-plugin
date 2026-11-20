@@ -53,7 +53,21 @@ public final class SiegeDtos {
             @JsonProperty("playerSkipMatchmakingSeconds") Integer playerSkipMatchmakingSeconds,
             @JsonProperty("adminSkipMatchmakingSeconds") Integer adminSkipMatchmakingSeconds,
             // Alpha run 1 (PandiO/knk-workspace#198): the post-match wait at the hub; null from an older API.
-            @JsonProperty("postMatchSeconds") Integer postMatchSeconds
+            @JsonProperty("postMatchSeconds") Integer postMatchSeconds,
+            // Siege shop L1 (PandiO/knk-workspace#866): siege points earning and the PvP transfer switch; null from an older API.
+            @JsonProperty("pointsPerKill") Integer pointsPerKill,
+            @JsonProperty("pointsStreakStep") Double pointsStreakStep,
+            @JsonProperty("pointsStreakCap") Double pointsStreakCap,
+            @JsonProperty("pointsPerAssist") Integer pointsPerAssist,
+            @JsonProperty("assistMinDamage") Double assistMinDamage,
+            @JsonProperty("assistWindowSeconds") Integer assistWindowSeconds,
+            @JsonProperty("pointsPerDeath") Integer pointsPerDeath,
+            @JsonProperty("gateHpPerPoint") Double gateHpPerPoint,
+            @JsonProperty("pointsPerCapturePercent") Integer pointsPerCapturePercent,
+            @JsonProperty("pointsPerCapture") Integer pointsPerCapture,
+            @JsonProperty("trickleAmount") Integer trickleAmount,
+            @JsonProperty("trickleIntervalSeconds") Integer trickleIntervalSeconds,
+            @JsonProperty("pointTransfersEnabled") Boolean pointTransfersEnabled
     ) {}
 
     public record RuntimeLobbyDto(

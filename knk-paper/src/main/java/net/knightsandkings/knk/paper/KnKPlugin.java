@@ -4934,9 +4934,16 @@ public class KnKPlugin extends JavaPlugin {
         siegeService.setPublicWebUrl(config.web().publicUrl());
         siegeService.setHistoryApi(apiClient.getSiegeMatchHistoryApi());
 
+        // Siege shop L1 (PandiO/knk-workspace#866): siege points in PvP Siege (earning, per-player scoreboard line,
+        // action bar, /siege points, /siege pay, totals in the match result). siege.points.enabled, default false:
+        // off registers nothing and Siege behaves as before.
+        final net.knightsandkings.knk.paper.siege.points.SiegePointsService siegePoints =
+            getConfig().getBoolean("siege.points.enabled", false) ? initializeSiegePoints() : null;
+
         PluginCommand siegeCommand = getCommand("siege");
         if (siegeCommand != null) {
             SiegeCommand executor = new SiegeCommand(siegeService);
+            executor.setPoints(siegePoints); // #866, null when off
             siegeCommand.setExecutor(executor);
             siegeCommand.setTabCompleter(executor);
             getLogger().info("Registered /siege command");
@@ -4954,7 +4961,8 @@ public class KnKPlugin extends JavaPlugin {
         var siegeWorld = new net.knightsandkings.knk.paper.siege.SiegeWorldPresenter(this, siegeVaultDirectory);
         siegeService.addObserver(siegeWorld);
         getServer().getPluginManager().registerEvents(siegeWorld, this); // objective banner protection
-        siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeScoreboardPresenter());
+        siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeScoreboardPresenter(
+            siegePoints == null ? null : siegePoints::scoreboardLine)); // #866: per-player boards only with siege points
         // Smoke test 2026-09-26: sounds, particles and chat when objectives start being attacked/defended.
         siegeService.addObserver(new net.knightsandkings.knk.paper.siege.SiegeCaptureFeedback());
         if (telemetryEmitter != null) {
@@ -5032,6 +5040,24 @@ public class KnKPlugin extends JavaPlugin {
         var siegeForRetry = siegeService;
         siegeStartupWork.register("siege config and title brackets", onMainThread(siegeForRetry::retryStartup));
         getLogger().info("Siege runtime initialized");
+    }
+
+    /**
+     * Siege shop L1 (PandiO/knk-workspace#866): the siege points service as a match observer (before the scoreboard
+     * presenter, so a member's first board already has their line), its damage listener for assists and the result
+     * totals. Called from {@link #initializeSiege()} only with {@code siege.points.enabled}.
+     */
+    private net.knightsandkings.knk.paper.siege.points.SiegePointsService initializeSiegePoints() {
+        var siege = siegeService;
+        var points = new net.knightsandkings.knk.paper.siege.points.SiegePointsService(getLogger(), siege::runningMatchOf,
+            statisticsService != null ? statisticsService::afkSince : null,
+            telemetryEmitter != null ? new net.knightsandkings.knk.paper.siege.points.SiegePointsTelemetry(telemetryEmitter) : null);
+        siege.addObserver(points);
+        siege.setResultExtras(points::withTotals);
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.siege.points.SiegePointsDamageListener(points), this);
+        getLogger().info("Siege points enabled (siege.points.enabled)");
+        return points;
     }
 
     /**

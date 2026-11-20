@@ -54,6 +54,13 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         this.service = service;
     }
 
+    /** Siege shop L1 (PandiO/knk-workspace#866): {@code /siege points} and {@code /siege pay}; null with siege.points.enabled off. */
+    private net.knightsandkings.knk.paper.siege.points.SiegePointsService points;
+
+    public void setPoints(net.knightsandkings.knk.paper.siege.points.SiegePointsService points) {
+        this.points = points;
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
@@ -71,6 +78,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
                 if (sender instanceof Player && !allowed(sender, SiegeService.PERMISSION_PLAY)) return true;
                 playerOnly(sender, service::history);
             }
+            // Siege shop L1 (#866): the player's siege points, and sending some to a teammate (P07).
+            case "points", "pay" -> siegePoints(sender, sub, rest);
             case "skip" -> {
                 if (!allowed(sender, SiegeService.PERMISSION_SKIP)) return true;
                 send(sender, service.skip(sender, arg(rest, 0), false));
@@ -108,6 +117,20 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             }
         }
         playerOnly(sender, p -> service.join(p, first));
+    }
+
+    /** {@code /siege points} and {@code /siege pay <player> <amount>} (#866); a message when siege points are off. */
+    private void siegePoints(CommandSender sender, String sub, String[] rest) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(SiegeMessages.bad("Only players can use this."));
+            return;
+        }
+        if (!allowed(sender, SiegeService.PERMISSION_PLAY)) return;
+        if (points == null) {
+            sender.sendMessage(SiegeMessages.bad("Siege points are not enabled on this server."));
+            return;
+        }
+        player.sendMessage(sub.equals("points") ? points.points(player) : points.pay(player, arg(rest, 0), arg(rest, 1)));
     }
 
     private void overview(CommandSender sender) {
@@ -345,7 +368,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
 
     private void help(CommandSender sender) {
         sender.sendMessage(SiegeMessages.info("/siege - lobbies | join [lobby] | leave | menu | info [lobby] | vote [n|name|random] | "
-                + "spawn [option] | history | skip [lobby] (cooldown, or shorten matchmaking)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
+                + "spawn [option] | history" + (points != null ? " | points | pay <player> <amount>" : "")
+                + " | skip [lobby] (cooldown, or shorten matchmaking)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
                 ? " | admin ..." : "")));
     }
 
@@ -355,7 +379,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             Stream<String> player = canSuggest(sender, SiegeService.PERMISSION_PLAY)
-                    ? Stream.of("join", "leave", "menu", "info", "vote", "spawn", "history") : Stream.empty();
+                    ? Stream.concat(Stream.of("join", "leave", "menu", "info", "vote", "spawn", "history"),
+                    points != null ? Stream.of("points", "pay") : Stream.empty()) : Stream.empty();
             Stream<String> skip = canSuggest(sender, SiegeService.PERMISSION_SKIP) ? Stream.of("skip") : Stream.empty();
             Stream<String> admin = canSuggestAnyAdmin(sender) ? Stream.of("admin") : Stream.empty();
             return filter(Stream.of(player, skip, admin, Stream.of("help")).flatMap(s -> s), args[0]);
@@ -374,6 +399,14 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
                 case "vote" -> canSuggest(sender, SiegeService.PERMISSION_PLAY)
                         ? filter(Stream.concat(Stream.of("random"), voteNames(sender)), args[1]) : List.of();
                 case "admin" -> filter(adminActions(sender), args[1]);
+                // #866: teammates in the sender's running match
+                case "pay" -> points != null && canSuggest(sender, SiegeService.PERMISSION_PLAY) && sender instanceof Player p
+                        ? filter(service.runningMatchOf(p.getUniqueId()).stream()
+                                .flatMap(m -> m.roster().teamOf(p.getUniqueId()).stream().boxed()
+                                        .flatMap(team -> m.roster().membersOf(team).stream()))
+                                .filter(id -> !id.equals(p.getUniqueId()))
+                                .map(Bukkit::getPlayer).filter(o -> o != null && VisiblePlayers.canSee(sender, o))
+                                .map(Player::getName), args[1]) : List.of();
                 default -> List.of();
             };
         }

@@ -225,7 +225,25 @@ public final class SiegeService {
         Integer lockedBy = gateLobby.apply(gateStructureId);
         if (lockedBy == null || lockedBy != rt.get().id()) return;
         rt.get().match().filter(m -> m.roster().contains(playerId))
-                .ifPresent(match -> match.contributions().addGateDamage(playerId, loss));
+                .ifPresent(match -> {
+                    match.contributions().addGateDamage(playerId, loss);
+                    // Siege shop L1 (#866): siege points for gate damage.
+                    observers.forEach(o -> safely("gateDamaged", () -> o.gateDamaged(rt.get(), match, playerId, loss)));
+                });
+    }
+
+    /**
+     * Siege shop L1 (PandiO/knk-workspace#866): adds siege points earned and spent to each reported member's result
+     * (P27); null (siege points off) leaves the results as they were.
+     */
+    public interface ResultExtras {
+        ParticipantResult apply(SiegeMatch match, UUID playerId, ParticipantResult result);
+    }
+
+    private ResultExtras resultExtras;
+
+    public void setResultExtras(ResultExtras resultExtras) {
+        this.resultExtras = resultExtras;
     }
 
     public SiegeService(
@@ -885,6 +903,7 @@ public final class SiegeService {
         SiegeDepartedMembers departed = departedMembers.remove(match);
         if (departed != null && reportDepartedMembers) participants = departed.appendTo(participants);
         participants = withContributions(match, participants);
+        if (resultExtras != null) participants = withResultExtras(match, participants);
         List<ObjectiveResult> objectives = new ArrayList<>();
         for (ObjectiveState state : match.board().objectives()) {
             if (state.captures().isEmpty()) {
@@ -915,6 +934,25 @@ public final class SiegeService {
             }
             var c = match.contributions().of(playerId, now);
             out.add(p.withContribution(c.gateDamage(), c.activeSeconds(), c.matchSeconds()));
+        }
+        return out;
+    }
+
+    /** #866: siege points per reported member (see {@link ResultExtras}); a member without a known player stays as is. */
+    private List<ParticipantResult> withResultExtras(SiegeMatch match, List<ParticipantResult> participants) {
+        Map<Integer, UUID> players = match.contributions().playersByUserId();
+        List<ParticipantResult> out = new ArrayList<>(participants.size());
+        for (ParticipantResult p : participants) {
+            UUID playerId = players.get(p.userId());
+            ParticipantResult extended = p;
+            if (playerId != null) {
+                try {
+                    extended = resultExtras.apply(match, playerId, p);
+                } catch (RuntimeException e) {
+                    logger.log(Level.WARNING, "[Siege] Result extras failed for user " + p.userId(), e);
+                }
+            }
+            out.add(extended == null ? p : extended);
         }
         return out;
     }
@@ -1862,6 +1900,10 @@ public final class SiegeService {
                             .append(Component.text(streak + " kills!", SiegeMessages.HIGHLIGHT)))));
             killer.sendActionBar(Component.text("You killed " + victim.getName(), SiegeMessages.GOOD));
         });
+        // Siege shop L1 (#866): siege points for the kill, the death and the assists (after the roster counted them).
+        int killerStreak = killerId == null ? 0 : match.roster().member(killerId).map(MemberView::killStreak).orElse(0);
+        lobbyOf(victim.getUniqueId()).ifPresent(rt -> observers.forEach(o -> safely("memberDied",
+                () -> o.memberDied(rt, match, victim.getUniqueId(), killerId, killerStreak))));
         return true;
     }
 

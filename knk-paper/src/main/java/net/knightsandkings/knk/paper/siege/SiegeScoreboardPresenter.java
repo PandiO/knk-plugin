@@ -26,6 +26,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -44,6 +45,10 @@ import java.util.UUID;
  * The player's previous scoreboard (normally {@code ScoreboardUtil}'s shared one) is restored when they
  * leave the match or are released after it. Every board assignment goes through {@link #setBoard}/{@link #boardOf}
  * (the one place package G's {@code ViewerScoreboards} wraps for the Flash Chaos name-tag blackout).
+ * <p>
+ * Siege shop P18 (PandiO/knk-workspace#866): with a {@link PersonalLine} (siege points on) every member gets a board
+ * of their own instead, with the same team lines plus their personal line (their siege points) after the clock.
+ * Without one (the default) the boards stay one per team, exactly as before.
  */
 public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
 
@@ -57,35 +62,60 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
     /** Matches that ended and wait at the hub (#198): their boards show the result. */
     private final Map<String, Boolean> endedMatches = new HashMap<>();
 
+    /** Siege shop P18 (#866): one member's own sidebar line; null when they have none. */
+    @FunctionalInterface
+    public interface PersonalLine {
+        Component line(SiegeMatch match, UUID playerId);
+    }
+
+    /** #866: null keeps one board per team (siege points off). */
+    private final PersonalLine personalLine;
+    /** #866: each member's own board per match, only with a {@link #personalLine}. */
+    private final Map<String, Map<UUID, Scoreboard>> playerBoardsByMatch = new HashMap<>();
+
+    public SiegeScoreboardPresenter() {
+        this(null);
+    }
+
+    public SiegeScoreboardPresenter(PersonalLine personalLine) {
+        this.personalLine = personalLine;
+    }
+
     @Override
     public void matchStarted(SiegeLobbyRuntime lobby, SiegeMatch match) {
         Map<Integer, Scoreboard> boards = new HashMap<>();
         for (KnkSiegeTeam viewerTeam : match.scenario().teams()) {
-            Scoreboard board = Bukkit.getScoreboardManager().getNewScoreboard();
-            for (KnkSiegeTeam team : match.scenario().teams()) {
-                Team bukkitTeam = board.registerNewTeam("siege_" + team.id());
-                bukkitTeam.color(SiegeBukkit.color(team));
-                bukkitTeam.prefix(Component.text("[" + SiegeBukkit.teamName(team) + "] ", SiegeBukkit.color(team)));
-                bukkitTeam.setAllowFriendlyFire(true); // the combat listener decides; never Bukkit's team rule
-                bukkitTeam.setCanSeeFriendlyInvisibles(team.id() == viewerTeam.id());
-            }
-            Objective sidebar = board.registerNewObjective("siege", Criteria.DUMMY,
-                    Component.text(lobby.displayName(), NamedTextColor.GOLD, TextDecoration.BOLD));
-            sidebar.setDisplaySlot(DisplaySlot.SIDEBAR);
-            sidebar.numberFormat(NumberFormat.blank());
-            // #163: kills/deaths in the tab list for the members only (was a global custom tab name).
-            Objective tab = board.registerNewObjective(TAB_OBJECTIVE, Criteria.DUMMY, Component.text("K/D"));
-            tab.setDisplaySlot(DisplaySlot.PLAYER_LIST);
-            boards.put(viewerTeam.id(), board);
+            boards.put(viewerTeam.id(), newBoard(lobby, match, viewerTeam));
         }
         boardsByMatch.put(match.matchToken(), boards);
+        if (personalLine != null) playerBoardsByMatch.put(match.matchToken(), new HashMap<>());
 
         for (MemberView member : match.roster().members()) {
             Player p = Bukkit.getPlayer(member.playerId());
             if (p == null) continue;
-            show(boards, p, member.teamId());
+            show(lobby, match, boards, p, member.teamId());
         }
         refresh(lobby, match);
+    }
+
+    /** A board seen from {@code viewerTeam}: every siege team as a Bukkit team, the sidebar and the tab-list K/D. */
+    private static Scoreboard newBoard(SiegeLobbyRuntime lobby, SiegeMatch match, KnkSiegeTeam viewerTeam) {
+        Scoreboard board = Bukkit.getScoreboardManager().getNewScoreboard();
+        for (KnkSiegeTeam team : match.scenario().teams()) {
+            Team bukkitTeam = board.registerNewTeam("siege_" + team.id());
+            bukkitTeam.color(SiegeBukkit.color(team));
+            bukkitTeam.prefix(Component.text("[" + SiegeBukkit.teamName(team) + "] ", SiegeBukkit.color(team)));
+            bukkitTeam.setAllowFriendlyFire(true); // the combat listener decides; never Bukkit's team rule
+            bukkitTeam.setCanSeeFriendlyInvisibles(team.id() == viewerTeam.id());
+        }
+        Objective sidebar = board.registerNewObjective("siege", Criteria.DUMMY,
+                Component.text(lobby.displayName(), NamedTextColor.GOLD, TextDecoration.BOLD));
+        sidebar.setDisplaySlot(DisplaySlot.SIDEBAR);
+        sidebar.numberFormat(NumberFormat.blank());
+        // #163: kills/deaths in the tab list for the members only (was a global custom tab name).
+        Objective tab = board.registerNewObjective(TAB_OBJECTIVE, Criteria.DUMMY, Component.text("K/D"));
+        tab.setDisplaySlot(DisplaySlot.PLAYER_LIST);
+        return board;
     }
 
     /** A rejoin or admin join (PandiO/knk-workspace#150, #152): the late member gets their team's board too. */
@@ -93,17 +123,29 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
     public void memberJoinedMatch(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) {
         Map<Integer, Scoreboard> boards = boardsByMatch.get(match.matchToken());
         if (boards == null) return;
-        match.roster().teamOf(player.getUniqueId()).ifPresent(teamId -> show(boards, player, teamId));
+        match.roster().teamOf(player.getUniqueId()).ifPresent(teamId -> show(lobby, match, boards, player, teamId));
         refresh(lobby, match);
     }
 
-    private void show(Map<Integer, Scoreboard> boards, Player p, int teamId) {
-        boards.values().forEach(b -> {
+    private void show(SiegeLobbyRuntime lobby, SiegeMatch match, Map<Integer, Scoreboard> boards, Player p, int teamId) {
+        Scoreboard own = boards.get(teamId);
+        Map<UUID, Scoreboard> personal = playerBoardsByMatch.get(match.matchToken());
+        KnkSiegeTeam viewerTeam = match.scenario().team(teamId).orElse(null);
+        if (personal != null && viewerTeam != null) {
+            // #866: the member's own board, with every member already in the match on their team.
+            own = newBoard(lobby, match, viewerTeam);
+            personal.put(p.getUniqueId(), own);
+            for (MemberView member : match.roster().members()) {
+                Player other = Bukkit.getPlayer(member.playerId());
+                Team team = own.getTeam("siege_" + member.teamId());
+                if (other != null && team != null) team.addEntry(other.getName());
+            }
+        }
+        allBoards(match, boards).forEach(b -> {
             Team team = b.getTeam("siege_" + teamId);
             if (team != null) team.addEntry(p.getName());
         });
         previousBoards.putIfAbsent(p.getUniqueId(), boardOf(p));
-        Scoreboard own = boards.get(teamId);
         if (own != null) setBoard(p, own);
         ScoreboardUtil.setSiegeTag(p, true);
     }
@@ -129,11 +171,13 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
     public void memberRemoved(SiegeLobbyRuntime lobby, SiegeMatch match, Player player) {
         Map<Integer, Scoreboard> boards = boardsByMatch.get(match.matchToken());
         if (boards != null) {
-            boards.values().forEach(b -> {
+            allBoards(match, boards).forEach(b -> {
                 Team t = b.getEntryTeam(player.getName());
                 if (t != null) t.removeEntry(player.getName());
             });
         }
+        Map<UUID, Scoreboard> personal = playerBoardsByMatch.get(match.matchToken());
+        if (personal != null) personal.remove(player.getUniqueId()); // #866
         restore(player);
     }
 
@@ -167,6 +211,7 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
                 }
             }
             boardsByMatch.remove(match.matchToken());
+            playerBoardsByMatch.remove(match.matchToken());
             endedMatches.remove(match.matchToken());
         });
     }
@@ -179,6 +224,7 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
         }
         previousBoards.clear();
         boardsByMatch.clear();
+        playerBoardsByMatch.clear();
         endedMatches.clear();
     }
 
@@ -214,6 +260,7 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
                                 secondsLeft <= net.knightsandkings.knk.core.siege.SiegeLobbyStateMachine.FINAL_COUNTDOWN_SECONDS
                                         ? NamedTextColor.RED : NamedTextColor.WHITE)));
             }
+            int personalAt = lines.size(); // #866: a member's own line goes after the clock
             lines.add(Component.empty());
             for (ObjectiveState state : objectives) {
                 boolean ours = match.alliances().knows(state.holderTeamId())
@@ -225,17 +272,54 @@ public final class SiegeScoreboardPresenter implements SiegeMatchObserver {
                 lines.add(line);
             }
             render(board, lines);
+            renderPersonal(match, viewerTeam.id(), lines, personalAt);
         }
 
         // #163: [kills/deaths] next to each member in the tab list, on the siege boards only.
         for (MemberView member : match.roster().members()) {
             Player p = Bukkit.getPlayer(member.playerId());
             if (p == null) continue;
-            for (Scoreboard board : boards.values()) {
+            for (Scoreboard board : allBoards(match, boards)) {
                 Objective tab = board.getObjective(TAB_OBJECTIVE);
                 if (tab != null) showKillsDeaths(tab.getScore(p.getName()), member.kills(), member.deaths());
             }
         }
+    }
+
+    /** #866: each member of the team on their own board: the team's lines with their personal line inserted. */
+    private void renderPersonal(SiegeMatch match, int teamId, List<Component> teamLines, int at) {
+        Map<UUID, Scoreboard> personal = playerBoardsByMatch.get(match.matchToken());
+        if (personal == null || personal.isEmpty()) return;
+        for (UUID playerId : match.roster().membersOf(teamId)) {
+            Scoreboard board = personal.get(playerId);
+            if (board == null) continue;
+            render(board, withPersonalLine(teamLines, at, personalLine.line(match, playerId)));
+        }
+    }
+
+    /** The team's lines with {@code personal} at {@code at}; the team's lines unchanged without one. */
+    static List<Component> withPersonalLine(List<Component> teamLines, int at, Component personal) {
+        if (personal == null) return teamLines;
+        List<Component> lines = new ArrayList<>(teamLines);
+        lines.add(Math.max(0, Math.min(at, lines.size())), personal);
+        return lines;
+    }
+
+    /** The match's team boards, then (#866) its members' own boards. */
+    private List<Scoreboard> allBoards(SiegeMatch match, Map<Integer, Scoreboard> boards) {
+        List<Scoreboard> all = new ArrayList<>(boards.values());
+        Map<UUID, Scoreboard> personal = playerBoardsByMatch.get(match.matchToken());
+        if (personal != null) all.addAll(personal.values());
+        return all;
+    }
+
+    /** The member's board in this match: their own (#866) or their team's; empty when they have none. */
+    Optional<Scoreboard> boardOf(SiegeMatch match, UUID playerId) {
+        Map<UUID, Scoreboard> personal = playerBoardsByMatch.get(match.matchToken());
+        if (personal != null && personal.containsKey(playerId)) return Optional.of(personal.get(playerId));
+        Map<Integer, Scoreboard> boards = boardsByMatch.get(match.matchToken());
+        if (boards == null) return Optional.empty();
+        return match.roster().teamOf(playerId).stream().mapToObj(boards::get).filter(java.util.Objects::nonNull).findFirst();
     }
 
     /** The tab-list score: kills as the number (for sorting), shown as {@code [k/d]}. */
