@@ -20,6 +20,10 @@ import net.knightsandkings.knk.core.siege.menu.SiegeServerMenuView;
 import net.knightsandkings.knk.core.siege.menu.SiegeViewerMenuView;
 import net.knightsandkings.knk.core.siege.menu.SiegeVoteOptionView;
 import net.knightsandkings.knk.core.siege.menu.SpawnOptionView;
+import net.knightsandkings.knk.core.siege.shop.ShopCategoryView;
+import net.knightsandkings.knk.core.siege.shop.ShopEntryView;
+import net.knightsandkings.knk.core.siege.shop.ShopHeaderView;
+import net.knightsandkings.knk.core.siege.shop.ShopMenuIds;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -36,7 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * changes). Each template is loaded through the real api-client DTO + mapper, assembled, and run
  * through the startup validation knk-paper's {@code MenuDefinitionValidationRunner} performs, against
  * registries that hold what {@code SiegeMenuFeature} registers (roots and row types = the knk-core
- * views, so every {@code $…$} getter the seeds use must exist) plus the engine default ids the seeds
+ * views, so every {@code $…$} getter the seeds use must exist; with siege shop L3, #868, also what
+ * {@code SiegeShopMenuFeature} registers) plus the engine default ids the seeds
  * reference. A seed/view drift fails here instead of blocking the menu at the server's start.
  */
 class SiegeMenuSeedContractTest {
@@ -59,6 +64,7 @@ class SiegeMenuSeedContractTest {
         var actions = new ActionRegistry<Object>();
         for (String id : List.of(SiegeMenuIds.ACTION_JOIN, SiegeMenuIds.ACTION_LEAVE, SiegeMenuIds.ACTION_VOTE,
                 SiegeMenuIds.ACTION_VOTE_RANDOM, SiegeMenuIds.ACTION_SPAWN, SiegeMenuIds.ACTION_OPEN_OWN,
+                ShopMenuIds.ACTION_BUY, ShopMenuIds.ACTION_OPEN, // siege shop L3 (#868): SiegeShopMenuFeature
                 "menu.open", "menu.back", "menu.close", "menu.page.prev", "menu.page.next", "menu.confirm.doubleclick")) {
             actions.register(id, (context, params) -> { });
         }
@@ -66,7 +72,7 @@ class SiegeMenuSeedContractTest {
         for (String id : List.of(SiegeMenuIds.CONDITION_PHASE, SiegeMenuIds.CONDITION_PARTICIPATING,
                 SiegeMenuIds.CONDITION_JOIN_ELIGIBLE, SiegeMenuIds.CONDITION_VOTE_OPEN,
                 SiegeMenuIds.CONDITION_SPAWN_AVAILABLE, SiegeMenuIds.CONDITION_LOBBIES_EMPTY,
-                SiegeMenuIds.CONDITION_LOBBY_OPEN, "value-equals")) {
+                SiegeMenuIds.CONDITION_LOBBY_OPEN, ShopMenuIds.CONDITION_AVAILABLE, "value-equals")) {
             conditions.register(id, (context, params) -> ConditionOutcome.allow());
         }
         var sources = new MenuContentSourceRegistry<Object>();
@@ -74,10 +80,13 @@ class SiegeMenuSeedContractTest {
         sources.registerRows(SiegeMenuIds.SOURCE_VOTE_CANDIDATES, SiegeVoteOptionView.class, (c, p, q) -> empty());
         sources.registerRows(SiegeMenuIds.SOURCE_BODY, SiegeBodyRowView.class, (c, p, q) -> empty());
         sources.registerRows(SiegeMenuIds.SOURCE_SPAWN_OPTIONS, SpawnOptionView.class, (c, p, q) -> empty());
+        sources.registerRows(ShopMenuIds.SOURCE_CATEGORIES, ShopCategoryView.class, (c, p, q) -> empty());
+        sources.registerRows(ShopMenuIds.SOURCE_ENTRIES, ShopEntryView.class, (c, p, q) -> empty());
         var variables = new MenuVariableProviderRegistry<Object>();
         variables.register(SiegeMenuIds.ROOT_SIEGE, SiegeLobbyMenuView.class, (player, ctx) -> null);
         variables.register(SiegeMenuIds.ROOT_VIEWER, SiegeViewerMenuView.class, (player, ctx) -> null);
         variables.register(SiegeMenuIds.ROOT_SERVER, SiegeServerMenuView.class, (player, ctx) -> null);
+        variables.register(ShopMenuIds.ROOT_SHOP, ShopHeaderView.class, (player, ctx) -> null);
         return new Registries(actions, conditions, sources, variables);
     }
 
@@ -86,7 +95,8 @@ class SiegeMenuSeedContractTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {SiegeMenuIds.MENU_OVERVIEW, SiegeMenuIds.MENU_INFORMATION, SiegeMenuIds.MENU_SPAWNPOINT})
+    @ValueSource(strings = {SiegeMenuIds.MENU_OVERVIEW, SiegeMenuIds.MENU_INFORMATION, SiegeMenuIds.MENU_SPAWNPOINT,
+            ShopMenuIds.MENU_SHOP, ShopMenuIds.MENU_CATEGORY})
     void seedPassesTheStartupValidationAgainstTheSiegeFeature(String key) throws Exception {
         MenuTemplateDto dto = seeds().stream().filter(s -> key.equals(s.key())).findFirst().orElseThrow();
         RuntimeMenu menu = MenuTemplateAssembler.assemble(MenuTemplateMapper.toCore(dto));

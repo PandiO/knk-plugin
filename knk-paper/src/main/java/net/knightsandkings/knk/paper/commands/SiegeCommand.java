@@ -61,6 +61,13 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         this.points = points;
     }
 
+    /** Siege shop L3 (PandiO/knk-workspace#868): {@code /siege shop}; null with siege.shop.enabled off. */
+    private net.knightsandkings.knk.paper.siege.shop.SiegeShopService shop;
+
+    public void setShop(net.knightsandkings.knk.paper.siege.shop.SiegeShopService shop) {
+        this.shop = shop;
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
@@ -80,6 +87,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
             }
             // Siege shop L1 (#866): the player's siege points, and sending some to a teammate (P07).
             case "points", "pay" -> siegePoints(sender, sub, rest);
+            // Siege shop L3 (#868): the siege shop, anywhere during a running match (P02, A17).
+            case "shop" -> siegeShop(sender);
             case "skip" -> {
                 if (!allowed(sender, SiegeService.PERMISSION_SKIP)) return true;
                 send(sender, service.skip(sender, arg(rest, 0), false));
@@ -95,6 +104,21 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     }
 
     // ==================== Player ====================
+
+    /** {@code /siege shop} (#868): opens the shop of the player's running match; a message when the shop is off. */
+    private void siegeShop(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(SiegeMessages.bad("Only players can use this."));
+            return;
+        }
+        if (!allowed(sender, SiegeService.PERMISSION_PLAY)) return;
+        if (shop == null) {
+            sender.sendMessage(SiegeMessages.bad("The siege shop is not enabled on this server."));
+            return;
+        }
+        net.kyori.adventure.text.Component reply = shop.open(player);
+        if (reply != null) player.sendMessage(reply);
+    }
 
     /**
      * {@code /siege join [lobby]}, and for admins {@code /siege join <player> [lobby] [team]}
@@ -369,6 +393,7 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
     private void help(CommandSender sender) {
         sender.sendMessage(SiegeMessages.info("/siege - lobbies | join [lobby] | leave | menu | info [lobby] | vote [n|name|random] | "
                 + "spawn [option] | history" + (points != null ? " | points | pay <player> <amount>" : "")
+                + (shop != null ? " | shop" : "")
                 + " | skip [lobby] (cooldown, or shorten matchmaking)" + (!(sender instanceof Player p) || service.hasPermission(p, SiegeService.PERMISSION_ADMIN_LIST)
                 ? " | admin ..." : "")));
     }
@@ -380,7 +405,8 @@ public class SiegeCommand implements CommandExecutor, TabCompleter {
         if (args.length == 1) {
             Stream<String> player = canSuggest(sender, SiegeService.PERMISSION_PLAY)
                     ? Stream.concat(Stream.of("join", "leave", "menu", "info", "vote", "spawn", "history"),
-                    points != null ? Stream.of("points", "pay") : Stream.empty()) : Stream.empty();
+                    Stream.concat(points != null ? Stream.of("points", "pay") : Stream.empty(),
+                            shop != null ? Stream.of("shop") : Stream.empty())) : Stream.empty();
             Stream<String> skip = canSuggest(sender, SiegeService.PERMISSION_SKIP) ? Stream.of("skip") : Stream.empty();
             Stream<String> admin = canSuggestAnyAdmin(sender) ? Stream.of("admin") : Stream.empty();
             return filter(Stream.of(player, skip, admin, Stream.of("help")).flatMap(s -> s), args[0]);

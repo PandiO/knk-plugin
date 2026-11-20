@@ -22,5 +22,7 @@ public record ItemBlueprintReadDto(
         @JsonProperty("shieldBannerBaseColor") String shieldBannerBaseColor,
         @JsonProperty("shieldBannerLayers") List<ItemBannerLayerDto> shieldBannerLayers,
         @JsonProperty("armorTrimPattern") String armorTrimPattern,
-        @JsonProperty("armorTrimMaterial") String armorTrimMaterial
+        @JsonProperty("armorTrimMaterial") String armorTrimMaterial,
+        // Siege shop L2 (PandiO/knk-workspace#867, #868): a vanilla potion key (minecraft:strong_healing), or null.
+        @JsonProperty("potionType") String potionType
 ) {}

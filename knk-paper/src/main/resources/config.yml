@@ -449,6 +449,14 @@ siege:
   # scoreboards stay one per team, as before.
   points:
     enabled: false
+  # Siege shop (knk-workspace docs/specs/siege-shop/DESIGN.md § 4.1, § 5.3-5.5, PandiO/knk-workspace#868): one in-match
+  # shop paid with siege points, opened anywhere during a running match with /siege shop or the Shop button in the
+  # siege menu. Each match reads its catalogue once at the start (the shop entries and scenario overrides edited in
+  # the web app); items have an escalating price, a growing cooldown and a per-match cap. Siege weapon entries need
+  # siege.weapons.enabled and are bought from siege weapons phase 3 on (#784). Needs siege.points.enabled. Off by
+  # default: with false nothing of the shop is registered and Siege and the siege menu behave as before.
+  shop:
+    enabled: false
 
 # Diagnostic telemetry (KNG-34 link 6, docs/specs/player-statistics DESIGN.md §F.12): a timeline of
 # meaningful actions and outcomes (joins, menus, command labels, Siege lobby/match steps, failed API
