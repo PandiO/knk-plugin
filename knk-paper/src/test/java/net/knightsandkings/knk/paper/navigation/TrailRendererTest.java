@@ -283,16 +283,19 @@ class TrailRendererTest {
     }
 
     @Test
-    void theFlagOffWalkTrailTakesTheLegSpacingAndItsDefaultIsTodays() {
+    void theFlagOffWalkTrailTakesTheLegSpacingAndItsDefaultIsTwo() {
         // the window: the first 30 blocks of the 30-block L path from the player at its start
-        long today = particlesOfTheFlagOffWalkTrail(NavigationConfig.TrailConfig.defaults());
-        long denser = particlesOfTheFlagOffWalkTrail(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 1.5));
-        long explicitDefault = particlesOfTheFlagOffWalkTrail(
+        // F3: the shipped default is 2.0 (the developer's choice of 2026-11-19); 3.0 (before F3) is set explicitly
+        long before = particlesOfTheFlagOffWalkTrail(
             new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", TrailRenderer.LEG_SPACING));
+        long denser = particlesOfTheFlagOffWalkTrail(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 1.5));
+        long shipped = particlesOfTheFlagOffWalkTrail(NavigationConfig.TrailConfig.defaults());
+        long explicitTwo = particlesOfTheFlagOffWalkTrail(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 2.0));
 
-        assertEquals(today, explicitDefault, "3.0 is today's spacing");
-        assertTrue(today >= 10 && today <= 12, "about one particle every 3 blocks: " + today);
-        assertTrue(denser >= 2 * today - 2, "1.5 blocks: about twice as many: " + denser + " vs " + today);
+        assertEquals(shipped, explicitTwo, "2.0 is the shipped spacing");
+        assertTrue(before >= 10 && before <= 12, "3.0: about one particle every 3 blocks: " + before);
+        assertTrue(shipped >= 15 && shipped <= 17, "2.0: about one particle every 2 blocks: " + shipped);
+        assertTrue(denser >= 2 * before - 2, "1.5 blocks: about twice as many as 3.0: " + denser + " vs " + before);
     }
 
     // ==================== off-road phase 6.2 (#711): anchored walk trails (DESIGN § 7.2, A17) ====================
@@ -356,9 +359,10 @@ class TrailRendererTest {
     }
 
     @Test
-    void theLegSpacingDefaultsToTodaysAndIsValidated() {
-        assertEquals(3.0, NavigationConfig.TrailConfig.defaults().legSpacing(), 1e-9);
-        assertEquals(TrailRenderer.LEG_SPACING, NavigationConfig.TrailConfig.DEFAULT_LEG_SPACING, 1e-9);
+    void theLegSpacingDefaultsToTwoAndIsValidated() {
+        assertEquals(2.0, NavigationConfig.TrailConfig.defaults().legSpacing(), 1e-9, "F3: the developer's choice");
+        assertEquals(2.0, NavigationConfig.TrailConfig.DEFAULT_LEG_SPACING, 1e-9);
+        assertEquals(3.0, TrailRenderer.LEG_SPACING, 1e-9, "the straight legs' spacing is not the key's");
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
             () -> new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 0.1).validate());
     }

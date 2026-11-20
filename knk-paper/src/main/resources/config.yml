@@ -774,11 +774,11 @@ navigation:
   # are shaped off the main thread and drawn with checked curves (walk.curve). false = walk paths, the search and the
   # trail exactly as before. Keep false until the live test signs it off
   guidance-v2: false
-  # Blocks between a walk trail's particles (0.5..16; 3.0 is today's spacing). With guidance-v2 (phase 6.2, #711) the
+  # Blocks between a walk trail's particles (0.5..16; 2.0 since F3, the developer's choice of 2026-11-19; 3.0 before). With guidance-v2 (phase 6.2, #711) the
   # fixed anchors of the trail; since F2 (#771 item 3) also the spacing of the walk trail with guidance-v2 off. With
   # guidance-v2 only: how far along the route the cursor may move in one tick before only a player who left
   # the previous stretch (farther than reroute-distance) makes it jump to another (loops, switchbacks)
-  trail-leg-spacing: 3.0
+  trail-leg-spacing: 2.0
   cursor-jump: 12
   # Plaza lines for the players' trail (off-road navigation phase 7, #712). Where a route enters a plaza on one road
   # and leaves on another, the trail is drawn along a rounded line from road to road, pulled towards the plaza node,
