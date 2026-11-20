@@ -497,6 +497,53 @@ class NpcNavigationConfigTest {
     }
 
     @Test
+    void readsTheRoadGoalKeysInEveryConfigLayer() throws Exception {
+        // link G1 (PandiO/knk-workspace#814): npc.navigation.road-goal-reachable and road-goal-walk-weight
+        YamlConfiguration shipped = new YamlConfiguration();
+        try (InputStreamReader reader = new InputStreamReader(
+            NpcNavigationConfigTest.class.getResourceAsStream("/config.yml"), StandardCharsets.UTF_8)) {
+            shipped.load(reader);
+        }
+        NavigationSettings defaults = NpcNavigationConfig.from(shipped.getConfigurationSection(NpcNavigationConfig.PATH))
+            .settings();
+        Scope anywhere = Scope.of("w");
+        assertEquals(false, defaults.value(NavigationSettings.ROAD_GOAL_REACHABLE, anywhere), "off by default");
+        assertEquals(4.0, defaults.value(NavigationSettings.ROAD_GOAL_WALK_WEIGHT, anywhere), "the players' weight");
+        assertEquals(Layer.GLOBAL, defaults.resolve(NavigationSettings.ROAD_GOAL_REACHABLE, anywhere).layer(),
+            "the shipped config.yml has the key");
+
+        NpcNavigationConfig config = parse("""
+            npc:
+              navigation:
+                road-goal-reachable: true
+                road-goal-walk-weight: 2.5
+                worlds:
+                  w2:
+                    road-goal-reachable: false
+                regions:
+                  keep:
+                    road-goal-walk-weight: 6
+            """);
+        assertTrue(config.rejected().isEmpty(), config.rejected().toString());
+        NavigationSettings settings = config.settings();
+        var global = net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings, anywhere);
+        assertEquals(true, global.roadGoalReachable(), "the global layer");
+        assertEquals(2.5, global.roadGoalWalkWeight(), 1e-9);
+        assertEquals(false, net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+            Scope.of("w2")).roadGoalReachable(), "a world turns it off");
+        assertEquals(6.0, net.knightsandkings.knk.core.npc.nav.NpcNavigationService.Settings.of(settings,
+            new Scope("w", List.of("town", "keep"), null, null)).roadGoalWalkWeight(), 1e-9, "a region's weight");
+
+        NpcNavigationConfig bad = parse("""
+            npc:
+              navigation:
+                road-goal-reachable: sometimes
+                road-goal-walk-weight: 0.5
+            """);
+        assertEquals(2, bad.rejected().size(), bad.rejected().toString());
+    }
+
+    @Test
     void readsTheGroupKeysInEveryConfigLayer() throws Exception {
         NpcNavigationConfig config = parse("""
             npc:

@@ -153,6 +153,23 @@ public final class NavigationSettings {
         decimal(0, 256), "longest trip without a road, walked as off-road hops");
 
     /**
+     * A point destination's road goal by walk reachability (link G1, PandiO/knk-workspace#814; the off-road chain's
+     * rule of {@code navigation.road-goal-reachable}, F2/F3, #780): when the road's end is off the destination, the
+     * route may end at another road point instead: today's goal, the nearest point of each road edge within
+     * {@code navigation.max-snap-distance} of the destination and the road's nodes onward, at most 12, each with a road
+     * route and one walk search to the destination; the least road plus {@code road-goal-walk-weight} times walk wins.
+     * None reached: today's goal and its walk (link C1). Off by default until the developer has tested it.
+     */
+    public static final Key<Boolean> ROAD_GOAL_REACHABLE = new Key<>("road-goal-reachable", false, bool(),
+        "choose the road goal of a point destination among the nearby road points by road plus weighted walk length");
+    /**
+     * With {@code road-goal-reachable}: a candidate's score is its road length plus this many times its walk length
+     * (F3's rule; players use {@code navigation.road-goal-walk-weight}, 4.0). 1 = road and walk count alike.
+     */
+    public static final Key<Double> ROAD_GOAL_WALK_WEIGHT = new Key<>("road-goal-walk-weight", 4.0,
+        decimal(1, 100), "with road-goal-reachable: how many blocks of road one block walked counts as");
+
+    /**
      * What happens to an NPC that entered a region its current rules deny (the trespass guard; it is always logged
      * and counted): {@code true} also stops it and plans its route again. For dev servers.
      */
@@ -253,7 +270,8 @@ public final class NavigationSettings {
     public static final List<Key<?>> KEYS = List.of(PATHFINDER, STRETCH_BLOCKS, HOP_BLOCKS, RECHECK_TICKS,
         STATIONARY_TICKS, NO_PROGRESS_TICKS, MAX_RETRIES, RECOVERY_WAIT_TICKS, CORNER_CLEARANCE, WAYPOINT_MARGIN,
         CORRIDOR_STEERING, CORRIDOR_HALF_WIDTH, WALL_CLEARANCE, LOCAL_LEGS_CLEARANCE, PLAZA_LINES,
-        PLAZA_CORRIDOR_BLOCKS, CROWD_AWARENESS, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, STOP_ON_TRESPASS,
+        PLAZA_CORRIDOR_BLOCKS, CROWD_AWARENESS, NO_ROUTE_WAIT_TICKS, WALK_ONLY_BLOCKS, ROAD_GOAL_REACHABLE,
+        ROAD_GOAL_WALK_WEIGHT, STOP_ON_TRESPASS,
         COLLIDABLE, PLAYERS_PUSH_NPCS, PUSH_RETURN, PUSH_EXEMPT_AFTER, PUSH_EXEMPT_WINDOW_TICKS, PUSH_EXEMPT_TICKS,
         PUSH_TELEPORT_TICKS, CHUNK_LOADING, GROUP_FORMATION, GROUP_SPACING, GROUP_LATERAL_SPACING, GROUP_RANKS_WIDTH,
         GROUP_WIDTH_HYSTERESIS_BLOCKS, GROUP_FORMATION_KEEPING, GROUP_LATERAL_SPACING_MIN, GROUP_SPACING_MIN,

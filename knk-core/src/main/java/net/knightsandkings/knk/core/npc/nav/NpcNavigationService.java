@@ -29,6 +29,7 @@ import net.knightsandkings.knk.core.npc.nav.crowd.Occupancy;
 import net.knightsandkings.knk.core.npc.nav.push.EdgeGuard;
 import net.knightsandkings.knk.core.npc.nav.push.PushLedger;
 import net.knightsandkings.knk.core.npc.nav.push.PushWatch;
+import net.knightsandkings.knk.core.roads.route.RoadGoalChoice;
 
 /**
  * Walks NPCs along K&K routes (implementation plan Phase 2; BEHAVIOR_MODEL NAV-01, 03, 11, 13, 14, 15, 17): a state
@@ -106,7 +107,14 @@ public final class NpcNavigationService {
      * plans the off-road ends and walk-only trips with the walk search (link C1); null: they are walked in hops.
      */
     public record Ports(RoadPlanner roads, LocalLegPreparer legs, NavWorld world, NpcNavigationMetrics metrics,
-                        LongSupplier nanoTime, Consumer<String> log, AccessRules rules, OffRoadWalks walks) {
+                        LongSupplier nanoTime, Consumer<String> log, AccessRules rules, OffRoadWalks walks,
+                        RoadGoals roadGoals) {
+
+        /** Without the road goal candidates (link G1): a route ends at the router's goal, as before. */
+        public Ports(RoadPlanner roads, LocalLegPreparer legs, NavWorld world, NpcNavigationMetrics metrics,
+                     LongSupplier nanoTime, Consumer<String> log, AccessRules rules, OffRoadWalks walks) {
+            this(roads, legs, world, metrics, nanoTime, log, rules, walks, null);
+        }
 
         /** Without access rules of its own: everything is allowed while walking ({@link AccessRules#OPEN}). */
         public Ports(RoadPlanner roads, LocalLegPreparer legs, NavWorld world, NpcNavigationMetrics metrics,
@@ -122,7 +130,15 @@ public final class NpcNavigationService {
 
         /** The same ports with the walk search for off-road legs (link C1, PandiO/knk-workspace#700). */
         public Ports withWalks(OffRoadWalks offRoad) {
-            return new Ports(roads, legs, world, metrics, nanoTime, log, rules, offRoad);
+            return new Ports(roads, legs, world, metrics, nanoTime, log, rules, offRoad, roadGoals);
+        }
+
+        /**
+         * The same ports with the road goal candidates (link G1, PandiO/knk-workspace#814): with
+         * {@code road-goal-reachable} on and the walk search, a point destination's road goal is chosen among them.
+         */
+        public Ports withRoadGoals(RoadGoals goals) {
+            return new Ports(roads, legs, world, metrics, nanoTime, log, rules, walks, goals);
         }
 
         public Ports {
@@ -150,7 +166,24 @@ public final class NpcNavigationService {
                            boolean localLegsClearance, boolean plazaLines, int plazaCorridorBlocks,
                            boolean crowdAwareness, boolean collidable, boolean playersPushNpcs, boolean pushReturn,
                            int pushExemptAfter, int pushExemptWindowTicks, int pushExemptTicks,
-                           int pushTeleportTicks) {
+                           int pushTeleportTicks, boolean roadGoalReachable, double roadGoalWalkWeight) {
+
+        /** With the road goal by reachability off (link G1, PandiO/knk-workspace#814). */
+        public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
+                        int noRouteWaitTicks, double walkOnlyBlocks, int recheckTicks, boolean stopOnTrespass,
+                        double cornerClearance, double waypointMargin, int recoveryWaitTicks,
+                        boolean corridorSteering, double corridorHalfWidth, double wallClearance,
+                        boolean localLegsClearance, boolean plazaLines, int plazaCorridorBlocks,
+                        boolean crowdAwareness, boolean collidable, boolean playersPushNpcs, boolean pushReturn,
+                        int pushExemptAfter, int pushExemptWindowTicks, int pushExemptTicks,
+                        int pushTeleportTicks) {
+            this(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks, recheckTicks,
+                stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering, corridorHalfWidth,
+                wallClearance, localLegsClearance, plazaLines, plazaCorridorBlocks, crowdAwareness, collidable,
+                playersPushNpcs, pushReturn, pushExemptAfter, pushExemptWindowTicks, pushExemptTicks, pushTeleportTicks,
+                NavigationSettings.ROAD_GOAL_REACHABLE.defaultValue(),
+                NavigationSettings.ROAD_GOAL_WALK_WEIGHT.defaultValue());
+        }
 
         /** With collision off and push resistance at its code defaults (plan 4c.4 item 7; link M7). */
         public Settings(double stretchBlocks, double hopBlocks, int noProgressTicks, int maxRetries,
@@ -253,7 +286,9 @@ public final class NpcNavigationService {
                 settings.value(NavigationSettings.PUSH_EXEMPT_AFTER, scope),
                 settings.value(NavigationSettings.PUSH_EXEMPT_WINDOW_TICKS, scope),
                 settings.value(NavigationSettings.PUSH_EXEMPT_TICKS, scope),
-                settings.value(NavigationSettings.PUSH_TELEPORT_TICKS, scope));
+                settings.value(NavigationSettings.PUSH_TELEPORT_TICKS, scope),
+                settings.value(NavigationSettings.ROAD_GOAL_REACHABLE, scope),
+                settings.value(NavigationSettings.ROAD_GOAL_WALK_WEIGHT, scope));
         }
 
         /** The waypoint margin for a stretch: {@link CorridorShaper#CHOKE_MARGIN} with an aligned chokepoint. */
@@ -271,7 +306,16 @@ public final class NpcNavigationService {
                 recheckTicks, stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering,
                 corridorHalfWidth, wallClearance, localLegsClearance, plazaLines, plazaCorridorBlocks, crowdAwareness,
                 on, playersPushNpcs, pushReturn, pushExemptAfter, pushExemptWindowTicks, pushExemptTicks,
-                pushTeleportTicks);
+                pushTeleportTicks, roadGoalReachable, roadGoalWalkWeight);
+        }
+
+        /** These settings with the road goal by reachability on or off (link G1), the walk weight kept. */
+        public Settings withRoadGoalReachable(boolean on) {
+            return new Settings(stretchBlocks, hopBlocks, noProgressTicks, maxRetries, noRouteWaitTicks, walkOnlyBlocks,
+                recheckTicks, stopOnTrespass, cornerClearance, waypointMargin, recoveryWaitTicks, corridorSteering,
+                corridorHalfWidth, wallClearance, localLegsClearance, plazaLines, plazaCorridorBlocks, crowdAwareness,
+                collidable, playersPushNpcs, pushReturn, pushExemptAfter, pushExemptWindowTicks, pushExemptTicks,
+                pushTeleportTicks, on, roadGoalWalkWeight);
         }
     }
 
@@ -284,6 +328,11 @@ public final class NpcNavigationService {
         /** Bumped whenever what is in flight for this NPC no longer counts. */
         int generation;
         NavPoint goal;
+        /**
+         * Link G1: the road goal chosen for this order with {@code road-goal-reachable} (a floor point on the road), so
+         * a replan routes there again instead of searching every candidate anew; null until chosen.
+         */
+        NavPoint roadGoal;
         Consumer<NavigationResult> onResult;
         long waitUntil;
         long queuedAtNanos;
@@ -530,6 +579,9 @@ public final class NpcNavigationService {
     /** Off-road ends and walk-only trips planned with the walk search (link C1), and those walked in hops instead. */
     private long offRoadWalks;
     private long offRoadHops;
+    /** Link G1: road goal choices made, and those that moved the goal off today's. */
+    private long roadGoalChoices;
+    private long roadGoalsMoved;
     /** Main-thread time of push resistance's looks, for its share of the cost. */
     private long pushNanos;
     private java.util.function.IntToDoubleFunction plazaClearance = id -> Double.NaN;
@@ -648,6 +700,7 @@ public final class NpcNavigationService {
             end(nav, new NavigationResult.Cancelled("replaced"));
         }
         nav.goal = goalFeet;
+        nav.roadGoal = null;
         nav.onResult = onResult;
         nav.returnTo = null;
         nav.bodyReturn = false;
@@ -765,6 +818,16 @@ public final class NpcNavigationService {
     /** Off-road ends and walk-only trips the walk search did not plan, walked in hops (link C1's fallback). */
     public long offRoadHops() {
         return offRoadHops;
+    }
+
+    /** Link G1: road goal choices made ({@code road-goal-reachable}). */
+    public long roadGoalChoices() {
+        return roadGoalChoices;
+    }
+
+    /** Link G1: road goal choices that took another road point than the router's goal. */
+    public long roadGoalsMoved() {
+        return roadGoalsMoved;
     }
 
     /** The feet, with the NPC's place on its waypoint list brought up to date. */
@@ -1076,7 +1139,8 @@ public final class NpcNavigationService {
         nav.roadPlanning = true;
         CompletableFuture<RoadPlanner.RoadPlan> planning;
         try {
-            planning = ports.roads().plan(subject(nav, at), from, to);
+            // link G1: once a road goal is chosen for this order, the road ends there; the walk to the goal follows
+            planning = ports.roads().plan(subject(nav, at), from, nav.roadGoal != null ? nav.roadGoal : to);
         } catch (RuntimeException e) {
             planning = CompletableFuture.failedFuture(e);
         }
@@ -1118,6 +1182,10 @@ public final class NpcNavigationService {
                 }
                 nav.blockedReported = false;
                 nav.reportedElement = null;
+                if (wantsRoadGoalChoice(nav, plan.line(), to)) {
+                    chooseRoadGoal(nav, generation, plan, from, to);
+                    return;
+                }
                 startRoute(nav, generation, at, plan.line(), plan.gates(), plan.plazas(), from, to);
             }
             case BLOCKED -> {
@@ -1177,6 +1245,16 @@ public final class NpcNavigationService {
     private void startRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
                             List<RoadPlanner.GateCrossing> gates, List<PlazaCrossing> plazas,
                             NavPoint from, NavPoint to) {
+        startRoute(nav, generation, at, line, gates, plazas, from, to, null);
+    }
+
+    /**
+     * As above; {@code tailFound}: the walk from the line's end to the goal, already searched (link G1's road goal
+     * choice), else null.
+     */
+    private void startRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
+                            List<RoadPlanner.GateCrossing> gates, List<PlazaCrossing> plazas,
+                            NavPoint from, NavPoint to, OffRoadWalks.Walk tailFound) {
         NavPoint roadStart = line.get(0);
         NavPoint roadEnd = line.get(line.size() - 1);
         boolean head = roadStart.horizontalDistance(from) > ROAD_JOIN_DISTANCE;
@@ -1185,7 +1263,7 @@ public final class NpcNavigationService {
             boolean tail = to != null && (roadEnd.horizontalDistance(to) > ARRIVAL_DISTANCE
                 || Math.abs(roadEnd.y() - to.y()) > 2);
             if (head || tail) {
-                walkRoute(nav, generation, at, line, gates, plazas, from, to, head, tail);
+                walkRoute(nav, generation, at, line, gates, plazas, from, to, head, tail, tail ? tailFound : null);
                 return;
             }
         }
@@ -1241,15 +1319,16 @@ public final class NpcNavigationService {
      */
     private void walkRoute(Nav nav, int generation, NavPoint at, List<NavPoint> line,
                            List<RoadPlanner.GateCrossing> gates, List<PlazaCrossing> plazas,
-                           NavPoint from, NavPoint to, boolean head, boolean tail) {
+                           NavPoint from, NavPoint to, boolean head, boolean tail, OffRoadWalks.Walk tailFound) {
         List<NavPoint> road = HopPlanner.resampleKeepingCorners(line, RouteFollower.STEP);
         AccessSubject subject = subject(nav, at);
         long start = ports.nanoTime().getAsLong();
         inFlight++;
         CompletableFuture<OffRoadWalks.Walk> headWalk = head
             ? askWalk(subject, at, joinTargets(road)) : CompletableFuture.completedFuture(null);
-        CompletableFuture<TailWalk> tailWalk = tail
-            ? tailWalk(subject, road, to, road.size() - 1, 1) : CompletableFuture.completedFuture(null);
+        CompletableFuture<TailWalk> tailWalk = !tail ? CompletableFuture.completedFuture(null)
+            : tailFound != null ? CompletableFuture.completedFuture(new TailWalk(road.size() - 1, tailFound))
+            : tailWalk(subject, road, to, road.size() - 1, 1);
         headWalk.thenCombine(tailWalk, (h, t) -> new Object[] {h, t}).whenComplete((both, error) -> timed(() -> {
             inFlight = Math.max(0, inFlight - 1);
             ports.metrics().observePlan("walk", (ports.nanoTime().getAsLong() - start) / 1e9);
@@ -1317,6 +1396,195 @@ public final class NpcNavigationService {
             }
             takeRoute(nav, generation, now, combined, walked, gates, plazas, headHops, tailHops);
         }));
+    }
+
+    // ==================== the road goal by walk reachability (link G1, PandiO/knk-workspace#814) ====================
+
+    /** The most road points tried for one road goal choice, today's included (the off-road chain's F2 bound). */
+    static final int ROAD_GOAL_CANDIDATES = 12;
+
+    /** One candidate the choice planned: its road route and the walk from the route's end to the goal. */
+    private record GoalOption(RoadGoals.Candidate candidate, RoadPlanner.RoadPlan plan, OffRoadWalks.Walk walk,
+                              RoadGoalChoice.Option option) {
+    }
+
+    /**
+     * Whether this road route's goal is chosen by walk reachability: {@code road-goal-reachable} on, the walk search
+     * and the candidates wired, no road goal chosen yet for this order, and the road's end off the goal (C1's tail).
+     */
+    private boolean wantsRoadGoalChoice(Nav nav, List<NavPoint> line, NavPoint to) {
+        if (!nav.settings.roadGoalReachable() || ports.walks() == null || ports.roadGoals() == null
+            || nav.roadGoal != null || to == null || line.isEmpty()) {
+            return false;
+        }
+        NavPoint roadEnd = line.get(line.size() - 1);
+        return roadEnd.horizontalDistance(to) > ARRIVAL_DISTANCE || Math.abs(roadEnd.y() - to.y()) > 2;
+    }
+
+    /**
+     * Link G1 (PandiO/knk-workspace#814; the off-road chain's rule for players, F2/F3 #780): the road goal of a point
+     * destination among today's goal (the end of {@code plan}) and the candidates {@link RoadGoals} gives, at most
+     * {@link #ROAD_GOAL_CANDIDATES}. For each, one after another: a road route from {@code from} (today's is
+     * {@code plan}), then one walk search from its end to the goal with the NPC's access and profile (off the main
+     * thread, as C1's). The least road plus {@code road-goal-walk-weight} times walk wins
+     * ({@link RoadGoalChoice#best(List, double)}); its route and walk are taken as they are, and the order keeps that
+     * goal for its replans. None reached: today's route with C1's join (the end and up to 3 points back).
+     */
+    private void chooseRoadGoal(Nav nav, int generation, RoadPlanner.RoadPlan plan, NavPoint from, NavPoint to) {
+        NavPoint roadEnd = plan.line().get(plan.line().size() - 1);
+        List<RoadGoals.Candidate> candidates;
+        try {
+            candidates = ports.roadGoals().candidates(roadEnd, to, ROAD_GOAL_CANDIDATES);
+        } catch (RuntimeException e) {
+            ports.log().accept(nav.mover.name() + " road goal candidates failed: " + e);
+            candidates = List.of();
+        }
+        NavPoint at = nav.mover.position().orElse(null);
+        if (candidates.size() < 2 || at == null) {
+            // nothing to choose among: today's goal, as C1 walks it
+            if (at == null) {
+                nav.state = NpcNavState.PAUSED;
+                return;
+            }
+            startRoute(nav, generation, at, plan.line(), plan.gates(), plan.plazas(), from, to);
+            return;
+        }
+        long start = ports.nanoTime().getAsLong();
+        inFlight++;
+        roadGoalChoices++;
+        tryRoadGoal(nav, generation, plan, from, to, List.copyOf(candidates), new ArrayList<>(), subject(nav, at),
+            start);
+    }
+
+    /** Main thread: the road route and the walk of the next candidate, or the choice once every one answered. */
+    private void tryRoadGoal(Nav nav, int generation, RoadPlanner.RoadPlan today, NavPoint from, NavPoint to,
+                             List<RoadGoals.Candidate> candidates, List<GoalOption> answered, AccessSubject subject,
+                             long start) {
+        if (!current(nav, generation)) {
+            inFlight = Math.max(0, inFlight - 1);
+            return;
+        }
+        int index = answered.size();
+        if (index >= candidates.size()) {
+            inFlight = Math.max(0, inFlight - 1);
+            ports.metrics().observePlan("road-goal", (ports.nanoTime().getAsLong() - start) / 1e9);
+            roadGoalChosen(nav, generation, today, from, to, candidates, answered);
+            return;
+        }
+        RoadGoals.Candidate candidate = candidates.get(index);
+        CompletableFuture<RoadPlanner.RoadPlan> road;
+        if (index == 0) {
+            road = CompletableFuture.completedFuture(today);
+        } else {
+            try {
+                road = ports.roads().plan(subject, from, candidate.floor());
+            } catch (RuntimeException e) {
+                road = CompletableFuture.failedFuture(e);
+            }
+        }
+        road.handle((plan, error) -> error != null || plan == null || plan.status() != RoadPlanner.Status.FOUND
+                || plan.line().isEmpty() ? null : plan)
+            .thenCompose(plan -> {
+                if (plan == null || (index > 0 && sameRoadEnd(plan, today))) {
+                    // no road route there, or the router ends where today's does: not a candidate of its own
+                    return CompletableFuture.completedFuture(new GoalOption(candidate, plan, null, null));
+                }
+                NavPoint end = plan.line().get(plan.line().size() - 1);
+                return askWalk(subject, HopPlanner.feet(end), List.of(to)).thenApply(walk -> new GoalOption(candidate,
+                    plan, walk, walk.isFound() ? new RoadGoalChoice.Option(candidate.snap(), lengthOf(plan.line()),
+                    lengthOf(walk.path())) : null));
+            })
+            .whenComplete((option, error) -> timed(() -> {
+                answered.add(error != null || option == null ? new GoalOption(candidate, null, null, null) : option);
+                tryRoadGoal(nav, generation, today, from, to, candidates, answered, subject, start);
+            }));
+    }
+
+    private static boolean sameRoadEnd(RoadPlanner.RoadPlan a, RoadPlanner.RoadPlan b) {
+        NavPoint x = a.line().get(a.line().size() - 1);
+        NavPoint y = b.line().get(b.line().size() - 1);
+        return Trail.dist3(x, y) < RoadGoalChoice.SAME_PLACE;
+    }
+
+    /** The length of a line of floor points (3D), in blocks. */
+    static double lengthOf(List<NavPoint> line) {
+        double length = 0;
+        for (int i = 1; i < line.size(); i++) {
+            length += Trail.dist3(line.get(i - 1), line.get(i));
+        }
+        return length;
+    }
+
+    /** Main thread: every candidate answered; the best one's route and walk, or today's with C1's join. */
+    private void roadGoalChosen(Nav nav, int generation, RoadPlanner.RoadPlan today, NavPoint from, NavPoint to,
+                                List<RoadGoals.Candidate> candidates, List<GoalOption> answered) {
+        NavPoint at = nav.mover.position().orElse(null);
+        if (at == null) {
+            nav.state = NpcNavState.PAUSED;
+            return;
+        }
+        double weight = nav.settings.roadGoalWalkWeight();
+        List<RoadGoalChoice.Option> options = new ArrayList<>();
+        answered.forEach(o -> {
+            if (o.option() != null) {
+                options.add(o.option());
+            }
+        });
+        RoadGoalChoice.Option best = RoadGoalChoice.best(options, weight).orElse(null);
+        GoalOption chosen = null;
+        int chosenIndex = -1;
+        for (int i = 0; i < answered.size(); i++) {
+            if (best != null && answered.get(i).option() == best) {
+                chosen = answered.get(i);
+                chosenIndex = i;
+            }
+        }
+        ports.log().accept(roadGoalLog(nav, to, candidates, answered, chosenIndex, weight));
+        if (chosen == null) {
+            // none reached on foot: today's goal, walked as C1 does (the end, then up to 3 points back)
+            startRoute(nav, generation, at, today.line(), today.gates(), today.plazas(), from, to);
+            return;
+        }
+        if (chosenIndex > 0) {
+            roadGoalsMoved++;
+        }
+        RoadPlanner.RoadPlan plan = chosen.plan();
+        nav.roadGoal = plan.line().get(plan.line().size() - 1);
+        startRoute(nav, generation, at, plan.line(), plan.gates(), plan.plazas(), from, to, chosen.walk());
+    }
+
+    /**
+     * One line per road goal choice: every candidate with its road point, road and walk lengths (or why it is out) and
+     * score, and the chosen one; as the players' INFO line (F3).
+     */
+    private static String roadGoalLog(Nav nav, NavPoint to, List<RoadGoals.Candidate> candidates,
+                                      List<GoalOption> answered, int chosen, double weight) {
+        StringBuilder sb = new StringBuilder(String.format(Locale.ROOT,
+            "%s road goal for %s, %d candidates (walk weight %.1f):", nav.mover.name(),
+            NavGeometry.block(HopPlanner.feet(to)), candidates.size(), weight));
+        for (int i = 0; i < answered.size(); i++) {
+            GoalOption o = answered.get(i);
+            sb.append(String.format(Locale.ROOT, " #%d edge %d (%s)", i + 1, o.candidate().snap().edgeId(),
+                NavGeometry.block(o.candidate().floor())));
+            if (o.option() != null) {
+                sb.append(String.format(Locale.ROOT, " road %.0f + walk %.0f = score %.0f", o.option().roadLength(),
+                    o.option().walkLength(), o.option().score(weight)));
+                if (i == chosen) {
+                    sb.append(" CHOSEN");
+                }
+            } else if (o.plan() == null) {
+                sb.append(" no road route");
+            } else if (o.walk() == null) {
+                sb.append(" same road end as today's");
+            } else {
+                sb.append(" not reached on foot (").append(o.walk().status()).append(")");
+            }
+            sb.append(i == 0 ? " (today's);" : ";");
+        }
+        if (chosen < 0) {
+            sb.append(" none reached on foot: today's goal with the road join");
+        }
+        return sb.toString();
     }
 
     /** A walk-only trip (no road within reach) with the walk search, walked as a route line; in hops without a path. */
