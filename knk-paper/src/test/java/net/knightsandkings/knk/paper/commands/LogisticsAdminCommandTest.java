@@ -110,13 +110,16 @@ class LogisticsAdminCommandTest {
         module.set(lanes);
 
         command.execute(staff, new String[] {"lanes", "measure"});
-        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5); // the run finishes on the KnK-lanes thread
-        while (lanes.job().last() == null && System.nanoTime() < until) {
+        // the run finishes on the KnK-lanes thread and replies on the main thread: tick until the reply is there
+        StringBuilder heard = new StringBuilder();
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!heard.toString().contains(" due, ") && System.nanoTime() < until) {
             Thread.sleep(10);
+            server.getScheduler().performTicks(1);
+            heard.append(drain(staff));
         }
-        server.getScheduler().performTicks(2);
 
-        String said = drain(staff);
+        String said = heard.toString();
         assertTrue(said.contains("Reading the lane list and measuring over the road network"), said);
         assertTrue(said.contains("2 due, 0 reachable, 1 without a road, 1 skipped"), said);
         assertTrue(said.contains("#6 Lost mine → #9 Docks: skipped, #6 has no location"), said);
