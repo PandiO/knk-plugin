@@ -49,7 +49,7 @@ class SiegePointsTelemetryTest {
         assertEquals(TelemetryEventNames.SIEGE_POINTS_EARNED, e.name());
         assertEquals("kill", e.payload().get("source"));
         assertEquals(130L, ((Number) e.payload().get("amount")).longValue());
-        assertEquals(1.3, ((Number) e.payload().get("multiplier")).doubleValue(), 1e-9);
+        assertEquals(1.3, ((Number) e.payload().get("factor")).doubleValue(), 1e-9);
         assertEquals(3, ((Number) e.payload().get("lobbyId")).intValue());
         assertEquals(7, e.userId());
     }

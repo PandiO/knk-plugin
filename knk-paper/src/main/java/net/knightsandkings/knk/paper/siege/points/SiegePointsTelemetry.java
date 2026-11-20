@@ -20,7 +20,8 @@ import java.util.function.LongSupplier;
  * Siege points in the diagnostic telemetry for the balance runs (siege shop P27, #651): one
  * {@code siege.points_earned} event per kill, assist, death, capture, trickle or notable event. Gate damage and
  * capture progress pay small amounts many times a second, so they are summed per player and source and sent at most
- * once a minute (and at the match end), with the number of credits in {@code count}. Main thread only.
+ * once a minute (and at the match end), with the number of credits in {@code count}; {@code factor} is the kill-streak multiplier ("multiplier" would trip the
+ * API catalog's forbidden "ip" key check). Main thread only.
  */
 public final class SiegePointsTelemetry {
 
@@ -88,7 +89,7 @@ public final class SiegePointsTelemetry {
                 .put("source", source.code())
                 .put("amount", amount)
                 .put("count", count)
-                .put("multiplier", Math.round(multiplier * 100) / 100.0)
+                .put("factor", Math.round(multiplier * 100) / 100.0)
                 .emit();
     }
 }
