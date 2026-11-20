@@ -1111,6 +1111,13 @@ public class KnKPlugin extends JavaPlugin {
                 // Siege shop L3 (#868): the shop menus' ids, always registered so the seeds validate; the service is
                 // created later (initializeSiegeShop) and null with siege.shop.enabled off.
                 new net.knightsandkings.knk.paper.siege.shop.SiegeShopMenuFeature(() -> siegeShop),
+                // Siege shop L4 (#869): the Siege unlocks menu (coins and title level; refused during a match).
+                new net.knightsandkings.knk.paper.siege.unlocks.SiegeUnlocksMenuFeature(
+                    apiClient.getSiegeWeaponUnlocksApi(),
+                    uuid -> cacheManager.getUserCache().getStale(uuid)
+                        .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+                    uuid -> siegeService != null && siegeService.runningMatchOf(uuid).isPresent(),
+                    MenuService.mainThreadExecutor(this), java.time.Clock.systemUTC()),
                 statisticsVisibilityMenuFeature,
                 statisticsMenuFeature,
                 leaderboardsMenuFeature,
