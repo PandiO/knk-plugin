@@ -67,7 +67,8 @@ class PaperScenariosTest {
             "npc-doorway-crowd", "npc-doorway-crowd-collision-on", "npc-plaza-line", "npc-plaza-line-collision-on",
             "npc-collision-policy", "npc-guard-ledge-push", "npc-door-column",
             "player-command-needs-grant", "player-heal-needs-grant", "player-chat-group-colours", "player-join-loading-hold", "player-menu-click",
-            "player-tp-into-closed-gate", "player-rejoin-in-closed-gate", "territory-border-crossing", "rural-structure-region"), names);
+            "player-tp-into-closed-gate", "player-rejoin-in-closed-gate", "territory-border-crossing", "rural-structure-region",
+            "production-area-survey"), names);
     }
 
     @SuppressWarnings("unchecked")
