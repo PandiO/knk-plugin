@@ -152,6 +152,7 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.TerritoryApi territoryApi;
     /** Yield-area surveys (PandiO/knk-workspace#679). */
     private final net.knightsandkings.knk.core.ports.api.ProductionSurveyApi productionSurveyApi;
+    private final net.knightsandkings.knk.core.ports.api.TransportLanesApi transportLanesApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
@@ -240,6 +241,8 @@ public class KnkApiClient {
                 objectMapper, authProvider, executor, debugLogging);
         this.productionSurveyApi = new net.knightsandkings.knk.api.impl.ProductionSurveyApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
+        this.transportLanesApi = new net.knightsandkings.knk.api.impl.TransportLanesApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -300,6 +303,11 @@ public class KnkApiClient {
     /** Yield-area surveys (PandiO/knk-workspace#679): the survey queue, reports, "survey now" and the area list. */
     public net.knightsandkings.knk.core.ports.api.ProductionSurveyApi getProductionSurveyApi() {
         return productionSurveyApi;
+    }
+
+    /** Transport lanes (PandiO/knk-workspace#681): the lane list, lane reports and road connections. */
+    public net.knightsandkings.knk.core.ports.api.TransportLanesApi getTransportLanesApi() {
+        return transportLanesApi;
     }
 
     /** PandiO/knk-workspace#269. */
