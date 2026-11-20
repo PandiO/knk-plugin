@@ -1895,9 +1895,25 @@ public final class NavigationService implements SiegeMatchObserver {
             if (deps.logger().isLoggable(Level.FINE)) {
                 deps.logger().fine("[Navigation] Walk search " + sample.describe());
             }
+            if (result.status() == WalkResult.Status.NO_PATH && result.expansions() == 0) {
+                // F3 (#771, smoke § 12 step 3a): a search that never left its start - say which cell was unusable
+                deps.logger().info(unusableEndLog(sample.seq(), result.reason(), searched));
+            }
         } catch (RuntimeException e) {
             deps.logger().log(Level.FINE, "[Navigation] Walk measurement skipped", e);
         }
+    }
+
+    /**
+     * F3: the INFO line for a walk search that ended before its first expansion ("no walkable cell near the start" or
+     * "... the target"): which end, and both ends' blocks, so a live run shows where the start or the goal cell is
+     * unusable.
+     */
+    static String unusableEndLog(long seq, String reason, WalkRequest searched) {
+        return String.format(Locale.ROOT, "[Navigation] Walk search #%d: %s (start feet %.1f %.1f %.1f, target floor"
+                + " %.1f %.1f %.1f, start snap %d, goal snap %d)", seq, reason, searched.startX(), searched.startY(),
+            searched.startZ(), searched.targetX(), searched.targetFloorY(), searched.targetZ(),
+            searched.budget().startSnap(), searched.budget().goalSnap());
     }
 
     /** A region is reached at its edge (arrival is WorldGuard containment) or within arrive-distance of the target. */

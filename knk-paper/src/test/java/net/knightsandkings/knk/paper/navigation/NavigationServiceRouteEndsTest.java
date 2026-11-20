@@ -296,7 +296,8 @@ class NavigationServiceRouteEndsTest {
         service.stop(player);
 
         service(tower, keysOn(true, false));
-        List<String> log = infoLines(() -> navigateTo("Keep Tower Roof", TOWER));
+        List<String> log = infoLines(() -> navigateTo("Keep Tower Roof", TOWER)).stream()
+            .filter(l -> l.contains("road goal")).toList(); // (the start leg's search, below the window, says no cell)
         Route chosen = route();
         double[] end = chosen.end().point();
         assertTrue(end[0] >= KEEP_GATE[0] - 1 && end[2] >= KEEP_GATE[1], "through the garrison, into the Keep Gate: "
@@ -371,6 +372,67 @@ class NavigationServiceRouteEndsTest {
         runSearches();
         assertFalse(service.isDirect(playerId));
         assertEquals(STAIR_HOUSE_LANDING, route().end().edgeId(), "the same road goal on the new network");
+    }
+
+    // ===== F3, failure 3 (#771, smoke § 12 step 3a): 0 expansions from the watchtower roof =====
+
+    @Test
+    void scene3aFromEveryRoofCellTheSearchToEveryNearbyRoadPointLeavesItsStart() {
+        // not reproduced on the snapshots: from every roof floor cell (the snow layers included, feet 107.125) the
+        // search to the road points (every 4 blocks along each edge) within 60 blocks expands (the keep-tower window starts at y 66, the stair-house
+        // snapshot adds the road below it)
+        DevWorldSnapshot both = DevWorldSnapshot.merged(tower, keep);
+        NavigationConfig config = NavigationConfig.defaults();
+        List<double[]> starts = new ArrayList<>();
+        for (int x = 1396; x <= 1406; x++) {
+            for (int z = -547; z <= -536; z++) {
+                String floor = both.states.get(net.knightsandkings.knk.core.util.BlockKey.pack(x, 106, z));
+                String feetBlock = both.states.get(net.knightsandkings.knk.core.util.BlockKey.pack(x, 107, z));
+                if (floor == null || floor.contains("ladder") || floor.endsWith("air")) {
+                    continue;
+                }
+                if (feetBlock == null || feetBlock.endsWith("air")) {
+                    starts.add(new double[] {x + 0.5, 107, z + 0.5});
+                } else if (feetBlock.contains("snow")) {
+                    starts.add(new double[] {x + 0.5, 107.125, z + 0.5});
+                }
+            }
+        }
+        assertTrue(starts.size() >= 15, "the roof's floor cells: " + starts.size());
+        int searches = 0;
+        var b = config.walk().budget(); // the shipped snaps; a few expansions show the search left its start
+        var budget = new net.knightsandkings.knk.core.roads.walk.WalkBudget(20, b.maxLengthFactor(), b.maxLength(),
+            b.detourAllowance(), b.climbAllowance(), b.startSnap(), b.goalSnap());
+        var terrain = both.capture(new WalkBox(DevWorldSnapshot.WORLD, 1376, 36, -575, 1460, 130, -480)).terrain();
+        for (var edge : both.network.edges()) {
+            var line = both.network.polyline(edge.id());
+            for (double along = 0; along <= line.length(); along += 4) {
+                double[] t = line.pointAt(along);
+                if (NavigationService.distance(1400, 106, -541, t) > 60) {
+                    continue;
+                }
+                for (double[] from : starts) {
+                    WalkResult r = new WalkSearch().find(WalkRequest.toPoint(terrain, from[0], from[1],
+                        from[2], t[0], t[1], t[2], 4).withBudget(budget));
+                    assertTrue(r.expansions() > 0, "from " + Arrays.toString(from) + " to " + Arrays.toString(t) + ": " + r);
+                    searches++;
+                }
+            }
+        }
+        assertTrue(searches > 300, "searches: " + searches);
+    }
+
+    @Test
+    void aSearchThatNeverLeavesItsStartSaysWhichEndAtInfo() {
+        moveTo(new double[] {1400.5, 125, -541.5}); // in the air above the watchtower roof: no cell near the feet
+        service(tower, NavigationConfig.defaults());
+        List<String> log = infoLines(() -> {
+            service.navigate(player, Destination.point("Keep Tower Roof", DevWorldSnapshot.WORLD, TOWER[0], TOWER[1],
+                TOWER[2]));
+            runSearches();
+        });
+        assertTrue(log.stream().anyMatch(l -> l.contains("Walk search #") && l.contains("no walkable cell near the start")
+            && l.contains("start feet 1400.5 125.0 -541.5")), log.toString());
     }
 
     // ===== F3, failure 2 (#780): a route replacement does not repeat an announced maneuver =====
