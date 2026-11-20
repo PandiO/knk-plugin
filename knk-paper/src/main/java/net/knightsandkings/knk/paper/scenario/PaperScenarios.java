@@ -2,6 +2,7 @@ package net.knightsandkings.knk.paper.scenario;
 
 import net.knightsandkings.knk.core.scenario.ScenarioRegistry;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateBlocksNeverSuffocateScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.ProductionAreaSurveyScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.RuralStructureRegionScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.TerritoryBorderCrossingScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateClosingKeepsSidesScenario;
@@ -152,6 +153,8 @@ public final class PaperScenarios {
             // Territory (PandiO/knk-workspace#689): the lookup on a border crossing
             .register(new TerritoryBorderCrossingScenario())
             // P2c (PandiO/knk-workspace#677): rural structure regions top level, the territory lookup
-            .register(new RuralStructureRegionScenario());
+            .register(new RuralStructureRegionScenario())
+            // P4b (PandiO/knk-workspace#679): a yield-area survey of real blocks from chunk snapshots
+            .register(new ProductionAreaSurveyScenario());
     }
 }
