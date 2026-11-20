@@ -160,8 +160,9 @@ jobs:
         # Link E1 (#701) adds two (61) and link R1 (#724) one, a cache refresh with followers held (about 30 s): 62.
         # Territory L2 (#689) adds one (63); production P2c (#677) one, rural-structure-region (a few seconds): 64.
         # Link H1 (#779) adds npc-ladder-hatch, four trips up a tower's ladder (about 1.5 minutes): 65.
+        # Link G1 (#814) adds npc-road-goal-dead-end and npc-replay-keep-hall (an NPC and a group of 5 each): 67.
         env:
-          MIN_SCENARIOS: 65
+          MIN_SCENARIOS: 67
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"

@@ -68,6 +68,10 @@ public final class NpcNavigationModule {
     private NavSnapshotTaker snapshots;
     /** The walk navigator's parts and access for off-road legs (link C1); set after start. */
     private java.util.function.Supplier<NpcWalkPlanner.Sources> walkSources = () -> null;
+    /** Link G1: {@code navigation.max-snap-distance}'s code default. */
+    static final double DEFAULT_ROAD_GOAL_REACH =
+        net.knightsandkings.knk.paper.config.NavigationConfig.defaults().routerParameters().maxSnapDistance();
+    private java.util.function.DoubleSupplier roadGoalReach = () -> DEFAULT_ROAD_GOAL_REACH;
     private java.util.function.Supplier<net.knightsandkings.knk.paper.navigation.walk.WalkAccessFactory> walkAccess =
         () -> null;
 
@@ -173,6 +177,14 @@ public final class NpcNavigationModule {
             java.util.function.Supplier<net.knightsandkings.knk.paper.navigation.walk.WalkAccessFactory> access) {
         this.walkSources = sources == null ? () -> null : sources;
         this.walkAccess = access == null ? () -> null : access;
+    }
+
+    /**
+     * Link G1 (PandiO/knk-workspace#814): the reach of the road goal candidates from a point destination
+     * ({@code navigation.max-snap-distance}, as for players); without it {@link #DEFAULT_ROAD_GOAL_REACH}.
+     */
+    public void setRoadGoalReach(java.util.function.DoubleSupplier reach) {
+        this.roadGoalReach = reach == null ? () -> DEFAULT_ROAD_GOAL_REACH : reach;
     }
 
     public void stop() {
@@ -306,6 +318,8 @@ public final class NpcNavigationModule {
         if (sources != null && access != null) {
             // link C1: off-road ends and walk-only trips with the walk search, walked like the road line
             ports = ports.withWalks(new NpcWalkPlanner(sources, NpcWalkPlanner.AccessFor.of(access), logger));
+            // link G1: a point destination's road goal by walk reachability, with npc.navigation.road-goal-reachable
+            ports = ports.withRoadGoals(new NpcRoadGoals(nav::roadNetwork, roadGoalReach));
         } else {
             logger.warning("[NPC] the walk navigator's parts are missing: off-road legs are walked in hops");
         }

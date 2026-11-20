@@ -128,6 +128,9 @@ public final class PaperScenarios {
             .register(new NpcKeepTowerReplayScenario())
             // link H1 (PandiO/knk-workspace#779): a ladder and a roof hatch on an NPC's off-road leg
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.NpcLadderHatchScenario())
+            // link G1 (PandiO/knk-workspace#814): the road goal by walk reachability for NPCs
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.NpcRoadGoalDeadEndScenario())
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.NpcKeepHallReplayScenario())
             .register(new NpcJaggedStraightScenario(false))
             .register(new NpcJaggedStraightScenario(true))
             .register(new NpcDoorwayCrowdScenario(false))
