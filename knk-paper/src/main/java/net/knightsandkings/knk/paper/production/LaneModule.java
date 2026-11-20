@@ -60,8 +60,9 @@ public final class LaneModule {
             // the first run after two minutes: the road network is downloaded at start
             task = Bukkit.getScheduler().runTaskTimer(plugin, () -> job.run("schedule"), 2 * 60 * 20L, period);
         }
-        plugin.getLogger().info("Lane measurer is on (production.enabled): every " + settings.intervalMinutes()
-                + " min, " + settings.batch() + " pairs per run, road connections "
+        plugin.getLogger().info("Lane measurer is on (production.enabled): " + (settings.intervalMinutes() > 0
+                ? "every " + settings.intervalMinutes() + " min" : "only on /knk logistics lanes measure") + ", "
+                + settings.batch() + " pairs per run, road connections "
                 + (settings.roadConnections() ? "on" : "off") + ".");
     }
 
