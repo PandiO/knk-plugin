@@ -1221,6 +1221,13 @@ production:
       batch: 100                   # lane pairs read per run
       max-snap-distance: 48        # blocks (3D) from a structure's location to a road; farther = no road (Unconnected)
       road-connections: true       # also set the producers' road connection (Connected / Unconnected) from the lanes
+  # Storage terminals and display containers (#74, P6): chests, trapped chests and barrels bound to a storage with
+  # /knk storage bind (or in the web app). A terminal opens a paged view of the storage (take and put are ledger moves);
+  # a display holds a read-only sample of the stock. Bindings are the API's list, never found by scanning. Needs
+  # production.enabled; putting items in also needs items.identity.enabled.
+  storage:
+    refresh-minutes: 5             # how often the bound containers are re-read (a binding made in the web app shows after this)
+    display-refresh-seconds: 30    # at most one refresh of a display this often (chunk load and terminal moves ask for one)
 lootboxes:
   enabled: true
   # Sent with every spawn so the drop log shows which server made the box.

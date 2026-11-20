@@ -69,7 +69,7 @@ class PaperScenariosTest {
             "npc-collision-policy", "npc-guard-ledge-push", "npc-door-column",
             "player-command-needs-grant", "player-heal-needs-grant", "player-chat-group-colours", "player-join-loading-hold", "player-menu-click",
             "player-tp-into-closed-gate", "player-rejoin-in-closed-gate", "territory-border-crossing", "rural-structure-region",
-            "production-area-survey"), names);
+            "production-area-survey", "storage-display-double-chest"), names);
     }
 
     @SuppressWarnings("unchecked")
@@ -106,7 +106,7 @@ class PaperScenariosTest {
         CommandSender sender = mock(CommandSender.class);
 
         command.execute(sender, new String[] {"list"});
-        verify(sender).sendMessage(contains("Scenarios (68)"));
+        verify(sender).sendMessage(contains("Scenarios (69)"));
         verify(sender).sendMessage(contains("global-region-explosion"));
         verify(sender).sendMessage(contains("player-menu-click"));
     }

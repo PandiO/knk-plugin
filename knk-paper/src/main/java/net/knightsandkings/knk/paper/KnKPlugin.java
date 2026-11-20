@@ -327,6 +327,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.production.AreaOutlineRenderer areaOutlineRenderer;
     /** Transport lanes (PandiO/knk-workspace#681): null unless production.enabled. */
     private net.knightsandkings.knk.paper.production.LaneModule laneModule;
+    // Storage terminals, displays and structure menus (PandiO/knk-workspace#74): only with production.enabled.
+    private net.knightsandkings.knk.paper.production.terminal.StorageTerminalModule storageTerminalModule;
+    private net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature structuresMenuFeature;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
     /** Overview map reports (PandiO/knk-workspace#735); off unless map.reporting.enabled. */
@@ -1066,6 +1069,17 @@ public class KnKPlugin extends JavaPlugin {
                 apiClient.getLeaderboardsApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC());
             getServer().getPluginManager().registerEvents(statisticsMenuFeature, this);
             getServer().getPluginManager().registerEvents(leaderboardsMenuFeature, this);
+            // Storage terminals, displays and structure menus (PandiO/knk-workspace#74). The menu feature is always
+            // registered so the seeded menus validate; with production.enabled off its menus are blocked below (A21) and the
+            // terminal module is not built.
+            initializeStorageTerminals();
+            this.structuresMenuFeature = new net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature(
+                apiClient.getStructureMenusApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC(),
+                MenuService.mainThreadExecutor(this),
+                player -> player.hasPermission(net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature.STAFF_NODE)
+                    || (knkPermissible != null && knkPermissible.hasPermission(player,
+                        net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature.STAFF_NODE)),
+                this::townAt, structuresStaffTools(), () -> menuService);
             List<MenuFeature> menuFeatures = List.of(
                 registries -> {
                     MenuVariableContext.registerDefaults(registries.variables());
@@ -1099,7 +1113,8 @@ public class KnKPlugin extends JavaPlugin {
                 new net.knightsandkings.knk.paper.siege.shop.SiegeShopMenuFeature(() -> siegeShop),
                 statisticsVisibilityMenuFeature,
                 statisticsMenuFeature,
-                leaderboardsMenuFeature
+                leaderboardsMenuFeature,
+                structuresMenuFeature
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -1121,6 +1136,12 @@ public class KnKPlugin extends JavaPlugin {
             getLogger().info("InventoryMenu rendering engine initialized (Phase 2 + 9)");
             if (telemetryHooks != null) {
                 menuService.addObserver(telemetryHooks); // menu.opened / menu.action / menu.click (KNG-34 link 6)
+            }
+            // PandiO/knk-workspace#74: the overview's Town filter starts on the player's town; off, the menus are blocked.
+            menuService.addObserver(structuresMenuFeature);
+            if (!getConfig().getBoolean(net.knightsandkings.knk.paper.production.SurveyConfig.ENABLED_KEY, false)) {
+                net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature.MENU_KEYS.forEach(
+                    key -> menuService.blockMenu(key, "production is switched off (production.enabled: false)"));
             }
             if (menuFunnelRecorder != null) {
                 menuService.addObserver(menuFunnelRecorder); // anonymous menu funnels (KNG-34 link 7)
@@ -1427,6 +1448,10 @@ public class KnKPlugin extends JavaPlugin {
         if (laneModule != null) { // transport lanes (#681)
             laneModule.stop();
             laneModule = null;
+        }
+        if (storageTerminalModule != null) { // storage terminals (#74)
+            storageTerminalModule.stop();
+            storageTerminalModule = null;
         }
         if (surveyModule != null) {
             surveyModule.stop();
@@ -3387,6 +3412,12 @@ public class KnKPlugin extends JavaPlugin {
                 net.knightsandkings.knk.paper.commands.LogisticsAdminCommand.metadata(),
                 logisticsCommand::execute,
                 logisticsCommand::complete);
+            // Storage terminals (PandiO/knk-workspace#74): /knk storage bind|unbind|info|reload; answers "off" without production.enabled
+            var storageCommand = new net.knightsandkings.knk.paper.commands.StorageAdminCommand(() -> storageTerminalModule, this);
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.commands.StorageAdminCommand.metadata(),
+                storageCommand::execute,
+                storageCommand::complete);
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this,
                     tempRegionRetentionTask);
@@ -4823,6 +4854,52 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /** Bukkit-or-in-house permission checks for commands (KNG-24); Bukkit-only when the API isn't configured. */
+    /** Storage terminals and displays (PandiO/knk-workspace#74); only with production.enabled (A21). */
+    private void initializeStorageTerminals() {
+        var settings = net.knightsandkings.knk.paper.production.terminal.StorageTerminalConfig.read(getConfig());
+        if (!settings.enabled()) {
+            return;
+        }
+        storageTerminalModule = new net.knightsandkings.knk.paper.production.terminal.StorageTerminalModule(this, settings,
+            apiClient.getStorageContainersApi(),
+            new net.knightsandkings.knk.paper.production.terminal.BlueprintItems(itemBlueprintsDataAccess,
+                minecraftMaterialRefsDataAccess),
+            uuid -> cacheManager.getUserCache().getStale(uuid)
+                .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+            () -> itemIdentityService == null ? null : itemIdentityService::resolve);
+        storageTerminalModule.start();
+    }
+
+    /** The town whose land {@code player} stands in (territory lookup, #689), or null (PandiO/knk-workspace#74). */
+    private Integer townAt(org.bukkit.entity.Player player) {
+        var territory = territoryModule;
+        if (territory == null || player == null) {
+            return null;
+        }
+        var location = player.getLocation();
+        var verdict = territory.service().lookup(player.getWorld().getName(), location.getBlockX(), location.getBlockZ());
+        var owner = verdict == null ? null : verdict.owner();
+        return owner != null && owner.kind() == net.knightsandkings.knk.core.territory.TerritoryHolder.Kind.TOWN
+            ? owner.id() : null;
+    }
+
+    /** The structure menu's staff buttons that reuse /knk production: survey now and the area outline (#74, M4). */
+    private net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature.StaffTools structuresStaffTools() {
+        var production = new net.knightsandkings.knk.paper.commands.ProductionAdminCommand(() -> surveyModule,
+            areaOutlineRenderer, this);
+        return new net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature.StaffTools() {
+            @Override
+            public void survey(org.bukkit.entity.Player player, int structureId) {
+                production.execute(player, new String[] {"survey", String.valueOf(structureId)});
+            }
+
+            @Override
+            public void outline(org.bukkit.entity.Player player, int structureId) {
+                production.execute(player, new String[] {"area", "show", String.valueOf(structureId)});
+            }
+        };
+    }
+
     private net.knightsandkings.knk.paper.commands.support.CommandPermissions commandPermissions() {
         if (commandPermissions == null) {
             commandPermissions = net.knightsandkings.knk.paper.commands.support.CommandPermissions.of(
