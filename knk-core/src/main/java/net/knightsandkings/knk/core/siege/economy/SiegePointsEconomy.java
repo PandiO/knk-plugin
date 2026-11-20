@@ -51,6 +51,7 @@ public final class SiegePointsEconomy {
     private final AssistTracker assists;
     private final Map<UUID, Long> earned = new LinkedHashMap<>();
     private final Map<UUID, Long> spent = new LinkedHashMap<>();
+    private final java.util.Set<String> reversals = new java.util.HashSet<>();
     private boolean ended;
 
     public SiegePointsEconomy(String matchId, SiegePointsSettings settings) {
@@ -159,6 +160,20 @@ public final class SiegePointsEconomy {
             spent.merge(player, price, Long::sum);
         }
         return result;
+    }
+
+    /**
+     * Gives back a charge whose delivery failed (the siege shop, #868, § 5.5.2): a ledger credit of {@code amount}
+     * that no longer counts as spent, applied once per {@code reversalId}.
+     *
+     * @return true when the points went back
+     */
+    public boolean reverseCharge(String reversalId, UUID player, long amount) {
+        if (reversalId == null || player == null || amount <= 0 || reversals.contains(reversalId)) return false;
+        if (!ledger.credit(player, amount)) return false;
+        reversals.add(reversalId);
+        spent.merge(player, -amount, Long::sum);
+        return true;
     }
 
     // ---- reading ----
