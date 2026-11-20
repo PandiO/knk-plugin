@@ -288,4 +288,29 @@ class NpcNavigationOffRoadWalksTest {
         assertEquals(30, NpcNavigationService.indexBack(road, 38, 8));
         assertEquals(-1, NpcNavigationService.indexBack(road, 5, 8));
     }
+    @Test
+    void aMovingNpcLooksForAHatchAheadOnlyWhenItsProfileOpensDoors() {
+        // link H1 (PandiO/knk-workspace#779): a closed roof hatch is opened like a door, so only with open-doors
+        FakeMover shut = new FakeMover(2, START);
+        service.register(shut, new NpcAccessProfile("no-doors", false, false, java.util.Set.of(), java.util.Set.of()),
+            Settings.defaults().withCollidable(false));
+        service.navigate(mover.id(), FAR, results::add);
+        service.navigate(shut.id(), FAR, r -> { });
+        service.tick();
+        for (RoadAsk ask : List.copyOf(roadAsks)) {
+            ask.answer().complete(RoadPlan.found(List.of(floor(0.5, 64, 20.5), floor(100.5, 64, 20.5))));
+        }
+        for (WalkAsk ask : List.copyOf(walkAsks)) {
+            ask.answer().complete(OffRoadWalks.Walk.found(List.of(floor(ask.feet().x(), 64, ask.feet().z()),
+                ask.targets().get(0)), 0, "test"));
+        }
+        assertEquals(NpcNavState.MOVING, service.state(mover.id()));
+        assertEquals(NpcNavState.MOVING, service.state(shut.id()));
+        int before = mover.hatchAsks;
+        service.tick();
+        service.tick();
+
+        assertEquals(before + 2, mover.hatchAsks, "every tick while it moves");
+        assertEquals(0, shut.hatchAsks, "never without open-doors: the closed hatch blocks");
+    }
 }

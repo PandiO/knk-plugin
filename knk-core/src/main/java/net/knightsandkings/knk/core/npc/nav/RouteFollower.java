@@ -357,8 +357,14 @@ public final class RouteFollower {
         boolean anyWalked = false;
         for (int i = start; i < end; i++) {
             NavPoint p = line.get(i);
+            // a walk search's ladder cell (link H1) has no floor to stand on: the body climbs there, as the walk says
+            int ownFloor = (int) Math.round(p.y());
+            NavPoint floor = walked(i) && NpcClimbables.climbCell(world, new NavPoint(p.world(), p.x(), ownFloor + 1,
+                p.z())) ? new NavPoint(p.world(), p.x(), ownFloor, p.z()) : null;
             // a walk search's cell stands on its own floor (link C1): no continuity snap onto another level
-            NavPoint floor = walked(i) ? NavGeometry.floorNear(world, p, (int) Math.round(p.y())) : null;
+            if (floor == null && walked(i)) {
+                floor = NavGeometry.floorNear(world, p, ownFloor);
+            }
             anyWalked |= walked(i);
             if (floor == null) {
                 floor = HopPlanner.surfaceNear(world, p, refY);

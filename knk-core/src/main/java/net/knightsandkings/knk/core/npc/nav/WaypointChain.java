@@ -17,7 +17,8 @@ import net.knightsandkings.knk.core.navigation.shape.NavWorld;
  * ledge or round a wall corner, the cells between the two are searched on the walk (4-neighbour moves, a floor at most
  * {@link #STEP_HEIGHT} up or down from the cell before, the body's headroom) in a small box round them, and the turns
  * of that cell path go in as extra waypoints. When there is no such path the step stays as it was: nothing is
- * dropped. Pure; main thread.
+ * dropped. A ladder move of the walk search ({@link NpcClimbables#climbStep}, link H1) is no straight walk on floor and
+ * is kept as it is. Pure; main thread.
  */
 public final class WaypointChain {
 
@@ -45,7 +46,7 @@ public final class WaypointChain {
         List<NavPoint> out = new ArrayList<>(waypoints.size() + 4);
         NavPoint prev = from;
         for (NavPoint p : waypoints) {
-            if (prev != null && !NavGeometry.straightWalkable(world, prev, p)) {
+            if (prev != null && !NpcClimbables.climbStep(world, prev, p) && !NavGeometry.straightWalkable(world, prev, p)) {
                 out.addAll(bridge(world, prev, p));
             }
             out.add(p);
@@ -68,7 +69,8 @@ public final class WaypointChain {
         NavPoint prev = from;
         for (int i = 0; i < waypoints.size(); i++) {
             NavPoint p = waypoints.get(i);
-            if (prev != null && !NavGeometry.straightWalkable(world, prev, p)) {
+            // a ladder move of the walk search (link H1) is climbed as it is
+            if (prev != null && !NpcClimbables.climbStep(world, prev, p) && !NavGeometry.straightWalkable(world, prev, p)) {
                 List<NavPoint> extra = bridge(world, prev, p);
                 if (extra.isEmpty()) {
                     return new Split(List.copyOf(out), p, i);
