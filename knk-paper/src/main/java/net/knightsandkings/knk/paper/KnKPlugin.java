@@ -359,6 +359,8 @@ public class KnKPlugin extends JavaPlugin {
     /** What the teleport menu uses; set once the teleport engine started (after the menu registries lock). */
     private volatile net.knightsandkings.knk.paper.menu.content.TeleportMenuFeature.Teleports teleportMenuParts;
     private SiegeService siegeService;
+    /** Siege shop L3 (PandiO/knk-workspace#868): null with siege.shop.enabled off (or siege points off). */
+    private volatile net.knightsandkings.knk.paper.siege.shop.SiegeShopService siegeShop;
     /** The siege gate lockdowns (Phase 7a); read-only for road navigation (KNG-27 plan R24). Null without the gate system. */
     private net.knightsandkings.knk.paper.siege.SiegeGateController siegeGates;
     private net.knightsandkings.knk.core.siege.SiegeMatchRecorder siegeMatchRecorder;
@@ -1106,6 +1108,9 @@ public class KnKPlugin extends JavaPlugin {
                 // Siege Phase 8b: the siege menus. SiegeService is created later (initializeSiege),
                 // so the feature looks it up on every call.
                 new net.knightsandkings.knk.paper.siege.SiegeMenuFeature(() -> siegeService),
+                // Siege shop L3 (#868): the shop menus' ids, always registered so the seeds validate; the service is
+                // created later (initializeSiegeShop) and null with siege.shop.enabled off.
+                new net.knightsandkings.knk.paper.siege.shop.SiegeShopMenuFeature(() -> siegeShop),
                 statisticsVisibilityMenuFeature,
                 statisticsMenuFeature,
                 leaderboardsMenuFeature,
@@ -5040,10 +5045,22 @@ public class KnKPlugin extends JavaPlugin {
         final net.knightsandkings.knk.paper.siege.points.SiegePointsService siegePoints =
             getConfig().getBoolean("siege.points.enabled", false) ? initializeSiegePoints() : null;
 
+        // Siege shop L3 (PandiO/knk-workspace#868): the shop menus, /siege shop and item purchases with the brakes,
+        // on the match's siege points. siege.shop.enabled, default false: off registers nothing and Siege and the
+        // siege.information menu behave as before. Needs siege points (the balance it sells for).
+        if (getConfig().getBoolean("siege.shop.enabled", false)) {
+            if (siegePoints != null) {
+                this.siegeShop = initializeSiegeShop(siegePoints);
+            } else {
+                getLogger().warning("siege.shop.enabled is on but siege.points.enabled is off: the siege shop needs siege points, so it stays off");
+            }
+        }
+
         PluginCommand siegeCommand = getCommand("siege");
         if (siegeCommand != null) {
             SiegeCommand executor = new SiegeCommand(siegeService);
             executor.setPoints(siegePoints); // #866, null when off
+            executor.setShop(siegeShop); // #868, null when off
             siegeCommand.setExecutor(executor);
             siegeCommand.setTabCompleter(executor);
             getLogger().info("Registered /siege command");
@@ -5158,6 +5175,53 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.paper.siege.points.SiegePointsDamageListener(points), this);
         getLogger().info("Siege points enabled (siege.points.enabled)");
         return points;
+    }
+
+    /**
+     * Siege shop L3 (PandiO/knk-workspace#868): the shop as a match observer (after the siege points service, so a
+     * match's balance exists when its shop opens), the blueprint items it sells, its menu and its telemetry. Called
+     * from {@link #initializeSiege()} only with {@code siege.shop.enabled} and siege points on.
+     */
+    private net.knightsandkings.knk.paper.siege.shop.SiegeShopService initializeSiegeShop(
+            net.knightsandkings.knk.paper.siege.points.SiegePointsService points) {
+        var siege = siegeService;
+        var blueprints = itemBlueprintsDataAccess;
+        var materials = minecraftMaterialRefsDataAccess;
+        var assembler = new net.knightsandkings.knk.paper.item.BlueprintItemAssembler(
+            new net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl());
+        net.knightsandkings.knk.paper.siege.shop.SiegeShopService.ItemSource items = blueprintId -> blueprints == null
+            ? java.util.concurrent.CompletableFuture.completedFuture(null)
+            : blueprints.getByIdAsync(blueprintId).thenCompose(result -> {
+                var blueprint = result == null ? null : result.value().orElse(null);
+                if (blueprint == null) return java.util.concurrent.CompletableFuture.completedFuture(null);
+                return net.knightsandkings.knk.paper.kit.KitGrantPlacer.resolveMaterialNamespaceKey(blueprint, materials)
+                    .thenApply(key -> key == null || key.isBlank() ? null
+                        : assembler.assembleDefaults(blueprint, key, java.util.Map.of(), 1).itemStack());
+            });
+        var shop = new net.knightsandkings.knk.paper.siege.shop.SiegeShopService(
+            getLogger(), apiClient.getSiegeShopApi(), siege::runningMatchOf, points::economyOf,
+            uuid -> siege.cachedUser(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+            org.bukkit.Bukkit::getPlayer, items,
+            net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsSettings.from(getConfig()).enabled(),
+            telemetryEmitter != null ? new net.knightsandkings.knk.paper.siege.shop.SiegeShopTelemetry(telemetryEmitter) : null,
+            task -> getServer().getScheduler().runTask(this, task),
+            (ticks, task) -> getServer().getScheduler().runTaskLater(this, task, ticks),
+            System::currentTimeMillis);
+        var menus = menuService;
+        if (menus != null) {
+            shop.setMenus(player -> {
+                String key = net.knightsandkings.knk.core.siege.shop.ShopMenuIds.MENU_SHOP;
+                if (!menus.isMenuAvailable(key)) {
+                    menus.requestValidation(key);
+                    return false;
+                }
+                menus.openMenu(player, key, net.knightsandkings.knk.core.menu.MenuContextParams.EMPTY);
+                return true;
+            });
+        }
+        siege.addObserver(shop);
+        getLogger().info("Siege shop enabled (siege.shop.enabled)");
+        return shop;
     }
 
     /**

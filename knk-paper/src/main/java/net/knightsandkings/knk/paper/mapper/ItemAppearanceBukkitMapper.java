@@ -11,10 +11,12 @@ import org.bukkit.block.banner.Pattern;
 import org.bukkit.inventory.meta.ArmorMeta;
 import org.bukkit.inventory.meta.BannerMeta;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.inventory.meta.ShieldMeta;
 import org.bukkit.inventory.meta.trim.ArmorTrim;
 import org.bukkit.inventory.meta.trim.TrimMaterial;
 import org.bukkit.inventory.meta.trim.TrimPattern;
+import org.bukkit.potion.PotionType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -81,6 +83,23 @@ public final class ItemAppearanceBukkitMapper {
             return;
         }
         armorMeta.setTrim(new ArmorTrim(material, pattern));
+    }
+
+    /**
+     * Siege shop (PandiO/knk-workspace#867, #868): the vanilla potion type {@code key} ({@code minecraft:strong_healing})
+     * on a potion, splash or lingering potion or tipped arrow. Nothing for a null key or another meta; an unknown key is
+     * warned about and skipped.
+     */
+    public static void applyPotionType(ItemMeta meta, String key, Consumer<String> warn) {
+        if (meta == null || key == null || key.isBlank() || !(meta instanceof PotionMeta potionMeta)) {
+            return;
+        }
+        PotionType type = resolve(Registry.POTION, key);
+        if (type == null) {
+            warn.accept("unknown potion type '" + key + "' - potion type skipped");
+            return;
+        }
+        potionMeta.setBasePotionType(type);
     }
 
     /**

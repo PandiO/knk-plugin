@@ -57,6 +57,17 @@ class ItemAppearanceMapperTest {
     }
 
     @Test
+    void blueprintJsonCarriesThePotionType_868() throws Exception {
+        KnkItemBlueprint potion = ItemBlueprintMapper.toCore(mapper.readValue(
+                "{\"id\":9,\"name\":\"Splash Potion of Healing II\",\"potionType\":\"minecraft:strong_healing\"}",
+                ItemBlueprintReadDto.class));
+        assertEquals("minecraft:strong_healing", potion.potionType());
+        assertEquals("minecraft:strong_healing", potion.withGrade(null).potionType(), "kept by withGrade");
+        assertNull(ItemBlueprintMapper.toCore(mapper.readValue("{\"id\":7,\"name\":\"Sword\"}", ItemBlueprintReadDto.class)).potionType());
+        assertNull(ItemBlueprintMapper.toCore(mapper.readValue("{\"id\":7,\"potionType\":\" \"}", ItemBlueprintReadDto.class)).potionType());
+    }
+
+    @Test
     void halfATrimIsNoTrim() {
         assertNull(ItemAppearanceMapper.toArmorTrim("minecraft:silence", null));
         assertNull(ItemAppearanceMapper.toArmorTrim("", "minecraft:gold"));
