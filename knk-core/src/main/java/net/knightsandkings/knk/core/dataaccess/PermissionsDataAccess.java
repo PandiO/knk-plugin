@@ -1,6 +1,7 @@
 package net.knightsandkings.knk.core.dataaccess;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -66,6 +67,21 @@ public class PermissionsDataAccess {
     private volatile boolean unrankedLogged;
     private final Map<Integer, CompletableFuture<FetchResult<EffectivePermissionSet>>> effectiveLoads = new ConcurrentHashMap<>();
     private final Map<Integer, LoadedSet> loadedSets = new ConcurrentHashMap<>();
+    /** Told about every invalidation (#852): caches derived from a user's groups drop with the permission set. */
+    private final List<InvalidationListener> invalidationListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /**
+     * Off-road L7b (PandiO/knk-workspace#852): told when a user's permissions (grants or group memberships) may have
+     * changed, so a cache derived from the user's groups drops along with the effective set. Runs on the invalidating
+     * thread; must be cheap and must not throw.
+     */
+    public interface InvalidationListener {
+        /** {@link #invalidateEffective(int)}: this user's permissions or memberships changed. */
+        void userInvalidated(int userId);
+
+        /** {@link #invalidateAll()}: anyone's may have changed (cache refresh, a grant or membership change). */
+        void allInvalidated();
+    }
 
     /**
      * Told about every answer the API gives a check (KNG-58: the offline security cache keeps the
@@ -144,6 +160,11 @@ public class PermissionsDataAccess {
                 return result;
             })
         );
+    }
+
+    /** Adds an {@link InvalidationListener} (#852). */
+    public void addInvalidationListener(InvalidationListener listener) {
+        invalidationListeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
     public void setAnswerListener(AnswerListener listener) {
@@ -390,6 +411,7 @@ public class PermissionsDataAccess {
         checkExecutor.invalidateAll();
         effectiveExecutor.invalidateAll();
         loadedSets.clear();
+        invalidationListeners.forEach(InvalidationListener::allInvalidated);
     }
 
     /**
@@ -399,5 +421,6 @@ public class PermissionsDataAccess {
     public void invalidateEffective(int userId) {
         effectiveExecutor.invalidate(userId);
         loadedSets.remove(userId);
+        invalidationListeners.forEach(listener -> listener.userInvalidated(userId));
     }
 }

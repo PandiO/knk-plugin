@@ -3203,6 +3203,40 @@ public class KnKPlugin extends JavaPlugin {
             + settings.originY() + ", " + settings.originZ() + ". Never turn this on on a real server.");
     }
 
+    /**
+     * Off-road L7b (PandiO/knk-workspace#852): the player's group default route mode, cached per player and dropped with
+     * the permission cache (a membership change, {@code UserPermissionsChanged}, a cache refresh) and the group list
+     * ({@code PermissionGroupChanged}). Without the API nothing is wired and every command keeps today's default.
+     */
+    private void wireGroupRouteModeDefaults(net.knightsandkings.knk.paper.navigation.NavigateCommand navigateCommand) {
+        if (usersQueryApi == null || permissionGroupsDataAccess == null || cacheManager == null) {
+            return;
+        }
+        var userCache = cacheManager.getUserCache();
+        var defaults = new net.knightsandkings.knk.paper.navigation.GroupRouteModeDefaults(
+            uuid -> userCache.getStale(uuid).map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+            usersQueryApi::getGroupMemberships,
+            permissionGroupsDataAccess::listAsync,
+            net.knightsandkings.knk.paper.navigation.GroupRouteModeDefaults.DEFAULT_TTL,
+            java.time.Clock.systemUTC(), getLogger());
+        permissionGroupsDataAccess.addInvalidationListener(defaults::invalidateAll);
+        if (permissionsDataAccess != null) {
+            permissionsDataAccess.addInvalidationListener(new PermissionsDataAccess.InvalidationListener() {
+                @Override
+                public void userInvalidated(int userId) {
+                    defaults.invalidateUser(userId);
+                }
+
+                @Override
+                public void allInvalidated() {
+                    defaults.invalidateAll();
+                }
+            });
+        }
+        navigateCommand.setGroupDefaults(player -> defaults.cachedDefault(player.getUniqueId()),
+            player -> defaults.warm(player.getUniqueId()));
+    }
+
     private void registerCommands() {
         PluginCommand knkCommand = getCommand("knk");
         if (knkCommand != null) {
@@ -3384,6 +3418,8 @@ public class KnKPlugin extends JavaPlugin {
             navigateCommand.setEngine(() -> navigationEngine);
             // Off-road phase 4 (#707): the route mode words' nodes knk.navigate.mode.<word> through KnkPermissible
             navigateCommand.setModePermissions(commandPermissions());
+            // Off-road L7b (PandiO/knk-workspace#852): a group's DefaultRouteMode for a command without a mode word
+            wireGroupRouteModeDefaults(navigateCommand);
             registerTabCommand("navigate", navigateCommand);
             // Location retention (KNG-80): /knk location here|tp|orphans replaces the built-in /knk location here;
             // each action checks its own knk.admin.location* node. tp goes through the KNG-17 teleport engine.
