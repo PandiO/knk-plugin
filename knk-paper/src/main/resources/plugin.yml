@@ -277,7 +277,7 @@ commands:
 
   # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §6.1, Phase 4): a particle trail and HUD
   # along the road network to a Location, Town/District/Structure, street or named road node.
-  # Node knk.navigate (default true) checked in NavigateCommand.
+  # Node knk.navigate (default false, granted to the default rank in-house) checked in NavigateCommand.
   navigate:
     description: "Guide yourself along the roads to a place, town, district, structure, street or road node"
     usage: "/navigate <destination> [shortest|efficient|preferred] [spawn|region] | /navigate stop | /navigate"
@@ -1267,9 +1267,10 @@ permissions:
 
   knk.navigate:
     description: >-
-      /navigate - guided routes along the road network (KNG-27, Phase 4). Everyone by default; the
-      in-house permission system can take it away per group.
-    default: true
+      /navigate - guided routes along the road network (KNG-27, Phase 4). Granted through the in-house
+      permission system (the default rank holds it), so a group's deny can take it away
+      (PandiO/knk-workspace#845); a plugin.yml default true would win over that deny.
+    default: false
 
   knk.navigate.any:
     description: >-
