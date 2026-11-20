@@ -126,6 +126,8 @@ public final class PaperScenarios {
             .register(new NpcOffRoadScenario(net.knightsandkings.knk.paper.scenario.NpcOffRoadScene.Kind.UPSTAIRS))
             .register(new NpcOffRoadScenario(net.knightsandkings.knk.paper.scenario.NpcOffRoadScene.Kind.RAVINE))
             .register(new NpcKeepTowerReplayScenario())
+            // link H1 (PandiO/knk-workspace#779): a ladder and a roof hatch on an NPC's off-road leg
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.NpcLadderHatchScenario())
             .register(new NpcJaggedStraightScenario(false))
             .register(new NpcJaggedStraightScenario(true))
             .register(new NpcDoorwayCrowdScenario(false))
