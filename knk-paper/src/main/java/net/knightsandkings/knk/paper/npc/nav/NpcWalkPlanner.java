@@ -40,9 +40,9 @@ import net.knightsandkings.knk.paper.navigation.walk.WalkSnapshotService;
  * today's walk search ({@link WalkPathfinder}, the walk executor) with the walk settings' budget, and changes none of
  * them. The box covers the NPC's feet and every target plus {@code navigation.walk.capture-margin}.
  * <p>
- * The movement profile is the walk settings' with three NPC changes (agent decision C1): doors only when the NPC's
- * access profile opens doors, no ladders (a Citizens NPC following waypoints does not climb), no wading (an NPC in water
- * drowns, #490).
+ * The movement profile is the walk settings' with two NPC changes (agent decision C1): doors only when the NPC's
+ * access profile opens doors, no wading (an NPC in water drowns, #490). Ladders are climbed (link H1,
+ * PandiO/knk-workspace#779): through an open roof hatch over one, and through a closed one when the NPC opens doors.
  */
 public final class NpcWalkPlanner implements OffRoadWalks {
 
@@ -88,34 +88,61 @@ public final class NpcWalkPlanner implements OffRoadWalks {
 
     /**
      * Main thread: whether a body cannot stand in the cell with its feet at {@code (x, feetY, z)} although the walk
-     * search let it through (an open trapdoor's panel, a fence post, a top slab at head height). A door or a fence gate
-     * is no such cell: the NPC opens it (link C1, PandiO/knk-workspace#700).
+     * search let it through (an open trapdoor's panel that is no hatch, a fence post, a top slab at head height). A
+     * door or a fence gate is no such cell: the NPC opens it (link C1, PandiO/knk-workspace#700). Nor is a ladder, an
+     * open hatch over one or, for an NPC that opens doors, a closed one: the NPC climbs through (link H1,
+     * PandiO/knk-workspace#779).
      */
     @FunctionalInterface
     public interface BodyCheck {
         boolean blocked(String world, int x, int feetY, int z);
 
+        /** This check for one NPC's leg: the climbables the walk capture used, and whether the NPC opens doors. */
+        default BodyCheck forLeg(Set<String> climbables, boolean opensDoors) {
+            return this;
+        }
+
         /** The live world: the NPC navigation's own body rule ({@link BukkitNavWorld}), doors and fence gates aside. */
-        BodyCheck BUKKIT = (world, x, feetY, z) -> {
-            World w = org.bukkit.Bukkit.getWorld(world);
-            if (w == null || !w.isChunkLoaded(x >> 4, z >> 4)) {
+        BodyCheck BUKKIT = new Bukkit(net.knightsandkings.knk.core.npc.nav.NpcClimbables.DEFAULT, false);
+
+        /** {@link #BUKKIT} with a leg's climbables and door rule. */
+        record Bukkit(Set<String> climbables, boolean opensDoors) implements BodyCheck {
+            public Bukkit {
+                climbables = Set.copyOf(climbables);
+            }
+
+            @Override
+            public BodyCheck forLeg(Set<String> legClimbables, boolean legOpensDoors) {
+                return new Bukkit(legClimbables, legOpensDoors);
+            }
+
+            @Override
+            public boolean blocked(String world, int x, int feetY, int z) {
+                World w = org.bukkit.Bukkit.getWorld(world);
+                if (w == null || !w.isChunkLoaded(x >> 4, z >> 4)) {
+                    return false;
+                }
+                for (int y = feetY; y <= feetY + 1; y++) {
+                    if (y < w.getMinHeight() || y >= w.getMaxHeight()) {
+                        continue;
+                    }
+                    org.bukkit.block.Block block = w.getBlockAt(x, y, z);
+                    org.bukkit.block.data.BlockData data = block.getBlockData();
+                    if (data instanceof org.bukkit.block.data.type.Door
+                        || data instanceof org.bukkit.block.data.type.Gate) {
+                        continue;
+                    }
+                    if (BukkitNavWorld.climbable(block, climbables)
+                        || opensDoors && BukkitNavWorld.closedHatch(block, climbables)) {
+                        continue;
+                    }
+                    if (BukkitNavWorld.blocksBody(block)) {
+                        return true;
+                    }
+                }
                 return false;
             }
-            for (int y = feetY; y <= feetY + 1; y++) {
-                if (y < w.getMinHeight() || y >= w.getMaxHeight()) {
-                    continue;
-                }
-                org.bukkit.block.Block block = w.getBlockAt(x, y, z);
-                org.bukkit.block.data.BlockData data = block.getBlockData();
-                if (data instanceof org.bukkit.block.data.type.Door || data instanceof org.bukkit.block.data.type.Gate) {
-                    continue;
-                }
-                if (BukkitNavWorld.blocksBody(block)) {
-                    return true;
-                }
-            }
-            return false;
-        };
+        }
     }
 
     /** Searches again at most this often after a found path crossed cells a body cannot stand in. */
@@ -150,10 +177,37 @@ public final class NpcWalkPlanner implements OffRoadWalks {
         return out;
     }
 
-    /** The walk settings' profile for an NPC: doors as its access profile says, no ladders, no wading. */
+    /**
+     * The walk settings' profile for an NPC: doors as its access profile says, ladders as the walk settings' (link H1:
+     * Citizens climbs a ladder on a waypoint list; the search reads climbables from the captured cells in any case),
+     * no wading.
+     */
     static MovementProfile npcProfile(MovementProfile walk, boolean opensDoors) {
         return new MovementProfile(walk.headroom(), walk.maxDrop(), walk.dropPenalty(), walk.jumpCost(), opensDoors,
-            walk.doorCost(), false, walk.waterFactor(), Set.of(), walk.climbCost(), walk.wallCost());
+            walk.doorCost(), false, walk.waterFactor(), walk.climbables(), walk.climbCost(), walk.wallCost());
+    }
+
+    /**
+     * The captured terrain as an NPC's leg sees it (link H1): for an NPC that opens doors, a closed hatch over a ladder
+     * is climbable too ({@link net.knightsandkings.knk.core.npc.nav.NpcClimbables#withClosedHatches}); the NPC opens
+     * it on its way. Otherwise the terrain unchanged: a closed hatch stays solid.
+     */
+    static WalkTerrain forNpc(WalkTerrain terrain, boolean opensDoors) {
+        if (!opensDoors) {
+            return terrain;
+        }
+        net.knightsandkings.knk.core.roads.build.SurfaceGrid surface = terrain.surface();
+        return new WalkTerrain(surface, terrain.gates(),
+            net.knightsandkings.knk.core.npc.nav.NpcClimbables.withClosedHatches(terrain.cells(), (x, y, z) -> {
+                if (y < surface.minY() || y >= surface.maxY()) {
+                    return null;
+                }
+                try {
+                    return surface.isSolid(x, y, z) ? surface.floorMaterial(x, y, z) : null;
+                } catch (RuntimeException notCaptured) {
+                    return null; // a solid block the capture kept no material for (no headroom above it)
+                }
+            }));
     }
 
     /** The box over the feet and every target, plus the margin, inside the world's heights. */
@@ -225,10 +279,11 @@ public final class NpcWalkPlanner implements OffRoadWalks {
         NavigationConfig.WalkConfig config = sources.config();
         boolean opensDoors = !(subject instanceof NpcAccessSubject npc) || npc.profile().openDoors();
         MovementProfile profile = npcProfile(config.profile(), opensDoors);
+        BodyCheck legBody = body.forLeg(config.profile().climbables(), opensDoors);
         WalkBudget budget = config.budget();
         List<NavPoint> aims = List.copyOf(targets);
         CompletableFuture<Walk> out = new CompletableFuture<>();
-        capture(subject, world, feet, aims, config.captureMargin(), profile, budget, arrive, out);
+        capture(subject, world, feet, aims, config.captureMargin(), profile, legBody, budget, arrive, out);
         return out;
     }
 
@@ -237,7 +292,8 @@ public final class NpcWalkPlanner implements OffRoadWalks {
      * more with {@link #EDGE_MARGIN} (an NPC near the edge of the loaded area; agent decision C1).
      */
     private void capture(AccessSubject subject, World world, NavPoint feet, List<NavPoint> aims, int margin,
-                         MovementProfile profile, WalkBudget budget, double arrive, CompletableFuture<Walk> out) {
+                         MovementProfile profile, BodyCheck legBody, WalkBudget budget, double arrive,
+                         CompletableFuture<Walk> out) {
         GateCells gates = sources.gatesOf().apply(world.getName());
         WalkBox box = boxOver(world.getName(), feet, aims, margin, world.getMinHeight(), world.getMaxHeight());
         NavPoint aim = aims.get(0);
@@ -250,7 +306,7 @@ public final class NpcWalkPlanner implements OffRoadWalks {
             switch (captured.status()) {
                 case UNLOADED -> {
                     if (margin > EDGE_MARGIN) {
-                        capture(subject, world, feet, aims, EDGE_MARGIN, profile, budget, arrive, out);
+                        capture(subject, world, feet, aims, EDGE_MARGIN, profile, legBody, budget, arrive, out);
                     } else {
                         out.complete(Walk.none(Status.UNLOADED, "unloaded chunk in the walk's box"));
                     }
@@ -265,10 +321,10 @@ public final class NpcWalkPlanner implements OffRoadWalks {
                         out.complete(Walk.none(Status.FAILED, "access error"));
                         return;
                     }
-                    WalkTerrain terrain = captured.terrain().terrain();
+                    WalkTerrain terrain = forNpc(captured.terrain().terrain(), profile.opensDoors());
                     java.util.concurrent.atomic.AtomicReference<CellAccess> resolved =
                         new java.util.concurrent.atomic.AtomicReference<>();
-                    searchChecked(subject, terrain, () -> {
+                    searchChecked(subject, terrain, legBody, () -> {
                         if (resolved.get() == null) {
                             resolved.set(cells.get());
                         }
@@ -284,7 +340,7 @@ public final class NpcWalkPlanner implements OffRoadWalks {
      * ({@link BodyCheck}); a path through a cell a body cannot stand in is searched again with those cells closed, at
      * most {@link #MAX_BODY_RECHECKS} times (agent decision C1: the walk search's own passability is not changed).
      */
-    private void searchChecked(AccessSubject subject, WalkTerrain terrain, Supplier<CellAccess> cells,
+    private void searchChecked(AccessSubject subject, WalkTerrain terrain, BodyCheck body, Supplier<CellAccess> cells,
                                MovementProfile profile, WalkBudget budget, NavPoint feet, List<NavPoint> aims,
                                NavPoint aim, double arrive, Set<Long> closed, int rechecks, CompletableFuture<Walk> out) {
         Set<Long> closedNow = Set.copyOf(closed);
@@ -320,7 +376,8 @@ public final class NpcWalkPlanner implements OffRoadWalks {
             for (int[] b : blocked) {
                 more.add(key(b[0], b[1], b[2]));
             }
-            searchChecked(subject, terrain, cells, profile, budget, feet, aims, aim, arrive, more, rechecks + 1, out);
+            searchChecked(subject, terrain, body, cells, profile, budget, feet, aims, aim, arrive, more, rechecks + 1,
+                out);
         }));
     }
 

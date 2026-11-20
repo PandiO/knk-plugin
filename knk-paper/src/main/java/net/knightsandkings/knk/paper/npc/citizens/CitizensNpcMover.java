@@ -40,9 +40,31 @@ final class CitizensNpcMover implements NpcMover {
     }
 
     CitizensNpcMover(NPC npc, java.util.function.Consumer<CitizensNpcMover> onRemove, DryBlockExaminer dry) {
+        this(npc, onRemove, dry, null);
+    }
+
+    CitizensNpcMover(NPC npc, java.util.function.Consumer<CitizensNpcMover> onRemove, DryBlockExaminer dry,
+                     NpcHatches hatches) {
         this.npc = npc;
         this.onRemove = onRemove;
         this.dry = dry;
+        this.hatches = hatches;
+    }
+
+    /** The runtime's roof hatches (link H1), or null (no hatches opened). */
+    private final NpcHatches hatches;
+
+    /**
+     * Opens a closed roof hatch the body is about to climb through (link H1, PandiO/knk-workspace#779): one in the
+     * column of Citizens' current waypoint, or right above the head. Citizens' own door opener skips trapdoors.
+     */
+    @Override
+    public boolean openHatchAhead() {
+        if (hatches == null || !npc.isSpawned() || !(npc.getEntity() instanceof org.bukkit.entity.LivingEntity body)) {
+            return false;
+        }
+        net.citizensnpcs.api.ai.PathStrategy strategy = npc.getNavigator().getPathStrategy();
+        return hatches.ahead(body, strategy == null ? null : strategy.getCurrentDestination());
     }
 
     NPC npc() {

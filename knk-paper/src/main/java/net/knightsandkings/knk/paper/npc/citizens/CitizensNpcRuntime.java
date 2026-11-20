@@ -53,6 +53,8 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
     private static final StuckAction NO_TELEPORT = (npc, navigator) -> false;
 
     private final String registryName;
+    /** Roof hatches this runtime's NPCs opened (link H1). */
+    private final NpcHatches hatches;
 
     CitizensNpcRuntime(Plugin plugin) {
         this(plugin, REGISTRY);
@@ -62,6 +64,7 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
     CitizensNpcRuntime(Plugin plugin, String registryName) {
         this.plugin = plugin;
         this.registryName = registryName;
+        this.hatches = new NpcHatches(plugin);
         this.registry = CitizensAPI.createInMemoryNPCRegistry(registryName);
         Bukkit.getPluginManager().registerEvents(this, plugin);
     }
@@ -103,7 +106,7 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
             dry = new DryBlockExaminer(List.of(new MinecraftBlockExaminer(npc)));
             params.avoidWater(true).clearExaminers().examiner(dry);
         }
-        CitizensNpcMover mover = new CitizensNpcMover(npc, this::forget, dry);
+        CitizensNpcMover mover = new CitizensNpcMover(npc, this::forget, dry, hatches);
         npc.data().set(NPC.Metadata.JUMP_POWER_SUPPLIER,
             (java.util.function.Function<NPC, Float>) n -> jumpPower(n, mover));
         movers.put(npc.getId(), mover);
@@ -275,6 +278,7 @@ final class CitizensNpcRuntime implements NpcMoverFactory, Listener {
     }
 
     void shutdown() {
+        hatches.stop();
         for (CitizensNpcMover mover : movers.values()) {
             mover.npc().destroy();
         }
