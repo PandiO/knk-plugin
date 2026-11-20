@@ -56,7 +56,8 @@ public final class ItemBlueprintMapper {
                 tags,
                 origins,
                 ItemAppearanceMapper.toShieldBanner(dto.shieldBannerBaseColor(), dto.shieldBannerLayers()),
-                ItemAppearanceMapper.toArmorTrim(dto.armorTrimPattern(), dto.armorTrimMaterial())
+                ItemAppearanceMapper.toArmorTrim(dto.armorTrimPattern(), dto.armorTrimMaterial()),
+                dto.potionType() == null || dto.potionType().isBlank() ? null : dto.potionType().trim()
         );
     }
 

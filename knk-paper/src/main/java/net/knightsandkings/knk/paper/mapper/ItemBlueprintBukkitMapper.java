@@ -69,6 +69,10 @@ public final class ItemBlueprintBukkitMapper {
             // #232: a shield's banner (base colour + layers) and an armour piece's trim, as the blueprint (or the
             // instance a lootbox claim carries) stores them. Nothing for other materials or a plain item.
             ItemAppearanceBukkitMapper.apply(meta, blueprint.shieldBanner(), blueprint.armorTrim(), "blueprint " + blueprint.id());
+            // Siege shop (#867, #868): a potion's vanilla type (healing II, regeneration, ...).
+            ItemAppearanceBukkitMapper.applyPotionType(meta, blueprint.potionType(),
+                    message -> java.util.logging.Logger.getLogger(ItemBlueprintBukkitMapper.class.getName())
+                            .warning("blueprint " + blueprint.id() + ": " + message));
 
             itemStack.setItemMeta(meta);
         }
