@@ -326,7 +326,7 @@ public final class SurveyRunner {
         return note.length() > 500 ? note.substring(0, 500) : note;
     }
 
-    static String describe(Throwable error) {
+    public static String describe(Throwable error) {
         Throwable cause = error;
         while (cause != null && !(cause instanceof ApiException) && cause.getCause() != null) {
             cause = cause.getCause();
