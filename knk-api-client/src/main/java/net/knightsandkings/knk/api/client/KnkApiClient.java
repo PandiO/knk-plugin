@@ -152,6 +152,8 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.TerritoryApi territoryApi;
     /** Yield-area surveys (PandiO/knk-workspace#679). */
     private final net.knightsandkings.knk.core.ports.api.ProductionSurveyApi productionSurveyApi;
+    private final net.knightsandkings.knk.core.ports.api.StorageContainersApi storageContainersApi;
+    private final net.knightsandkings.knk.core.ports.api.StructureMenusApi structureMenusApi;
     private final net.knightsandkings.knk.core.ports.api.TransportLanesApi transportLanesApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
@@ -241,6 +243,10 @@ public class KnkApiClient {
                 objectMapper, authProvider, executor, debugLogging);
         this.productionSurveyApi = new net.knightsandkings.knk.api.impl.ProductionSurveyApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
+        this.storageContainersApi = new net.knightsandkings.knk.api.impl.StorageContainersApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
+        this.structureMenusApi = new net.knightsandkings.knk.api.impl.StructureMenusApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.transportLanesApi = new net.knightsandkings.knk.api.impl.TransportLanesApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -303,6 +309,16 @@ public class KnkApiClient {
     /** Yield-area surveys (PandiO/knk-workspace#679): the survey queue, reports, "survey now" and the area list. */
     public net.knightsandkings.knk.core.ports.api.ProductionSurveyApi getProductionSurveyApi() {
         return productionSurveyApi;
+    }
+
+    /** Storage terminals and displays (PandiO/knk-workspace#74): bindings, terminal pages, put and take, display samples. */
+    public net.knightsandkings.knk.core.ports.api.StorageContainersApi getStorageContainersApi() {
+        return storageContainersApi;
+    }
+
+    /** In-game structure menus (PandiO/knk-workspace#74): overview, structure menu, orders and the staff buttons' routes. */
+    public net.knightsandkings.knk.core.ports.api.StructureMenusApi getStructureMenusApi() {
+        return structureMenusApi;
     }
 
     /** Transport lanes (PandiO/knk-workspace#681): the lane list, lane reports and road connections. */
