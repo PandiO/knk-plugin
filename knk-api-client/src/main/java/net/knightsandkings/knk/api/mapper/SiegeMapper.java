@@ -14,6 +14,7 @@ import net.knightsandkings.knk.api.dto.SiegeDtos.RuntimeSpawnpointDto;
 import net.knightsandkings.knk.api.dto.SiegeDtos.RuntimeTeamDto;
 import net.knightsandkings.knk.api.dto.SiegeDtos.SkippedScenarioDto;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeConfiguration;
+import net.knightsandkings.knk.core.siege.economy.SiegePointsSettings;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeDistrict;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeGate;
 import net.knightsandkings.knk.core.domain.siege.KnkSiegeLobby;
@@ -86,7 +87,29 @@ public final class SiegeMapper {
                 or(dto.giveNavigationItem(), d.giveNavigationItem()),
                 or(dto.playerSkipMatchmakingSeconds(), d.playerSkipMatchmakingSeconds()),
                 or(dto.adminSkipMatchmakingSeconds(), d.adminSkipMatchmakingSeconds()),
-                or(dto.postMatchSeconds(), KnkSiegeConfiguration.DEFAULT_POST_MATCH_SECONDS)
+                or(dto.postMatchSeconds(), KnkSiegeConfiguration.DEFAULT_POST_MATCH_SECONDS),
+                toPoints(dto)
+        );
+    }
+
+    /** Siege shop L1 (PandiO/knk-workspace#866): missing values (an older API) fall back to the DESIGN § 5.2 defaults. */
+    static SiegePointsSettings toPoints(ConfigurationDto dto) {
+        SiegePointsSettings d = SiegePointsSettings.defaults();
+        if (dto == null) return d;
+        return new SiegePointsSettings(
+                or(dto.pointsPerKill(), d.pointsPerKill()),
+                or(dto.pointsStreakStep(), d.streakStep()),
+                or(dto.pointsStreakCap(), d.streakCap()),
+                or(dto.pointsPerAssist(), d.pointsPerAssist()),
+                or(dto.assistMinDamage(), d.assistMinDamage()),
+                or(dto.assistWindowSeconds(), d.assistWindowSeconds()),
+                or(dto.pointsPerDeath(), d.pointsPerDeath()),
+                or(dto.gateHpPerPoint(), d.gateHpPerPoint()),
+                or(dto.pointsPerCapturePercent(), d.pointsPerCapturePercent()),
+                or(dto.pointsPerCapture(), d.pointsPerCapture()),
+                or(dto.trickleAmount(), d.trickleAmount()),
+                or(dto.trickleIntervalSeconds(), d.trickleIntervalSeconds()),
+                or(dto.pointTransfersEnabled(), d.transfersEnabled())
         );
     }
 

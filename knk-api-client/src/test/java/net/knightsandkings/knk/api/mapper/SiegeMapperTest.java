@@ -302,6 +302,20 @@ class SiegeMapperTest {
         assertEquals(0, SiegeMapper.toCore(objectMapper.readValue(off, RuntimeConfigDto.class)).configuration().postMatchSeconds());
     }
 
+    /** Siege shop L1 (PandiO/knk-workspace#866): the siege points settings reach the configuration; an older API gets the defaults. */
+    @Test
+    void mapsTheSiegePointsSettings() throws IOException {
+        String json = "{\"configuration\":{\"pointsPerKill\":120,\"pointsStreakStep\":0.2,\"pointsStreakCap\":2.0,"
+                + "\"pointsPerAssist\":50,\"assistMinDamage\":6.0,\"assistWindowSeconds\":8,\"pointsPerDeath\":20,"
+                + "\"gateHpPerPoint\":4.0,\"pointsPerCapturePercent\":2,\"pointsPerCapture\":150,\"trickleAmount\":5,"
+                + "\"trickleIntervalSeconds\":30,\"pointTransfersEnabled\":true},\"lobbies\":[]}";
+        assertEquals(new net.knightsandkings.knk.core.siege.economy.SiegePointsSettings(120, 0.2, 2.0, 50, 6.0, 8, 20, 4.0, 2,
+                        150, 5, 30, true),
+                SiegeMapper.toCore(objectMapper.readValue(json, RuntimeConfigDto.class)).configuration().points());
+        assertEquals(net.knightsandkings.knk.core.siege.economy.SiegePointsSettings.defaults(),
+                SiegeMapper.toCore(readFixture()).configuration().points(), "a fixture from before #866: the § 5.2 defaults");
+    }
+
     private RuntimeConfigDto readFixture() throws IOException {
         try (InputStream in = getClass().getClassLoader().getResourceAsStream("siege/runtime-config-dev-2026-09-25.json")) {
             assertNotNull(in, "fixture missing");

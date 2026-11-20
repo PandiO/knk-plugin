@@ -43,7 +43,10 @@ public final class SiegeMatchDtos {
             // Alpha run 1 (PandiO/knk-workspace#165/#166): gate HP dealt, active and match-window seconds.
             @JsonProperty("gateDamage") double gateDamage,
             @JsonProperty("activeSeconds") long activeSeconds,
-            @JsonProperty("matchSeconds") long matchSeconds
+            @JsonProperty("matchSeconds") long matchSeconds,
+            // Siege shop L1 (PandiO/knk-workspace#866): only with siege.points.enabled; omitted otherwise (as before).
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("siegePointsEarned") Long siegePointsEarned,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("siegePointsSpent") Long siegePointsSpent
     ) {}
 
     public record ObjectiveResult(
