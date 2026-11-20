@@ -1203,6 +1203,16 @@ production:
     notable-change-blocks: 64      # block breaks/places in one area that ask for a NotableChange survey (0 = off)
     notable-cooldown-minutes: 30   # at most one notable-change survey per area this often
     areas-refresh-minutes: 10      # how often the area list is re-read (notable-change counters, area show)
+  # Transport lanes (#681, P5): measure the road route between each producer and its town's warehouses over the road
+  # network (GET api/TransportLanes/due, POST api/TransportLanes/report) and set the producers' road connection
+  # (PUT api/ProductionStructures/<id>/road-connection). Measuring runs off the main thread. Needs production.enabled
+  # and the road network (navigation).
+  logistics:
+    lanes:
+      interval-minutes: 60         # how often the headless job reads the lane list (0 = only on /knk logistics lanes measure)
+      batch: 100                   # lane pairs read per run
+      max-snap-distance: 48        # blocks (3D) from a structure's location to a road; farther = no road (Unconnected)
+      road-connections: true       # also set the producers' road connection (Connected / Unconnected) from the lanes
 lootboxes:
   enabled: true
   # Sent with every spawn so the drop log shows which server made the box.

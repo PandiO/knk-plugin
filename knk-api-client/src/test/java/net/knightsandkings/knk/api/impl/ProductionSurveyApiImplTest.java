@@ -23,6 +23,7 @@ import net.knightsandkings.knk.core.ports.api.ProductionSurveyApi;
 import net.knightsandkings.knk.core.production.survey.AreaShape;
 import net.knightsandkings.knk.core.production.survey.AreaSpec;
 import net.knightsandkings.knk.core.production.survey.SurveyDue;
+import net.knightsandkings.knk.core.production.survey.SurveyProfile;
 import net.knightsandkings.knk.core.production.survey.SurveyUnit;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -94,6 +95,25 @@ class ProductionSurveyApiImplTest {
         assertEquals(9, overlap.structureId());
         assertEquals("world", overlap.worldName(), "an overlap is in the surveyed area's world");
         assertTrue(overlap.resolve(null, -64, 320).contains(118, 100, -55));
+        assertEquals(null, item.unitTypesOf(15), "an overlap without unit types shares every unit (before #875)");
+    }
+
+    @Test
+    void surveyDue_readsEachOverlapsUnitTypes_fromUnitTypesOrItsProfile_875() {
+        body = """
+                [{"area":{"id":12,"productionStructureId":4,"shape":"Radius","worldName":"world","centerX":0,"centerY":64,
+                    "centerZ":0,"radius":8},"surveyProfileJson":"{\\"unitTypes\\":[\\"CROP\\"]}","trigger":"Admin",
+                  "overlappingSharedAreas":[
+                    {"productionAreaId":15,"productionStructureId":9,"shape":"Radius","centerX":0,"centerZ":0,"radius":4,
+                     "unitTypes":["TREE","sapling","NOPE"]},
+                    {"productionAreaId":16,"productionStructureId":10,"shape":"Radius","centerX":0,"centerZ":0,"radius":4,
+                     "surveyProfileJson":"{\\"unitTypes\\":[\\"BLOCK\\"]}"},
+                    {"productionAreaId":17,"productionStructureId":11,"shape":"Radius","centerX":0,"centerZ":0,"radius":4}]}]
+                """;
+        SurveyDue item = api.surveyDue(5).join().get(0);
+        assertEquals(java.util.EnumSet.of(SurveyProfile.UnitType.TREE, SurveyProfile.UnitType.SAPLING), item.unitTypesOf(15));
+        assertEquals(java.util.EnumSet.of(SurveyProfile.UnitType.BLOCK), item.unitTypesOf(16));
+        assertEquals(null, item.unitTypesOf(17));
     }
 
     @Test

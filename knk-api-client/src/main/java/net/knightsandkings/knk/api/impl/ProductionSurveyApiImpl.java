@@ -3,7 +3,11 @@ package net.knightsandkings.knk.api.impl;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -19,6 +23,7 @@ import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.ports.api.ProductionSurveyApi;
 import net.knightsandkings.knk.core.production.survey.AreaSpec;
 import net.knightsandkings.knk.core.production.survey.SurveyDue;
+import net.knightsandkings.knk.core.production.survey.SurveyProfile;
 import okhttp3.OkHttpClient;
 
 /**
@@ -54,7 +59,32 @@ public class ProductionSurveyApiImpl extends BaseApiImpl implements ProductionSu
                    @JsonProperty("radius") Integer radius, @JsonProperty("minX") Integer minX,
                    @JsonProperty("minY") Integer minY, @JsonProperty("minZ") Integer minZ,
                    @JsonProperty("maxX") Integer maxX, @JsonProperty("maxY") Integer maxY,
-                   @JsonProperty("maxZ") Integer maxZ) {
+                   @JsonProperty("maxZ") Integer maxZ, @JsonProperty("unitTypes") List<String> unitTypes,
+                   @JsonProperty("surveyProfileJson") String surveyProfileJson) {
+
+        /**
+         * An overlap's unit types (PandiO/knk-workspace#875): {@code unitTypes}, else those of its
+         * {@code surveyProfileJson}; null when the API sent neither (the overlap then shares every unit).
+         */
+        Set<SurveyProfile.UnitType> unitTypeSet() {
+            if (unitTypes != null) {
+                Set<SurveyProfile.UnitType> types = EnumSet.noneOf(SurveyProfile.UnitType.class);
+                for (String name : unitTypes) {
+                    try {
+                        if (name != null) {
+                            types.add(SurveyProfile.UnitType.valueOf(name.trim().toUpperCase(java.util.Locale.ROOT)));
+                        }
+                    } catch (IllegalArgumentException e) {
+                        // an unknown unit type is ignored, like SurveyProfile.parse does
+                    }
+                }
+                return types;
+            }
+            if (surveyProfileJson != null && !surveyProfileJson.isBlank()) {
+                return SurveyProfile.parse(surveyProfileJson, 0).unitTypes();
+            }
+            return null;
+        }
 
         /** @param world the world of the surveyed area for an overlap (the overlap DTO has none) */
         AreaSpec toSpec(String world) {
@@ -123,14 +153,19 @@ public class ProductionSurveyApiImpl extends BaseApiImpl implements ProductionSu
                         continue;
                     }
                     List<AreaSpec> overlaps = new ArrayList<>();
+                    Map<Integer, Set<SurveyProfile.UnitType>> unitTypes = new HashMap<>();
                     for (AreaDto overlap : row.overlappingSharedAreas() == null ? List.<AreaDto>of() : row.overlappingSharedAreas()) {
                         AreaSpec spec = overlap == null ? null : overlap.toSpec(area.worldName());
                         if (spec != null) {
                             overlaps.add(spec);
+                            Set<SurveyProfile.UnitType> types = overlap.unitTypeSet();
+                            if (types != null) {
+                                unitTypes.put(spec.areaId(), types);
+                            }
                         }
                     }
                     due.add(new SurveyDue(area, row.productionKindId(), row.productionKindName(), row.surveyProfileJson(),
-                            row.surveyProfileVersion(), row.trigger(), overlaps));
+                            row.surveyProfileVersion(), row.trigger(), overlaps, unitTypes));
                 }
                 return due;
             } catch (ApiException e) {
