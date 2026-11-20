@@ -162,6 +162,7 @@ jobs:
         # Link H1 (#779) adds npc-ladder-hatch, four trips up a tower's ladder (about 1.5 minutes): 65.
         # Link G1 (#814) adds npc-road-goal-dead-end and npc-replay-keep-hall (an NPC and a group of 5 each): 67.
         # Production P4b (#679) adds production-area-survey (a few seconds): 68.
+        # Production P6 (#74) adds storage-display-double-chest (about 3 s): 69.
         env:
           MIN_SCENARIOS: 69
         run: >-
