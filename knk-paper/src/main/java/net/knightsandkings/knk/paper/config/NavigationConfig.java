@@ -115,11 +115,15 @@ public record NavigationConfig(
      * @param particle    a Bukkit {@code Particle} name (DUST takes the colour)
      * @param color       {@code #RRGGBB}
      * @param legSpacing  {@code navigation.trail-leg-spacing} (phase 6.2, #711; since F2, #771 item 3, also with {@code guidance-v2} off): blocks
-     *                    between the fixed anchors of a walk trail. Default 3.0, today's spacing (O20, DESIGN § 7.2.2)
+     *                    between the fixed anchors of a walk trail. Default 2.0 (the developer's choice in the live test of
+     *                    2026-11-19, smoke § 13 step 5; 3.0 before F3, O20, DESIGN § 7.2.2)
      */
     public record TrailConfig(int length, int periodTicks, String particle, String color, double legSpacing) {
-        /** Default of {@code navigation.trail-leg-spacing}: today's walk-trail spacing (O20). */
-        public static final double DEFAULT_LEG_SPACING = 3.0;
+        /**
+         * Default of {@code navigation.trail-leg-spacing}: 2.0, the developer's choice in the live test of 2026-11-19
+         * (fix link F3; 3.0, {@link net.knightsandkings.knk.paper.navigation.TrailRenderer#LEG_SPACING}, before).
+         */
+        public static final double DEFAULT_LEG_SPACING = 2.0;
 
         /** Without {@code trail-leg-spacing} (callers from before #711): the default. */
         public TrailConfig(int length, int periodTicks, String particle, String color) {

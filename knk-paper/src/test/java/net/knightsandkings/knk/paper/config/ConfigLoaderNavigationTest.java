@@ -241,14 +241,15 @@ class ConfigLoaderNavigationTest {
 
     @Test
     void thePhase62KeysAreInConfigYmlWithTheDesignDefaultsAndAreChecked() throws Exception {
-        // off-road phase 6.2 (#711, DESIGN § 7.6 corrected: trail-leg-spacing 3.0 per O20 and § 7.2.2)
+        // off-road phase 6.2 (#711, DESIGN § 7.6 corrected: trail-leg-spacing 3.0 per O20 and § 7.2.2); 2.0 since F3
+        // (the developer's choice in the live test of 2026-11-19)
         YamlConfiguration bundled = bundledConfig();
         assertTrue(bundled.contains("navigation.trail-leg-spacing"));
         assertTrue(bundled.contains("navigation.cursor-jump"));
         NavigationConfig loaded = ConfigLoader.load(bundled).navigation();
-        assertEquals(3.0, loaded.trail().legSpacing());
+        assertEquals(2.0, loaded.trail().legSpacing());
         assertEquals(12.0, loaded.cursorJump());
-        assertEquals(3.0, NavigationConfig.defaults().trail().legSpacing());
+        assertEquals(2.0, NavigationConfig.defaults().trail().legSpacing());
         assertEquals(12.0, NavigationConfig.defaults().cursorJump());
         assertEquals(null, loaded.cursorParameters(), "guidance-v2 off: the session keeps no cursor");
 
