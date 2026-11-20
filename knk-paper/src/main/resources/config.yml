@@ -1190,6 +1190,19 @@ production:
       enter-crown-land: "&7Entering the crown land of &f{name}"
       enter-contested: "&6Entering contested land: &f{holders}"
       enter-wilderness: "&7Leaving &f{name}&7: wilderness"
+  # Yield-area surveys (#679, P4): count what each production area holds (trees, rock and ores, crops, flowers, water,
+  # pasture animals) and report it to the API (GET api/ProductionAreas/survey-due, POST .../surveys). Chunk snapshots are
+  # taken on the main thread within chunks-per-tick; counting and reporting run off it. Needs production.enabled.
+  surveys:
+    poll-minutes: 5                # how often the API's survey queue is read (0 = only on /knk production survey)
+    batch: 20                      # queue items read per poll
+    chunks-per-tick: 2             # chunk snapshots per server tick (main-thread budget)
+    max-area-blocks: 16000000      # an area with more blocks (columns x height) is not surveyed
+    max-area-chunks: 256           # an area spanning more chunks is not surveyed
+    scheduled-loads-chunks: false  # false: the daily survey waits until the area's chunks are loaded; requested ones load them
+    notable-change-blocks: 64      # block breaks/places in one area that ask for a NotableChange survey (0 = off)
+    notable-cooldown-minutes: 30   # at most one notable-change survey per area this often
+    areas-refresh-minutes: 10      # how often the area list is re-read (notable-change counters, area show)
 lootboxes:
   enabled: true
   # Sent with every spawn so the drop log shows which server made the box.

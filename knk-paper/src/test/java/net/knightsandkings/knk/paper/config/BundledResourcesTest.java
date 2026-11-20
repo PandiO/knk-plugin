@@ -4,6 +4,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.permissions.Permission;
+import org.bukkit.permissions.PermissionDefault;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
@@ -14,6 +15,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -65,6 +67,24 @@ class BundledResourcesTest {
             String version = new PluginDescriptionFile(reader).getVersion();
             assertTrue(version.equals("dev") || version.matches("\\d+\\.\\d+\\.\\d+\\+[0-9A-Za-z.-]+"),
                 "plugin.yml version is '" + version + "'");
+        }
+    }
+
+    @Test
+    void navigateNodesAreNotGrantedByPluginYml() throws Exception {
+        // PandiO/knk-workspace#845: a plugin.yml "default: true" beats an in-house group deny, so knk.navigate is
+        // granted through the default rank (knk-web-api SeedNavigateDefaultNode) and plugin.yml grants it to nobody.
+        // knk.navigate.any (the destination engine bypass) is not granted by default, not even to operators.
+        try (Reader reader = builtPluginYml()) {
+            PluginDescriptionFile description = new PluginDescriptionFile(reader);
+            for (String node : java.util.List.of("knk.navigate", "knk.navigate.any")) {
+                Permission permission = description.getPermissions().stream()
+                    .filter(p -> p.getName().equals(node))
+                    .findFirst()
+                    .orElse(null);
+                assertNotNull(permission, "plugin.yml declares " + node);
+                assertEquals(PermissionDefault.FALSE, permission.getDefault(), node + " is default: false");
+            }
         }
     }
 

@@ -150,6 +150,8 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.TempRegionReleasesApi tempRegionReleasesApi;
     private final net.knightsandkings.knk.core.ports.api.ItemIdentityApi itemIdentityApi;
     private final net.knightsandkings.knk.core.ports.api.TerritoryApi territoryApi;
+    /** Yield-area surveys (PandiO/knk-workspace#679). */
+    private final net.knightsandkings.knk.core.ports.api.ProductionSurveyApi productionSurveyApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
@@ -236,6 +238,8 @@ public class KnkApiClient {
                 objectMapper, authProvider, executor, debugLogging);
         this.territoryApi = new net.knightsandkings.knk.api.impl.TerritoryApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
+        this.productionSurveyApi = new net.knightsandkings.knk.api.impl.ProductionSurveyApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -291,6 +295,11 @@ public class KnkApiClient {
     /** Territory V1 (PandiO/knk-workspace#689): the inputs read and the report. */
     public net.knightsandkings.knk.core.ports.api.TerritoryApi getTerritoryApi() {
         return territoryApi;
+    }
+
+    /** Yield-area surveys (PandiO/knk-workspace#679): the survey queue, reports, "survey now" and the area list. */
+    public net.knightsandkings.knk.core.ports.api.ProductionSurveyApi getProductionSurveyApi() {
+        return productionSurveyApi;
     }
 
     /** PandiO/knk-workspace#269. */

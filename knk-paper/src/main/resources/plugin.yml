@@ -277,7 +277,7 @@ commands:
 
   # Road navigation (KNG-27, docs/specs/navigation/DESIGN.md §6.1, Phase 4): a particle trail and HUD
   # along the road network to a Location, Town/District/Structure, street or named road node.
-  # Node knk.navigate (default true) checked in NavigateCommand.
+  # Node knk.navigate (default false, granted to the default rank in-house) checked in NavigateCommand.
   navigate:
     description: "Guide yourself along the roads to a place, town, district, structure, street or road node"
     usage: "/navigate <destination> [shortest|efficient|preferred] [spawn|region] | /navigate stop | /navigate"
@@ -309,6 +309,7 @@ permissions:
       knk.admin.cache: true
       knk.admin.regions: true
       knk.admin.world.territory: true
+      knk.admin.world.production: true
       knk.admin.world.landmark: true
       knk.admin.clans: true
       knk.admin.towns: true
@@ -354,6 +355,9 @@ permissions:
 
   knk.admin.world.landmark:
     description: Access to /knk landmark create|list|show|move|delete|link|unlink, the staff-made named places players can /navigate to (off-road navigation phase 5.1, PandiO/knk-workspace#708; needs navigation.landmarks). Also gates landmark writes in the web app. Matched by knk.admin.world.*, knk.admin.* and *.
+    default: false
+  knk.admin.world.production:
+    description: Access to /knk production survey|area show (survey a production structure's yield areas now, the survey queue, draw an area's outline; PandiO/knk-workspace#679; needs production.enabled). Matched by knk.admin.world.*, knk.admin.* and *.
     default: false
   knk.admin.world.territory:
     description: Access to /knk territory here|status|rebuild (territory lookup where you stand, the territory chunk cache, rebuild it now; PandiO/knk-workspace#689; needs production.enabled). Matched by knk.admin.world.*, knk.admin.* and *.
@@ -1267,9 +1271,10 @@ permissions:
 
   knk.navigate:
     description: >-
-      /navigate - guided routes along the road network (KNG-27, Phase 4). Everyone by default; the
-      in-house permission system can take it away per group.
-    default: true
+      /navigate - guided routes along the road network (KNG-27, Phase 4). Granted through the in-house
+      permission system (the default rank holds it), so a group's deny can take it away
+      (PandiO/knk-workspace#845); a plugin.yml default true would win over that deny.
+    default: false
 
   knk.navigate.any:
     description: >-
