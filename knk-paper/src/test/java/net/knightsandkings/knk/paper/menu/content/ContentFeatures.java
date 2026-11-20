@@ -71,6 +71,10 @@ final class ContentFeatures {
                 new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)), Clock.systemUTC()));
         features.add(new LeaderboardsMenuFeature(mock(net.knightsandkings.knk.core.ports.api.LeaderboardsApi.class),
                 new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)), Clock.systemUTC()));
+        // Production P6 (PandiO/knk-workspace#74): the structures menus.
+        features.add(new StructuresMenuFeature(mock(net.knightsandkings.knk.core.ports.api.StructureMenusApi.class),
+                new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)), Clock.systemUTC(),
+                Runnable::run, player -> false, player -> null, mock(StructuresMenuFeature.StaffTools.class), () -> null));
         return features;
     }
 
