@@ -17,6 +17,8 @@ import java.util.concurrent.CompletableFuture;
 public class PermissionGroupsDataAccess {
 
     private final CachedList<PermissionGroupSummary> list;
+    /** Told about every {@link #invalidate()} (#852), e.g. the route mode defaults derived from the groups. */
+    private final List<Runnable> invalidationListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public PermissionGroupsDataAccess(PermissionGroupsQueryApi queryApi, Duration ttl, Clock clock) {
         this.list = new CachedList<>(() -> queryApi.list().thenApply(groups -> groups == null ? List.of()
@@ -34,5 +36,14 @@ public class PermissionGroupsDataAccess {
 
     public void invalidate() {
         list.invalidate();
+        invalidationListeners.forEach(Runnable::run);
+    }
+
+    /**
+     * Off-road L7b (PandiO/knk-workspace#852): runs after every {@link #invalidate()} (the {@code PermissionGroupChanged}
+     * realtime event), on the invalidating thread; must be cheap and must not throw.
+     */
+    public void addInvalidationListener(Runnable listener) {
+        invalidationListeners.add(java.util.Objects.requireNonNull(listener, "listener"));
     }
 }

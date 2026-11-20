@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.knightsandkings.knk.api.dto.PermissionGroupListItemDto;
 import net.knightsandkings.knk.core.domain.permissions.PermissionGroupSummary;
+import net.knightsandkings.knk.core.roads.route.RouteMode;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /** Content port CP5: the group list carries PermissionGroup.SalaryMultiplier. */
 class PermissionGroupsQueryApiImplTest {
@@ -34,5 +36,26 @@ class PermissionGroupsQueryApiImplTest {
 
         assertEquals(new PermissionGroupSummary(4, "Noble", 10, true, 1.1, "&e", "&6", "&e"),
                 PermissionGroupsQueryApiImpl.toSummary(noble));
+    }
+
+    @Test
+    void mapsDefaultRouteModeAndIgnoresUnknownOrMissingValues() throws Exception {
+        PermissionGroupListItemDto royal = mapper.readValue(
+                "{\"id\":5,\"name\":\"Royal\",\"weight\":30,\"defaultRouteMode\":\"shortest\"}", PermissionGroupListItemDto.class);
+        PermissionGroupListItemDto upper = mapper.readValue(
+                "{\"id\":6,\"name\":\"Knight\",\"weight\":20,\"defaultRouteMode\":\"Efficient\"}", PermissionGroupListItemDto.class);
+        PermissionGroupListItemDto none = mapper.readValue(
+                "{\"id\":1,\"name\":\"Default\",\"weight\":0,\"defaultRouteMode\":null}", PermissionGroupListItemDto.class);
+        PermissionGroupListItemDto old = mapper.readValue("{\"id\":2,\"name\":\"Old\",\"weight\":0}",
+                PermissionGroupListItemDto.class);
+        PermissionGroupListItemDto unknown = mapper.readValue(
+                "{\"id\":3,\"name\":\"Future\",\"weight\":0,\"defaultRouteMode\":\"scenic\"}", PermissionGroupListItemDto.class);
+
+        assertEquals(RouteMode.SHORTEST, PermissionGroupsQueryApiImpl.toSummary(royal).defaultRouteMode());
+        assertEquals(RouteMode.EFFICIENT, PermissionGroupsQueryApiImpl.toSummary(upper).defaultRouteMode());
+        assertNull(PermissionGroupsQueryApiImpl.toSummary(none).defaultRouteMode());
+        assertNull(PermissionGroupsQueryApiImpl.toSummary(old).defaultRouteMode());
+        assertNull(PermissionGroupsQueryApiImpl.toSummary(unknown).defaultRouteMode(), "unknown word: no default, no crash");
+        assertNull(PermissionGroupsQueryApiImpl.toSummary(unknown).defaultRouteMode(), "logged once, still null");
     }
 }
