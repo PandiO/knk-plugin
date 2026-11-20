@@ -352,12 +352,17 @@ public final class ScenarioNpcs {
 
     /** Spawns an NPC (feet position) under navigation with the scenario's settings. */
     public NpcMover spawn(NavPoint feet) {
+        return spawn(feet, NpcAccessProfile.DEFAULT);
+    }
+
+    /** As {@link #spawn(NavPoint)} with an access profile of its own (one without {@code open-doors}, link H1). */
+    public NpcMover spawn(NavPoint feet, NpcAccessProfile profile) {
         NavigationSettings.Scope scope = NavigationSettings.Scope.of(feet.world());
         NpcMover mover = factory.spawn("knk-sc-" + scene.fakeId(movers.size()) * -1 % 100000, feet,
             new NpcMoverFactory.MoverOptions(settings.value(NavigationSettings.PATHFINDER, scope),
                 settings.value(NavigationSettings.STATIONARY_TICKS, scope),
                 settings.value(NavigationSettings.COLLIDABLE, scope)));
-        service.register(mover, NpcAccessProfile.DEFAULT, NpcNavigationService.Settings.of(settings, scope));
+        service.register(mover, profile, NpcNavigationService.Settings.of(settings, scope));
         movers.add(mover);
         return mover;
     }

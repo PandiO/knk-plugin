@@ -39,10 +39,18 @@ class NpcNavigationServiceTest {
         final List<LocalLeg> legs = new ArrayList<>();
         int stops;
         boolean moving;
+        /** Times the service asked to open a hatch ahead (link H1). */
+        int hatchAsks;
 
         FakeMover(int id, NavPoint feet) {
             this.id = id;
             this.position = feet;
+        }
+
+        @Override
+        public boolean openHatchAhead() {
+            hatchAsks++;
+            return false;
         }
 
         @Override

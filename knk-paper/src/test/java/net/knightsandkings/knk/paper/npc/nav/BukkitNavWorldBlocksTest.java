@@ -112,4 +112,68 @@ class BukkitNavWorldBlocksTest {
         assertEquals(4.0, freeHeight(solid(), Map.of(1, door(true), 2, door(true))), 1e-9,
             "an open doorway has its headroom");
     }
+    // ---- link H1 (PandiO/knk-workspace#779): ladders and roof hatches, as the walk search's cells ----
+
+    private static Block ladder() {
+        Block block = mock(Block.class);
+        when(block.isPassable()).thenReturn(false); // a ladder has a collision box: its panel
+        when(block.getType()).thenReturn(org.bukkit.Material.LADDER);
+        when(block.getBlockData()).thenReturn(mock(BlockData.class));
+        return block;
+    }
+
+    private static Block trapdoor(org.bukkit.Material material, boolean open, Block below) {
+        org.bukkit.block.data.type.TrapDoor data = mock(org.bukkit.block.data.type.TrapDoor.class);
+        when(data.isOpen()).thenReturn(open);
+        Block block = mock(Block.class);
+        when(block.isPassable()).thenReturn(false);
+        when(block.getType()).thenReturn(material);
+        when(block.getBlockData()).thenReturn(data);
+        when(block.getRelative(org.bukkit.block.BlockFace.DOWN)).thenReturn(below);
+        return block;
+    }
+
+    private static Block stone() {
+        Block block = solid();
+        when(block.getType()).thenReturn(org.bukkit.Material.STONE);
+        return block;
+    }
+
+    private static final java.util.Set<String> LADDERS = java.util.Set.of("LADDER");
+
+    @Test
+    void aLadderIsClimbedNotAWall() {
+        assertTrue(BukkitNavWorld.climbable(ladder(), LADDERS));
+        assertTrue(BukkitNavWorld.passable(ladder()), "its panel stands at the side of the cell");
+        assertFalse(BukkitNavWorld.blocksBody(ladder()));
+        assertFalse(BukkitNavWorld.climbable(ladder(), java.util.Set.of()), "only the climbables given");
+    }
+
+    @Test
+    void anOpenHatchOverALadderIsClimbedAsTheWalkSearchSays() {
+        Block hatch = trapdoor(org.bukkit.Material.OAK_TRAPDOOR, true, ladder());
+        assertTrue(BukkitNavWorld.climbable(hatch, LADDERS));
+        assertTrue(BukkitNavWorld.passable(hatch));
+        assertFalse(BukkitNavWorld.blocksBody(hatch), "the NPC climbs through it (the body check passes it)");
+        assertFalse(BukkitNavWorld.closedHatch(hatch, LADDERS), "it is open");
+        assertEquals(4.0, freeHeight(ladder(), Map.of(1, hatch)), 1e-9, "no ceiling over the ladder's top");
+    }
+
+    @Test
+    void aClosedHatchStaysSolidAndIsAHatchToOpen() {
+        Block hatch = trapdoor(org.bukkit.Material.SPRUCE_TRAPDOOR, false, ladder());
+        assertFalse(BukkitNavWorld.climbable(hatch, LADDERS));
+        assertTrue(BukkitNavWorld.blocksBody(hatch), "solid, as in the walk search");
+        assertTrue(BukkitNavWorld.closedHatch(hatch, LADDERS), "an NPC with open-doors opens it");
+        assertFalse(BukkitNavWorld.closedHatch(trapdoor(org.bukkit.Material.IRON_TRAPDOOR, false, ladder()), LADDERS),
+            "an iron hatch needs redstone");
+    }
+
+    @Test
+    void aTrapdoorWithoutALadderBelowIsNoHatch() {
+        Block open = trapdoor(org.bukkit.Material.OAK_TRAPDOOR, true, stone());
+        assertFalse(BukkitNavWorld.climbable(open, LADDERS));
+        assertTrue(BukkitNavWorld.blocksBody(open), "its panel can lie across the way (C1's rule stands)");
+        assertFalse(BukkitNavWorld.closedHatch(trapdoor(org.bukkit.Material.OAK_TRAPDOOR, false, stone()), LADDERS));
+    }
 }
