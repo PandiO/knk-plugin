@@ -169,6 +169,43 @@ public final class SnapshotReplay {
         return out;
     }
 
+    /**
+     * Link G1 (PandiO/knk-workspace#814): the snapshot's road graph in the scene, to route on with the plugin's router:
+     * its nodes, and its edges whose two nodes are in the snapshot (the edges through the box are whole, their far
+     * nodes may lie outside), with the stored length and width; every edge detected, no profile, no flags.
+     */
+    public net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot roads(ScenarioScene scene) {
+        var b = net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot.builder(scene.world().getName());
+        java.util.Set<Integer> known = new java.util.HashSet<>();
+        for (NavSnapshot.Node n : snapshot().roads().nodes()) {
+            net.knightsandkings.knk.core.domain.roads.RoadNodeKind kind;
+            try {
+                kind = net.knightsandkings.knk.core.domain.roads.RoadNodeKind.valueOf(n.kind());
+            } catch (IllegalArgumentException | NullPointerException e) {
+                kind = net.knightsandkings.knk.core.domain.roads.RoadNodeKind.JUNCTION;
+            }
+            NavPoint p = inScene(scene, new double[] {n.x(), n.y(), n.z()});
+            b.addNode(new net.knightsandkings.knk.core.domain.roads.RoadNode(n.id(), (int) Math.floor(p.x()),
+                (int) Math.floor(p.y()), (int) Math.floor(p.z()), kind, n.name(), 0, false, n.plazaRadius()));
+            known.add(n.id());
+        }
+        for (NavSnapshot.Edge e : snapshot().roads().edges()) {
+            if (!known.contains(e.fromNode()) || !known.contains(e.toNode()) || e.geometry().size() < 2) {
+                continue;
+            }
+            List<int[]> geometry = new ArrayList<>();
+            for (int[] p : e.geometry()) {
+                NavPoint q = inScene(scene, new double[] {p[0], p[1], p[2]});
+                geometry.add(new int[] {(int) Math.floor(q.x()), (int) Math.floor(q.y()), (int) Math.floor(q.z())});
+            }
+            b.addEdge(new net.knightsandkings.knk.core.domain.roads.RoadEdge(e.id(), e.fromNode(), e.toNode(), geometry,
+                Math.max(e.length(), 1e-6), Math.max(e.width(), 1), java.util.OptionalInt.empty(),
+                java.util.OptionalInt.empty(), 1.0, java.util.Set.of(), List.of(), List.of(), List.of(),
+                net.knightsandkings.knk.core.domain.roads.RoadEdgeSource.DETECTED, false));
+        }
+        return b.build();
+    }
+
     /** The stored line there and back, the loop a scenario's fake road walks. */
     public List<NavPoint> loop(ScenarioScene scene) {
         List<NavPoint> there = line(scene);

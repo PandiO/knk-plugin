@@ -113,13 +113,7 @@ public final class ScenarioRoadNpcs {
         Plugin plugin = scene.services().plugin();
         // the router's answer always comes on a later tick, as the live one's does (the routing thread hands it back)
         Executor nextTick = task -> Bukkit.getScheduler().runTask(plugin, task);
-        NavigationService router = new NavigationService(new NavigationService.Deps(plugin, NavigationConfig.defaults(),
-            world -> world.equals(scene.world().getName()) ? network : RoadNetworkSnapshot.empty(world), OPEN_ROADS,
-            new WorldGuardRegionShapes(), new NavigationEligibility(id -> false, id -> false, id -> false),
-            new NavigationHud(new EtaEstimator(NavigationConfig.defaults().sessionParameters().sprintSpeed())),
-            new TrailRenderer(NavigationConfig.defaults().trail(), TickBudget.server()), nextTick,
-            // a route on one edge is quick: routed in place, answered on the next tick
-            Runnable::run, () -> (long) Bukkit.getCurrentTick(), event -> { }, plugin.getLogger(), null));
+        NavigationService router = router(scene, network);
         RoadPlanner roads = router::planRoadFor;
         metrics.setEnabled(true);
         BukkitNavWorld world = new BukkitNavWorld(null);
@@ -246,6 +240,23 @@ public final class ScenarioRoadNpcs {
         builder.addEdge(new RoadEdge(1, 1, 2, geometry, length, 3, OptionalInt.of(1), OptionalInt.empty(), 1.0,
             EnumSet.noneOf(RoadEdgeFlag.class), List.of(), List.of(), List.of(), RoadEdgeSource.DETECTED, false));
         return builder.build();
+    }
+
+    /**
+     * A road navigation service on {@code network} with the code defaults and every road open, built as the live one
+     * is: its {@link NavigationService#planRoadFor} snaps, handles components and routes as the plugin's (link G1 also
+     * routes a snapshot's road graph with it). Answers on the next tick.
+     */
+    static NavigationService router(ScenarioScene scene, RoadNetworkSnapshot network) {
+        Plugin plugin = scene.services().plugin();
+        Executor nextTick = task -> Bukkit.getScheduler().runTask(plugin, task);
+        return new NavigationService(new NavigationService.Deps(plugin, NavigationConfig.defaults(),
+            world -> world.equals(scene.world().getName()) ? network : RoadNetworkSnapshot.empty(world), OPEN_ROADS,
+            new WorldGuardRegionShapes(), new NavigationEligibility(id -> false, id -> false, id -> false),
+            new NavigationHud(new EtaEstimator(NavigationConfig.defaults().sessionParameters().sprintSpeed())),
+            new TrailRenderer(NavigationConfig.defaults().trail(), TickBudget.server()), nextTick,
+            // a scene's network is small: routed in place, answered on the next tick
+            Runnable::run, () -> (long) Bukkit.getCurrentTick(), event -> { }, plugin.getLogger(), null));
     }
 
     /** Every road open, for players and NPCs alike: the scenarios test movement, not access rules. */
