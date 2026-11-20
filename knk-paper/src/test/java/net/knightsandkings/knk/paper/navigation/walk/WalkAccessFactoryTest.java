@@ -111,6 +111,31 @@ class WalkAccessFactoryTest {
     }
 
     @Test
+    void anOpenDoorIsPassedWithoutThePlayersDoorCheck() {
+        // F3 (#710, smoke § 8): a player who may not open the keep's doors still passes one that stands open
+        fake.open.add(BlockKey.pack(6, 65, 4));
+        fake.open.add(BlockKey.pack(6, 66, 4));
+        WalkSnapshotService.WalkCapture capture = capture();
+        assertEquals(Set.of(BlockKey.pack(6, 65, 4), BlockKey.pack(6, 66, 4)), capture.openDoorBlocks());
+
+        doorsAllowed = false;
+        WalkAccessFactory.WalkAccess access = factory().prepare(player, world, fake.gates(), capture, 2);
+        assertEquals(List.of("10,65,2"), doorChecks, "only the closed garden gate is WorldGuard's question");
+        assertEquals(Set.of(BlockKey.pack(10, 65, 2)), access.doors().deniedDoorBlocks());
+        assertEquals(WalkResult.Status.FOUND, walkInto(access.resolve(), capture).status(), "through the open door");
+    }
+
+    @Test
+    void aClosedDoorIsStillThePlayersDoorCheck() {
+        fake.open.add(BlockKey.pack(10, 65, 2)); // the garden gate stands open, the house door is shut
+        WalkSnapshotService.WalkCapture capture = capture();
+        doorsAllowed = false;
+        WalkAccessFactory.WalkAccess access = factory().prepare(player, world, fake.gates(), capture, 2);
+        assertEquals(Set.of(BlockKey.pack(6, 65, 4), BlockKey.pack(6, 66, 4)), access.doors().deniedDoorBlocks());
+        assertNoWalkPath(walkInto(access.resolve(), capture), "the shut house door is denied as before");
+    }
+
+    @Test
     void aRegionsDomainIsLookedUpInTheWalksWorld() {
         // KNG-112: the hub's "house" keeps players out; the gameplay world's "house" is a different, open domain
         org.mockito.Mockito.when(world.getName()).thenReturn("gameplay");

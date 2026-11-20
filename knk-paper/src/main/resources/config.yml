@@ -822,6 +822,11 @@ navigation:
   # first route is today's; the chosen one replaces it once the searches answer (a second or two)
   road-goal-reachable: false
   road-goal-candidates: 12
+  # With road-goal-reachable (fix link F3): a candidate's score is its road length plus road-goal-walk-weight times its
+  # walk length, the least winning, so the road carries the route as far as it usefully goes and the walk starts as late
+  # as it can. The candidates include the road's nodes onward from the nearest point (within max-snap-distance). 1..100;
+  # 1 is F2's road plus walk
+  road-goal-walk-weight: 4.0
   # road-to-its-end: a road route is kept to its end when the road network is swapped while the player is within
   # max-snap-distance of the destination (today: direct mode from where the player stands)
   road-to-its-end: false
