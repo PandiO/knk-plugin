@@ -267,7 +267,7 @@ public final class SurveyRunner {
         for (AreaSpec overlap : job.due.overlaps()) {
             try {
                 shared.add(new SurveyCounter.SharedArea(overlap.areaId(), overlap.structureId(),
-                        overlap.resolve(regions, world.minY(), world.maxY())));
+                        overlap.resolve(regions, world.minY(), world.maxY()), job.due.unitTypesOf(overlap.areaId())));
             } catch (IllegalArgumentException e) {
                 logger.warning("Survey of area " + area.label() + ": overlapping area #" + overlap.areaId()
                         + " left out of the shared split: " + e.getMessage());
