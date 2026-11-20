@@ -14,5 +14,7 @@ public record PermissionGroupListItemDto(
     @JsonProperty("salaryMultiplier") Double salaryMultiplier,
     @JsonProperty("chatPrimaryColor") String chatPrimaryColor,
     @JsonProperty("chatSecondaryColor") String chatSecondaryColor,
-    @JsonProperty("nameColor") String nameColor
+    @JsonProperty("nameColor") String nameColor,
+    // PandiO/knk-workspace#852: "shortest" / "efficient" / "preferred", null = none
+    @JsonProperty("defaultRouteMode") String defaultRouteMode
 ) {}
