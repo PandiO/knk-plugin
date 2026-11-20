@@ -8,6 +8,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import net.knightsandkings.knk.core.roads.route.AStarRouter;
 import net.knightsandkings.knk.core.roads.route.AccessPolicy;
@@ -45,7 +46,7 @@ public final class LaneMeasurer {
     }
 
     private final Function<String, RoadNetworkSnapshot> snapshots;
-    private final RouterParameters parameters;
+    private final Supplier<RouterParameters> parameters;
     private final double maxSnapDistance;
     private final Clock clock;
 
@@ -54,8 +55,17 @@ public final class LaneMeasurer {
      */
     public LaneMeasurer(Function<String, RoadNetworkSnapshot> snapshots, RouterParameters parameters,
                         double maxSnapDistance, Clock clock) {
+        this(snapshots, () -> parameters, maxSnapDistance, clock);
+    }
+
+    /**
+     * @param snapshots  the road snapshot per world name (null or empty when none is loaded)
+     * @param parameters the router's parameters (class costs, snap weight), read per lane; null or failing = defaults
+     */
+    public LaneMeasurer(Function<String, RoadNetworkSnapshot> snapshots, Supplier<RouterParameters> parameters,
+                        double maxSnapDistance, Clock clock) {
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
-        this.parameters = parameters == null ? RouterParameters.defaults() : parameters;
+        this.parameters = parameters == null ? RouterParameters::defaults : parameters;
         this.maxSnapDistance = maxSnapDistance;
         this.clock = clock == null ? Clock.systemUTC() : clock;
     }
@@ -75,18 +85,19 @@ public final class LaneMeasurer {
         if (snapshot == null || snapshot.isEmpty()) {
             return skipped(due, "no road network loaded for world " + from.world());
         }
-        Optional<SnapPoint> start = snap(snapshot, from);
+        RouterParameters routerParameters = parameters();
+        Optional<SnapPoint> start = snap(snapshot, from, routerParameters);
         if (start.isEmpty()) {
             return unreachable(due, straight, "#" + due.fromStructureId() + " is more than "
                     + Math.round(maxSnapDistance) + " blocks from a road");
         }
-        Optional<SnapPoint> goal = snap(snapshot, to);
+        Optional<SnapPoint> goal = snap(snapshot, to, routerParameters);
         if (goal.isEmpty()) {
             return unreachable(due, straight, "#" + due.toStructureId() + " is more than "
                     + Math.round(maxSnapDistance) + " blocks from a road");
         }
         RouteResult result = new AStarRouter(snapshot).route(
-                new RouteRequest(start.get(), List.of(goal.get()), AccessPolicy.ALL_OPEN, parameters.classCost()));
+                new RouteRequest(start.get(), List.of(goal.get()), AccessPolicy.ALL_OPEN, routerParameters.classCost()));
         if (result.status() != RouteResult.Status.FOUND || result.route() == null) {
             return unreachable(due, straight, result.status() == RouteResult.Status.DIFFERENT_COMPONENTS
                     ? "the roads at the two structures are not connected" : "no road route");
@@ -102,9 +113,18 @@ public final class LaneMeasurer {
     }
 
     /** The nearest road point to a structure position (its Location's feet; the network is stored by floor block). */
-    private Optional<SnapPoint> snap(RoadNetworkSnapshot snapshot, LanePosition p) {
+    private Optional<SnapPoint> snap(RoadNetworkSnapshot snapshot, LanePosition p, RouterParameters routerParameters) {
         return Snapper.snapRanked(snapshot, p.x(), Math.floor(p.y()) - 1, p.z(), maxSnapDistance,
-                parameters.snapVerticalWeight(), null);
+                routerParameters.snapVerticalWeight(), null);
+    }
+
+    private RouterParameters parameters() {
+        try {
+            RouterParameters p = parameters.get();
+            return p == null ? RouterParameters.defaults() : p;
+        } catch (RuntimeException e) {
+            return RouterParameters.defaults();
+        }
     }
 
     private Outcome unreachable(LaneDue due, Double straight, String why) {
