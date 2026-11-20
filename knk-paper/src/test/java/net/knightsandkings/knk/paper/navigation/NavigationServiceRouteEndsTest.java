@@ -59,6 +59,12 @@ class NavigationServiceRouteEndsTest {
     static final int STAIR_HOUSE_LANDING = 2000000033;
     /** Today's road goal of the tower roof: about 10 blocks past where the walk to the stair leaves the road (#771 item 4). */
     static final int PAST_THE_STAIR = 2000000019;
+    /** Location 53, "Garrison Watchtower Roof" (feet), on the roof floor beside the hatch (#771 item 5, F3). */
+    static final double[] WATCHTOWER = {1401.5, 107, -541.5};
+    /** The edge the road leaves the Keep Garrison on (its north end, 1399 80 -532): F2's goal for the tower roof live. */
+    static final int GARRISON_EXIT = 2000000003;
+    /** The Keep Gate (gate structure domain 5): x 1414..1430, z -523..-516. */
+    static final double[] KEEP_GATE = {1414, -523, 1430, -516};
 
     private static DevWorldSnapshot keep;
     private static DevWorldSnapshot tower;
@@ -236,6 +242,106 @@ class NavigationServiceRouteEndsTest {
             < today.length() + todaysWalk.path().orElseThrow().length(), "less road plus walk");
     }
 
+    // ===== F3, failure 1: the road carries the route as far as it usefully goes (smoke test 2026-11-19) =====
+
+    private static NavigationConfig walkWeight(double weight) {
+        return NavigationConfig.defaults().withRouteEnds(new NavigationConfig.RouteEndsConfig(true,
+            NavigationConfig.RouteEndsConfig.DEFAULT_GOAL_CANDIDATES, false, weight));
+    }
+
+    /** The service's INFO lines during {@code body}. */
+    private List<String> infoLines(Runnable body) {
+        List<String> lines = new ArrayList<>();
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                if (r.getLevel() == java.util.logging.Level.INFO) {
+                    lines.add(r.getMessage());
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        Logger logger = Logger.getLogger("test");
+        logger.addHandler(handler);
+        try {
+            body.run();
+        } finally {
+            logger.removeHandler(handler);
+        }
+        return lines;
+    }
+
+    @Test
+    void scene2WithF2sRoadPlusWalkTheRoadStopsAtTheGarrisonExitAsInTheSmokeTest() {
+        service(tower, walkWeight(1));
+        Route chosen = navigateTo("Keep Tower Roof", TOWER);
+        assertEquals(GARRISON_EXIT, chosen.end().edgeId(), chosen.end().toString());
+        assertEquals(-532, chosen.end().z(), 1);
+        WalkResult walk = walkFromTheEnd(chosen, TOWER);
+        assertTrue(walk.path().orElseThrow().length() > 190, "a long walk, as the live 202: " + walk);
+    }
+
+    @Test
+    void scene2TheRoadGoesIntoTheKeepGateAndTheWalkIsTheShortest() {
+        service(tower, NavigationConfig.defaults());
+        Route today = navigateTo("Keep Tower Roof", TOWER);
+        double todaysWalk = walkFromTheEnd(today, TOWER).path().orElseThrow().length();
+        service.stop(player);
+
+        service(tower, keysOn(true, false));
+        List<String> log = infoLines(() -> navigateTo("Keep Tower Roof", TOWER));
+        Route chosen = route();
+        double[] end = chosen.end().point();
+        assertTrue(end[0] >= KEEP_GATE[0] - 1 && end[2] >= KEEP_GATE[1], "through the garrison, into the Keep Gate: "
+            + chosen.end());
+        WalkResult walk = walkFromTheEnd(chosen, TOWER);
+        assertEquals(WalkResult.Status.FOUND, walk.status(), walk.toString());
+        assertTrue(walk.path().orElseThrow().length() <= todaysWalk, "no longer than from node #74's street: " + walk);
+        assertTrue(chosen.length() > today.length() - 20, "the road carries the route: " + chosen.length());
+
+        assertEquals(1, log.size(), "one INFO line per choice: " + log);
+        String line = log.get(0);
+        assertTrue(line.contains("road goal for Keep Tower Roof") && line.contains("walk weight 4.0"), line);
+        assertTrue(line.contains("(1408 84 -517)"), "node #74, the road onward from today's goal, is a candidate: " + line);
+        assertTrue(line.contains("(1399 80 -532) road"), "the garrison exit with its road and walk numbers: " + line);
+        assertTrue(line.contains("CHOSEN"), line);
+    }
+
+    @Test
+    void scene3WithF2sRoadPlusWalkTheWatchtowerGoalStaysUnderTheWatchtowerAsInTheSmokeTest() {
+        service(tower, NavigationConfig.defaults());
+        Route today = navigateTo("Garrison Watchtower Roof", WATCHTOWER);
+        assertEquals(GARRISON_EXIT, today.end().edgeId(), "under the watchtower: " + today.end());
+        service.stop(player);
+
+        service(tower, walkWeight(1));
+        Route chosen = navigateTo("Garrison Watchtower Roof", WATCHTOWER);
+        assertTrue(chosen.end().distanceTo(today.end()) < 1, "not moved by the key: " + chosen.end());
+    }
+
+    @Test
+    void scene3TheWatchtowersWalkStartsWhereItIsShortest() {
+        service(tower, NavigationConfig.defaults());
+        Route today = navigateTo("Garrison Watchtower Roof", WATCHTOWER);
+        double todaysWalk = walkFromTheEnd(today, WATCHTOWER).path().orElseThrow().length();
+        service.stop(player);
+
+        service(tower, keysOn(true, false));
+        Route chosen = navigateTo("Garrison Watchtower Roof", WATCHTOWER);
+        assertNotEquals(GARRISON_EXIT, chosen.end().edgeId(), "moved off the road under the watchtower: " + chosen.end());
+        WalkResult walk = walkFromTheEnd(chosen, WATCHTOWER);
+        assertEquals(WalkResult.Status.FOUND, walk.status(), walk.toString());
+        assertTrue(walk.path().orElseThrow().length() < todaysWalk - 25, "a much shorter walk: " + walk + " vs " + todaysWalk);
+        assertTrue(chosen.length() > today.length(), "the road carries the route further: " + chosen.length());
+    }
+
     // ===== #771 item 5: a network swap inside max-snap-distance =====
 
     private void networkSwapInsideMaxSnap(NavigationConfig config) {
@@ -265,6 +371,63 @@ class NavigationServiceRouteEndsTest {
         runSearches();
         assertFalse(service.isDirect(playerId));
         assertEquals(STAIR_HOUSE_LANDING, route().end().edgeId(), "the same road goal on the new network");
+    }
+
+    // ===== F3, failure 2 (#780): a route replacement does not repeat an announced maneuver =====
+
+    /** The chat lines "In 6 m: Turn left ..." the player was sent, in order. */
+    private List<String> maneuverLines() {
+        List<String> lines = new ArrayList<>();
+        mockingDetails(player).getInvocations().forEach(i -> {
+            if (i.getMethod().getName().equals("sendMessage") && i.getArguments().length == 1
+                && i.getArguments()[0] instanceof net.kyori.adventure.text.Component c) {
+                String text = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(c);
+                if (text.matches("\\[Road\\] In .*")) {
+                    lines.add(text);
+                }
+            }
+        });
+        return lines;
+    }
+
+    private void tickStill(int ticks) {
+        for (int i = 0; i < ticks; i++) {
+            tick.incrementAndGet();
+            service.tickAll();
+        }
+    }
+
+    /** Navigate, stand still while the goal choice and two live-tag network swaps replace the route. */
+    private List<String> maneuversSaidStandingStill(NavigationConfig config) {
+        moveTo(new double[] {1394.5, 46, -518.5}); // on the road, 5 blocks before the junction at node 76
+        service(tower, config);
+        service.navigate(player, Destination.point("Keep Tower Roof", DevWorldSnapshot.WORLD, TOWER[0], TOWER[1], TOWER[2]));
+        tickStill(20);
+        runSearches();
+        tickStill(20);
+        service.onNetworkChanged(DevWorldSnapshot.WORLD);
+        tickStill(20);
+        runSearches();
+        tickStill(20);
+        service.onNetworkChanged(DevWorldSnapshot.WORLD);
+        runSearches();
+        tickStill(20);
+        return maneuverLines();
+    }
+
+    @Test
+    void withTheKeysOnAReplacedRouteDoesNotRepeatAnAnnouncedManeuver() {
+        List<String> said = maneuversSaidStandingStill(keysOn(true, true));
+        assertEquals(List.of("[Road] In 5 m: Take the road on the left"), said,
+            "the goal choice and two network swaps replace the route; the turn is said once");
+    }
+
+    @Test
+    void withTheKeysOffANetworkSwapStillRepeatsItAsToday() {
+        // flag-off identity: today every silent replacement (here the two live-tag swaps) says the turn again
+        List<String> said = maneuversSaidStandingStill(NavigationConfig.defaults());
+        assertEquals(3, said.size(), said.toString());
+        assertEquals(1, new java.util.HashSet<>(said).size(), said.toString());
     }
 
     // ===== flag-off identity and NPC plans =====
@@ -345,6 +508,12 @@ class NavigationServiceRouteEndsTest {
         assertFalse(defaults.reachableGoal());
         assertFalse(defaults.roadToItsEnd());
         assertEquals(12, defaults.goalCandidates());
+        assertEquals(4, defaults.goalWalkWeight(), 1e-9, "F3: road-goal-walk-weight");
+        assertEquals(4, new NavigationConfig.RouteEndsConfig(true, 12, false).goalWalkWeight(), 1e-9);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+            () -> new NavigationConfig.RouteEndsConfig(true, 12, false, 0.5).validate());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+            () -> new NavigationConfig.RouteEndsConfig(true, 12, false, 101).validate());
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
             () -> new NavigationConfig.RouteEndsConfig(true, 0, false).validate());
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,

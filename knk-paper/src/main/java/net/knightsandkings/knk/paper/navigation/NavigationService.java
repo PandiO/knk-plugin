@@ -301,6 +301,9 @@ public final class NavigationService implements SiegeMatchObserver {
     public static final int HUD_TICKS = 10;
     /** The next maneuver is announced (chat, boss bar) within this many blocks (DESIGN §6.4). */
     public static final double MANEUVER_ANNOUNCE_DISTANCE = 20;
+
+    /** F3 (#780): two maneuvers with the same text this close (blocks) are the same instruction on a replaced route. */
+    static final double SAME_MANEUVER_DISTANCE = 2;
     /** A teleport farther than this ends the session (DESIGN §6.4). */
     public static final double TELEPORT_END_DISTANCE = 16;
     /**
@@ -385,6 +388,12 @@ public final class NavigationService implements SiegeMatchObserver {
         double startLegClosestToRoute;
         int generation;
         int announcedManeuvers;
+        /**
+         * Fix link F3 (#780, with {@code road-goal-reachable} or {@code road-to-its-end}): the maneuvers said in chat
+         * since the last route that was not a silent replacement. A replacement (the road-goal choice, a live-tag network
+         * swap) does not say them again.
+         */
+        final List<Maneuver> spokenManeuvers = new ArrayList<>();
         boolean hintShown;
         long lastRecheckTick;
         /**
@@ -1460,7 +1469,8 @@ public final class NavigationService implements SiegeMatchObserver {
             return;
         }
         double[] target = a.target.clone();
-        List<SnapPoint> candidates = RoadGoalChoice.candidates(a.snapshot, target[0], target[1], target[2],
+        // F3: the road's nodes onward from today's goal are candidates too (the road can carry the route further)
+        List<SnapPoint> candidates = RoadGoalChoice.candidatesAlongRoad(a.snapshot, target[0], target[1], target[2],
             routerParameters.maxSnapDistance(), deps.config().routeEnds().goalCandidates(), a.goals.get(0));
         GoalChoice choice = new GoalChoice(a.goalChoice, a.snapshot, target, candidates, walkWeights(a));
         searchGoalCandidate(a, choice);
@@ -1539,8 +1549,8 @@ public final class NavigationService implements SiegeMatchObserver {
             }
         }
         if (reached.isEmpty()) {
-            deps.logger().fine("[Navigation] " + a.player.getName() + ": no road goal reaches " + a.destination.name()
-                + " on foot; the nearest road point stays");
+            deps.logger().info(goalChoiceLog(a, choice, List.of(), null, deps.config().routeEnds().goalWalkWeight())
+                + "; none reached on foot, the nearest road point stays");
             return;
         }
         Location feet = a.player.getLocation();
@@ -1553,6 +1563,7 @@ public final class NavigationService implements SiegeMatchObserver {
             destinationRegions(a.player, a.destination, a.goals, a.target));
         SnapPoint from = connectedStart(snapshot, feet, start.get(), a.goals);
         RouteMode mode = a.mode;
+        double walkWeight = deps.config().routeEnds().goalWalkWeight();
         deps.routing().execute(() -> {
             List<RoadGoalChoice.Option> options = new ArrayList<>();
             for (int i : reached) {
@@ -1568,9 +1579,45 @@ public final class NavigationService implements SiegeMatchObserver {
                     deps.logger().log(Level.FINE, "[Navigation] Road goal routing failed", e);
                 }
             }
-            Optional<RoadGoalChoice.Option> best = RoadGoalChoice.best(options);
-            deps.mainThread().execute(() -> goalChosen(a, choice, best.orElse(null)));
+            // F3: the walk weighs more than the road, so the walk starts as late as the road usefully carries the route
+            Optional<RoadGoalChoice.Option> best = RoadGoalChoice.best(options, walkWeight);
+            deps.mainThread().execute(() -> {
+                if (goalChoiceCurrent(a, choice)) {
+                    deps.logger().info(goalChoiceLog(a, choice, options, best.orElse(null), walkWeight));
+                }
+                goalChosen(a, choice, best.orElse(null));
+            });
         });
+    }
+
+    /**
+     * F3: one INFO line per road-goal choice (once per route, with {@code road-goal-reachable} only): every candidate with
+     * its edge, position, road and walk lengths (or why it is out) and score, and the chosen one. The smoke test of
+     * 2026-11-19 could not see these at FINE.
+     */
+    private String goalChoiceLog(Active a, GoalChoice choice, List<RoadGoalChoice.Option> options,
+                                RoadGoalChoice.Option best, double walkWeight) {
+        StringBuilder sb = new StringBuilder(String.format(Locale.ROOT,
+            "[Navigation] %s: road goal for %s, %d candidates (walk weight %.1f):", a.player.getName(),
+            a.destination.name(), choice.candidates.size(), walkWeight));
+        for (int i = 0; i < choice.candidates.size(); i++) {
+            SnapPoint c = choice.candidates.get(i);
+            sb.append(String.format(Locale.ROOT, " #%d edge %d (%.0f %.0f %.0f)", i + 1, c.edgeId(), c.x(), c.y(), c.z()));
+            RoadGoalChoice.Option o = options.stream().filter(op -> op.goal() == c).findFirst().orElse(null);
+            if (o != null) {
+                sb.append(String.format(Locale.ROOT, " road %.0f + walk %.0f = score %.0f", o.roadLength(), o.walkLength(),
+                    o.score(walkWeight)));
+                if (o == best) {
+                    sb.append(" CHOSEN");
+                }
+            } else if (i < choice.paths.size() && choice.paths.get(i) != null) {
+                sb.append(String.format(Locale.ROOT, " walk %.0f, no road route", choice.paths.get(i).length()));
+            } else {
+                sb.append(" not reached on foot");
+            }
+            sb.append(i == 0 ? " (today's);" : ";");
+        }
+        return sb.toString();
     }
 
     /** Main thread: the chosen goal replaces today's (a fresh route, taken as it is), or keeps it with its walk path. */
@@ -2935,6 +2982,9 @@ public final class NavigationService implements SiegeMatchObserver {
         Player player = a.player;
         Route route = effect.route();
         a.announcedManeuvers = 0;
+        if (effect.reason() != RouteReason.NETWORK_CHANGED || !routeEndsKeysOn()) {
+            a.spokenManeuvers.clear(); // F3: only a silent replacement keeps what was said
+        }
         switch (effect.reason()) {
             case INITIAL -> {
                 player.sendMessage(NavigationMessages.started(a.destination.name(), route.length(), eta));
@@ -3112,6 +3162,25 @@ public final class NavigationService implements SiegeMatchObserver {
         }
     }
 
+    /** F3: either route-end key is on (the road-goal choice and road-to-its-end replace routes silently). */
+    private boolean routeEndsKeysOn() {
+        return deps.config().routeEnds().reachableGoal() || deps.config().routeEnds().roadToItsEnd();
+    }
+
+    /**
+     * F3 (#780): the same instruction at the same node (within {@link #SAME_MANEUVER_DISTANCE} blocks) was said for a
+     * route this one silently replaced. Always false with the route-end keys off, whose replacements clear the list.
+     */
+    private static boolean alreadySpoken(Active a, Maneuver next) {
+        for (Maneuver m : a.spokenManeuvers) {
+            if (m.text().equals(next.text())
+                && distance(m.position()[0], m.position()[1], m.position()[2], next.position()) <= SAME_MANEUVER_DISTANCE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void guidance(Active a, GuidanceEffect effect) {
         long since = deps.tick().getAsLong() - a.startedTick;
         Route route = a.route().orElse(null);
@@ -3125,7 +3194,10 @@ public final class NavigationService implements SiegeMatchObserver {
             int index = a.session.maneuvers().indexOf(next);
             if (index >= a.announcedManeuvers) {
                 a.announcedManeuvers = index + 1;
-                a.player.sendMessage(NavigationMessages.maneuver(effect.metersToNext(), next.text()));
+                if (!alreadySpoken(a, next)) {
+                    a.player.sendMessage(NavigationMessages.maneuver(effect.metersToNext(), next.text()));
+                    a.spokenManeuvers.add(next);
+                }
             }
         }
         if (since % deps.trail().periodTicks() == 0) {
