@@ -77,6 +77,16 @@ public final class ScenarioNpcs {
 
     private ScenarioNpcs(ScenarioScene scene, List<NavPoint> loop, NpcMoverFactory factory, NavigationSettings settings,
                          AccessRules rules, List<RoadPlanner.GateCrossing> gates) {
+        this(scene, loop, factory, settings, rules, gates, null);
+    }
+
+    /**
+     * @param network a road graph to route on with the plugin's router (link G1), with the road goal candidates on it;
+     *                null: the fake road round {@code loop}
+     */
+    private ScenarioNpcs(ScenarioScene scene, List<NavPoint> loop, NpcMoverFactory factory, NavigationSettings settings,
+                         AccessRules rules, List<RoadPlanner.GateCrossing> gates,
+                         net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot network) {
         this.scene = scene;
         this.loop = HopPlanner.resampleKeepingCorners(loop, 1.0);
         this.gates = List.copyOf(gates);
@@ -90,8 +100,18 @@ public final class ScenarioNpcs {
         this.rules = rules;
         this.world = world;
         Consumer<String> logLine = line -> log.add(new LogLine(tick, line));
-        service = new NpcNavigationService(withWalks(scene, new NpcNavigationService.Ports(this::plan, this::prepare,
-            world, metrics, System::nanoTime, logLine, rules)), 4);
+        RoadPlanner roads = this::plan;
+        net.knightsandkings.knk.core.npc.nav.RoadGoals roadGoals = null;
+        if (network != null) {
+            net.knightsandkings.knk.paper.navigation.NavigationService router = ScenarioRoadNpcs.router(scene, network);
+            roads = router::planRoadFor;
+            roadGoals = new net.knightsandkings.knk.paper.npc.nav.NpcRoadGoals(router::roadNetwork,
+                () -> net.knightsandkings.knk.paper.config.NavigationConfig.defaults().routerParameters()
+                    .maxSnapDistance());
+        }
+        NpcNavigationService.Ports ports = withWalks(scene, new NpcNavigationService.Ports(roads, this::prepare,
+            world, metrics, System::nanoTime, logLine, rules));
+        service = new NpcNavigationService(roadGoals == null ? ports : ports.withRoadGoals(roadGoals), 4);
         groups = new NavGroupService(new NavGroupService.Ports(service, world, rules, metrics,
             System::nanoTime, logLine));
         // bodies with collision on (link M7), as the plugin wires them
@@ -147,6 +167,31 @@ public final class ScenarioNpcs {
             scene.uniqueName("npcs").replace('_', '-')).orElseThrow(
                 () -> new ScenarioAssertionError("Citizens did not start for the scenario"));
         ScenarioNpcs npcs = new ScenarioNpcs(scene, loop, factory, settings, rules, gates);
+        npcs.task = Bukkit.getScheduler().runTaskTimer(scene.services().plugin(), npcs::tick, 1L, 1L);
+        return npcs;
+    }
+
+    /**
+     * Link G1 (PandiO/knk-workspace#814): as {@link #start(ScenarioScene, List, NavigationSettings, AccessRules, List)},
+     * routed on a real road graph ({@code network}, scene coordinates) with the plugin's router
+     * ({@link net.knightsandkings.knk.paper.navigation.NavigationService#planRoadFor}) and the road goal candidates on
+     * it ({@link net.knightsandkings.knk.paper.npc.nav.NpcRoadGoals}, {@code max-snap-distance}'s code default), as the
+     * plugin wires them; the walk search as {@link #withWalks}.
+     */
+    public static ScenarioNpcs startOnRoads(ScenarioScene scene,
+                                            net.knightsandkings.knk.core.roads.route.RoadNetworkSnapshot network,
+                                            NavigationSettings settings, AccessRules rules) {
+        CitizensBootstrap.unavailableReason().ifPresent(reason -> {
+            throw new ScenarioAssertionError("NPC scenarios need Citizens: " + reason);
+        });
+        NpcMoverFactory factory = CitizensBootstrap.start(scene.services().plugin(),
+            scene.uniqueName("npcs").replace('_', '-')).orElseThrow(
+                () -> new ScenarioAssertionError("Citizens did not start for the scenario"));
+        // the fake road is not used: a placeholder loop for the parts that read it
+        NavPoint origin = new NavPoint(scene.world().getName(), scene.worldX(0), scene.worldY(0), scene.worldZ(0));
+        List<NavPoint> loop = List.of(origin, new NavPoint(origin.world(), origin.x() + 1, origin.y(), origin.z()),
+            origin);
+        ScenarioNpcs npcs = new ScenarioNpcs(scene, loop, factory, settings, rules, List.of(), network);
         npcs.task = Bukkit.getScheduler().runTaskTimer(scene.services().plugin(), npcs::tick, 1L, 1L);
         return npcs;
     }

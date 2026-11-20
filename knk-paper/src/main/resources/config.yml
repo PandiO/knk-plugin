@@ -614,6 +614,15 @@ npc:
     # With an end too far from a road (or no road network): the longest trip, in blocks, walked as off-road hops.
     # Further than this the order fails; NPCs never cross terrain in a straight line.
     walk-only-blocks: 64
+    # A point destination off the road (link G1, PandiO/knk-workspace#814): the road goal is chosen as for players with
+    # navigation.road-goal-reachable. Today's goal, the nearest point of each road edge within
+    # navigation.max-snap-distance of the destination and the road's nodes onward (at most 12) each get a road route
+    # and one walk search with the NPC's access; the least road plus road-goal-walk-weight times walk wins. None
+    # reached: today's goal, as before. A group takes its leader's choice. Needs navigation.walk.enabled. Off by
+    # default until tested; it can be set per world, region, template or assignment.
+    road-goal-reachable: false
+    # With road-goal-reachable: a block walked counts as this many blocks of road (1..100; players' default too).
+    road-goal-walk-weight: 4.0
     # The trespass guard logs and counts an NPC that entered a region its current rules deny (it must never happen).
     # true: also stop that NPC and plan its route again. For dev servers.
     stop-on-trespass: false
