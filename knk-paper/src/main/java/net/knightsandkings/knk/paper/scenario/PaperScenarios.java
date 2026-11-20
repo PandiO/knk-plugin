@@ -158,6 +158,8 @@ public final class PaperScenarios {
             // P2c (PandiO/knk-workspace#677): rural structure regions top level, the territory lookup
             .register(new RuralStructureRegionScenario())
             // P4b (PandiO/knk-workspace#679): a yield-area survey of real blocks from chunk snapshots
-            .register(new ProductionAreaSurveyScenario());
+            .register(new ProductionAreaSurveyScenario())
+            // P6 (PandiO/knk-workspace#74): a display double chest keeps its tagged sample from a hopper
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.StorageDisplayDoubleChestScenario());
     }
 }
