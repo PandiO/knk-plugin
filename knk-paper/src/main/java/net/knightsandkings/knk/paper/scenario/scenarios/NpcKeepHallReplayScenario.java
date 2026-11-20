@@ -198,6 +198,17 @@ public final class NpcKeepHallReplayScenario implements Scenario<ScenarioScene>,
                 " after %.1f s", took / 20.0), npcs.service().roadGoalChoices(), npcs.service().roadGoalsMoved(),
             npcs.service().offRoadWalks(), npcs.service().offRoadHops(),
             npcs.metrics().total(Event.STUCK_ENGINE) + npcs.metrics().total(Event.STUCK_NO_PROGRESS),
-            npcs.metrics().total(Event.FELL)));
+            npcs.metrics().total(Event.FELL)) + "; " + lastChoice(npcs));
+    }
+
+    /** The last road goal choice in the run log (the candidates, their road and walk lengths and the chosen one). */
+    static String lastChoice(ScenarioNpcs npcs) {
+        String last = "no road goal choice";
+        for (ScenarioNpcs.LogLine line : npcs.log()) {
+            if (line.text().contains(" road goal for ")) {
+                last = line.text();
+            }
+        }
+        return last;
     }
 }
