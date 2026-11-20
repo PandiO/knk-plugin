@@ -435,6 +435,31 @@ class NavigationServiceRouteEndsTest {
             && l.contains("start feet 1400.5 125.0 -541.5")), log.toString());
     }
 
+    // ===== F3, failure 4 (#710, smoke § 8): the open door at 1405 104 -494 =====
+
+    @Test
+    void theOpenKeepDoorBlocksTheWayWithEitherFlagOnlyWhenItIsDeniedAsIfShut() {
+        // the spiral stair's landing door (spruce, open) on the way up to the Keep Tower Roof; the search starts below it
+        assertTrue(tower.states.get(net.knightsandkings.knk.core.util.BlockKey.pack(1405, 104, -494)).contains("open=true"));
+        double[] from = {1402.5, 96, -496.5};
+        NavigationConfig.WalkConfig walk = NavigationConfig.defaults().walk();
+        WalkBox box = WalkBox.around(DevWorldSnapshot.WORLD, from[0], from[1], from[2], TOWER[0], TOWER[1] - 1, TOWER[2],
+            walk.captureMargin(), -64, 320);
+        var terrain = tower.capture(box).terrain();
+        CellAccess deniedDoor = new net.knightsandkings.knk.core.roads.walk.DoorCellAccess(List.of(
+            net.knightsandkings.knk.core.util.BlockKey.pack(1405, 104, -494),
+            net.knightsandkings.knk.core.util.BlockKey.pack(1405, 105, -494)), MovementProfile.PLAYER_HEADROOM);
+        for (boolean guidanceV2 : new boolean[] {false, true}) {
+            WalkRequest request = WalkRequest.toPoint(terrain, from[0], from[1], from[2], TOWER[0], TOWER[1] - 1, TOWER[2], 4)
+                .withBudget(walk.budget()).withProfile(walk.profile(guidanceV2));
+            WalkResult open = new WalkSearch().find(request);
+            assertEquals(WalkResult.Status.FOUND, open.status(), "guidance-v2 " + guidanceV2 + ": " + open);
+            WalkResult denied = new WalkSearch().find(request.withAccess(deniedDoor));
+            assertEquals(WalkResult.Status.NO_PATH, denied.status(), "guidance-v2 " + guidanceV2 + ": " + denied);
+            assertTrue(denied.partialPath().isPresent(), "a partial trail up to the door, as live: " + denied);
+        }
+    }
+
     // ===== F3, failure 2 (#780): a route replacement does not repeat an announced maneuver =====
 
     /** The chat lines "In 6 m: Turn left ..." the player was sent, in order. */
