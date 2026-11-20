@@ -42,6 +42,8 @@ class WalkCaptureTest {
     static final class FakeWorld implements SpanExtractor.BlockSource {
         final Map<Long, String> blocks = new HashMap<>();
         final Map<Long, Integer> gateCells = new HashMap<>();
+        /** Blocks whose block state is open (doors, trapdoors). */
+        final java.util.Set<Long> open = new java.util.HashSet<>();
         int groundY = 64;
 
         FakeWorld set(int x, int y, int z, String material) {
@@ -72,8 +74,23 @@ class WalkCaptureTest {
             return at(x, y, z);
         }
 
+        @Override
+        public boolean isOpen(int x, int y, int z) {
+            return open.contains(BlockKey.pack(x, y, z));
+        }
+
         SpanExtractor.BlockSource chunk(int chunkX, int chunkZ) {
-            return (lx, y, lz) -> at((chunkX << 4) + lx, y, (chunkZ << 4) + lz);
+            return new SpanExtractor.BlockSource() {
+                @Override
+                public String materialAt(int lx, int y, int lz) {
+                    return at((chunkX << 4) + lx, y, (chunkZ << 4) + lz);
+                }
+
+                @Override
+                public boolean isOpen(int lx, int y, int lz) {
+                    return open.contains(BlockKey.pack((chunkX << 4) + lx, y, (chunkZ << 4) + lz));
+                }
+            };
         }
 
         GateCells gates() {

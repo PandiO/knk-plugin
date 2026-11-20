@@ -16,7 +16,7 @@ import net.knightsandkings.knk.core.navigation.shape.NavWorld;
 import net.knightsandkings.knk.paper.regions.RegionIds;
 
 /** {@link NavWorld} on the Bukkit world: loaded chunks only, never loading one. Main thread. */
-public final class BukkitNavWorld implements NavWorld {
+public final class BukkitNavWorld implements NavWorld, net.knightsandkings.knk.core.npc.nav.NpcClimbables.Climbs {
 
     private final RegionIds regionIds;
 
@@ -45,13 +45,15 @@ public final class BukkitNavWorld implements NavWorld {
         }
         Block floor = w.getBlockAt(x, floorY, z);
         Material type = floor.getType();
-        return type.isSolid() && !Tag.LEAVES.isTagged(type) && passable(w.getBlockAt(x, floorY + 1, z))
+        // a ladder or an open hatch is climbed, never stood on (link H1, as the walk search's cells)
+        return type.isSolid() && !Tag.LEAVES.isTagged(type) && !climbable(floor, net.knightsandkings.knk.core.npc.nav
+            .NpcClimbables.DEFAULT) && passable(w.getBlockAt(x, floorY + 1, z))
             && passable(w.getBlockAt(x, floorY + 2, z));
     }
 
     /**
-     * Whether a body passes through a block: no collision, or an open door or fence gate (link C1,
-     * PandiO/knk-workspace#700). An open door's panel stands at the side of its cell, so a walk through the doorway
+     * Whether a body passes through a block: no collision, an open door or fence gate (link C1,
+     * PandiO/knk-workspace#700), or a ladder or an open hatch over one ({@link #climbable}, link H1). An open door's panel stands at the side of its cell, so a walk through the doorway
      * passes it; before, every door was a wall, and a walk through an open doorway (the keep tower's) was a gap no
      * search could take.
      */
@@ -60,8 +62,68 @@ public final class BukkitNavWorld implements NavWorld {
             return true;
         }
         BlockData data = block.getBlockData();
-        return (data instanceof org.bukkit.block.data.type.Door || data instanceof org.bukkit.block.data.type.Gate)
-            && ((org.bukkit.block.data.Openable) data).isOpen();
+        if ((data instanceof org.bukkit.block.data.type.Door || data instanceof org.bukkit.block.data.type.Gate)
+            && ((org.bukkit.block.data.Openable) data).isOpen()) {
+            return true;
+        }
+        return climbable(block, net.knightsandkings.knk.core.npc.nav.NpcClimbables.DEFAULT);
+    }
+
+    /**
+     * Whether a body with its feet in the block climbs there: a ladder or a hatch over one, open or closed (link H1).
+     * A closed hatch is on a walk only for an NPC that opens doors, which opens it on its way.
+     */
+    @Override
+    public boolean climbsAt(String world, int x, int feetY, int z) {
+        World w = Bukkit.getWorld(world);
+        if (w == null || feetY <= w.getMinHeight() || feetY >= w.getMaxHeight() || !w.isChunkLoaded(x >> 4, z >> 4)) {
+            return false;
+        }
+        Block block = w.getBlockAt(x, feetY, z);
+        java.util.Set<String> climbables = net.knightsandkings.knk.core.npc.nav.NpcClimbables.DEFAULT;
+        return climbable(block, climbables) || closedHatch(block, climbables);
+    }
+
+    /**
+     * Whether a body climbs in a block (link H1, PandiO/knk-workspace#779): a climbable (a ladder), or an open
+     * trapdoor directly above one, as the walk search's cells say ({@code WalkCells.isClimbableHatch}). A ladder's
+     * and an open hatch's panels stand at the side of their cell: a body climbs through them, so they are no wall for
+     * NPC floors, headroom and "blocks a body". A closed hatch stays solid.
+     *
+     * @param climbables the climbable materials
+     */
+    public static boolean climbable(Block block, java.util.Set<String> climbables) {
+        String material = materialOf(block);
+        if (material == null) {
+            return false;
+        }
+        BlockData data = block.getBlockData();
+        boolean open = data instanceof org.bukkit.block.data.Openable openable && openable.isOpen();
+        String below = net.knightsandkings.knk.core.roads.build.PassabilityRules.isTrapdoor(material)
+            ? materialOf(block.getRelative(org.bukkit.block.BlockFace.DOWN)) : null;
+        return net.knightsandkings.knk.core.npc.nav.NpcClimbables.climbable(material, open, below, climbables);
+    }
+
+    private static String materialOf(Block block) {
+        Material type = block == null ? null : block.getType();
+        return type == null ? null : type.name();
+    }
+
+    /**
+     * Whether a block is a closed hatch over a climbable that a hand opens (link H1): the NPC with {@code open-doors}
+     * opens it on its way, as it opens doors.
+     *
+     * @param climbables the climbable materials
+     */
+    public static boolean closedHatch(Block block, java.util.Set<String> climbables) {
+        String material = materialOf(block);
+        if (material == null || !net.knightsandkings.knk.core.roads.build.PassabilityRules.isTrapdoor(material)) {
+            return false;
+        }
+        BlockData data = block.getBlockData();
+        boolean open = data instanceof org.bukkit.block.data.Openable openable && openable.isOpen();
+        return net.knightsandkings.knk.core.npc.nav.NpcClimbables.closedHatch(material, open,
+            materialOf(block.getRelative(org.bukkit.block.BlockFace.DOWN)), climbables);
     }
 
     @Override

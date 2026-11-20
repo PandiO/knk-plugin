@@ -75,9 +75,12 @@ class NpcWalkPlannerTest {
             return 255;
         }
 
+        /** Materials other than stone, as "x,y,z" (link H1: a hatch). */
+        final java.util.Map<String, String> materials = new java.util.HashMap<>();
+
         @Override
         public String floorMaterial(int x, int y, int z) {
-            return isSolid(x, y, z) ? "STONE" : "AIR";
+            return materials.getOrDefault(x + "," + y + "," + z, isSolid(x, y, z) ? "STONE" : "AIR");
         }
 
         @Override
@@ -151,9 +154,10 @@ class NpcWalkPlannerTest {
     }
 
     @Test
-    void theNpcProfileHasNoLaddersNoWadingAndDoorsAsItsAccessProfileSays() {
+    void theNpcProfileClimbsLaddersDoesNotWadeAndOpensDoorsAsItsAccessProfileSays() {
         MovementProfile npc = NpcWalkPlanner.npcProfile(MovementProfile.PLAYER, false);
-        assertTrue(npc.climbables().isEmpty());
+        // link H1 (#779): ladders as the walk settings' (C1 had none; the search read them from the capture anyway)
+        assertEquals(MovementProfile.PLAYER.climbables(), npc.climbables());
         assertFalse(npc.wades());
         assertFalse(npc.opensDoors());
         assertEquals(MovementProfile.PLAYER.maxDrop(), npc.maxDrop());
@@ -257,5 +261,67 @@ class NpcWalkPlannerTest {
             "weighted, the walk costs more (it goes round)");
         assertFalse(weighted.path().orElseThrow().length() == off.results.get(0).path().orElseThrow().length(),
             "and is longer");
+    }
+    // ==================== link H1 (PandiO/knk-workspace#779): a ladder and a roof hatch ====================
+
+    /**
+     * A tower in small: a ladder at (5, 65..71, 0), a roof at y 72 over x 3..8, z -2..2 with a closed oak hatch at
+     * (5, 72, 0) right above the ladder. The roof is 8 blocks above the ground: the ladder is the only way up.
+     */
+    private static WalkTerrain tower(Grid grid) {
+        for (int x = 3; x <= 8; x++) {
+            for (int z = -2; z <= 2; z++) {
+                grid.solid.add(x + ",72," + z);
+            }
+        }
+        grid.materials.put("5,72,0", "OAK_TRAPDOOR");
+        WalkCells ladder = new WalkCells() {
+            @Override
+            public boolean isDoor(int x, int y, int z) {
+                return false;
+            }
+
+            @Override
+            public boolean isClimbable(int x, int y, int z) {
+                return x == 5 && z == 0 && y >= 65 && y <= 71; // as captured: the closed hatch is no climbable
+            }
+
+            @Override
+            public boolean isWater(int x, int y, int z) {
+                return false;
+            }
+        };
+        return new WalkTerrain(grid, GateCells.NONE, ladder);
+    }
+
+    private static OffRoadWalks.Walk toTheRoof(WalkTerrain terrain, boolean opensDoors) {
+        List<NavPoint> roof = List.of(new NavPoint(W, 7.5, 72, 1.5));
+        return NpcWalkPlanner.search(NpcWalkPlanner.forNpc(terrain, opensDoors), CellAccess.OPEN,
+            NpcWalkPlanner.npcProfile(MovementProfile.PLAYER, opensDoors), WalkBudget.DEFAULTS,
+            new NavPoint(W, 0.5, 65, 0.5), roof, roof.get(0), 1.5, new WalkSearch());
+    }
+
+    @Test
+    void anNpcThatOpensDoorsClimbsThroughAClosedHatch() {
+        OffRoadWalks.Walk walk = toTheRoof(tower(new Grid()), true);
+        assertTrue(walk.isFound(), walk.toString());
+        assertTrue(walk.path().stream().anyMatch(p -> p.blockX() == 5 && p.blockZ() == 0 && p.blockY() == 71),
+            "through the hatch (its cell's floor is the ladder's top, 71): " + walk.path());
+    }
+
+    @Test
+    void forAnNpcWithoutOpenDoorsAClosedHatchStaysSolid() {
+        OffRoadWalks.Walk walk = toTheRoof(tower(new Grid()), false);
+        assertFalse(walk.isFound(), "the closed hatch blocks: " + walk);
+        WalkTerrain terrain = tower(new Grid());
+        assertTrue(NpcWalkPlanner.forNpc(terrain, false) == terrain, "the capture unchanged");
+    }
+
+    @Test
+    void theBodyCheckIsMadeForEachLegsClimbablesAndDoorRule() {
+        NpcWalkPlanner.BodyCheck leg = NpcWalkPlanner.BodyCheck.BUKKIT.forLeg(java.util.Set.of("LADDER", "VINE"), true);
+        assertEquals(new NpcWalkPlanner.BodyCheck.Bukkit(java.util.Set.of("LADDER", "VINE"), true), leg);
+        NpcWalkPlanner.BodyCheck fake = (world, x, feetY, z) -> false;
+        assertTrue(fake.forLeg(java.util.Set.of(), true) == fake, "a test's check stays as it is");
     }
 }

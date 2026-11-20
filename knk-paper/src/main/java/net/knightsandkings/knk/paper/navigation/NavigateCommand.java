@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.bukkit.command.Command;
@@ -57,6 +59,14 @@ public class NavigateCommand implements TabExecutor {
      * {@code hasForCompletion} to complete); null (tests, no API) checks Bukkit and {@code knkPermission}'s cache.
      */
     private CommandPermissions modePermissions;
+    /**
+     * Off-road L7b (PandiO/knk-workspace#852): the route mode the player's permission groups give a command without a
+     * typed word, from a warm cache only (null = none or not cached: {@link RouteMode#DEFAULT}, today's call). The
+     * default (no groups wired, tests) answers null for everyone.
+     */
+    private Function<Player, RouteMode> groupDefault = player -> null;
+    /** Starts a background fill of the player's group default as they use the command; no-op by default. */
+    private Consumer<Player> warmGroupDefault = player -> { };
 
     public NavigateCommand(Supplier<NavigationService> service, Supplier<NavigationDestinations> destinations,
                            BiPredicate<Player, String> knkPermission, Executor mainThread) {
@@ -74,6 +84,15 @@ public class NavigateCommand implements TabExecutor {
     /** The in-house permission checks of the route mode nodes (#707). */
     public void setModePermissions(CommandPermissions modePermissions) {
         this.modePermissions = modePermissions;
+    }
+
+    /**
+     * The group default route mode lookup (#852): {@code cached} must answer from a cache without blocking, {@code warm}
+     * fills it in the background.
+     */
+    public void setGroupDefaults(Function<Player, RouteMode> cached, Consumer<Player> warm) {
+        this.groupDefault = Objects.requireNonNull(cached, "cached");
+        this.warmGroupDefault = Objects.requireNonNull(warm, "warm");
     }
 
     /** The destination engine, read lazily; a supplier answering null means the flag is off. */
@@ -107,6 +126,7 @@ public class NavigateCommand implements TabExecutor {
             navigation.status(player);
             return true;
         }
+        warmGroupDefault.accept(player);
         if (args.length == 1 && args[0].equalsIgnoreCase("stop")) {
             if (!navigation.stop(player)) {
                 player.sendMessage(NavigationMessages.notNavigating());
@@ -297,16 +317,23 @@ public class NavigateCommand implements TabExecutor {
     }
 
     /**
-     * Starts the navigation (#707, O25): without a typed word {@code today} runs, today's call with no check (the
-     * default mode); with one {@code inMode} runs once the player holds {@code knk.navigate.mode.<word>} (the in-house
-     * check waits for a real answer; a refusal says so and starts nothing).
+     * Starts the navigation (#707, O25; #852): with a typed word {@code inMode} runs once the player holds
+     * {@code knk.navigate.mode.<word>} (the in-house check waits for a real answer; a refusal says so and starts
+     * nothing). Without one, the player's group default route mode (#852, from the warm cache only) runs through
+     * {@code inMode} with no node check - an admin chose it for the group; without a group default {@code today} runs,
+     * today's call with no check (the default mode).
      */
-    private void withMode(Player player, RouteMode typed, Runnable today, java.util.function.Consumer<RouteMode> inMode) {
+    private void withMode(Player player, RouteMode typed, Runnable today, Consumer<RouteMode> inMode) {
         if (typed == null) {
-            today.run();
+            RouteMode fromGroup = groupDefault.apply(player);
+            if (fromGroup == null) {
+                today.run();
+            } else {
+                inMode.accept(fromGroup);
+            }
             return;
         }
-        java.util.function.Consumer<RouteMode> start = inMode;
+        Consumer<RouteMode> start = inMode;
         CommandPermissions permissions = modePermissions;
         if (permissions != null) {
             permissions.whenAllowed(player, typed.node(), () -> start.accept(typed));
@@ -391,6 +418,7 @@ public class NavigateCommand implements TabExecutor {
         if (!(sender instanceof Player player) || (engine.get() == null && !hasNode(player)) || args.length == 0) {
             return List.of();
         }
+        warmGroupDefault.accept(player); // #852: the group default is usually cached by the time the command runs
         PlayerNavigationEngine destinationEngine = engine.get();
         if (destinationEngine != null) {
             return completeWithEngine(player, destinationEngine, args);

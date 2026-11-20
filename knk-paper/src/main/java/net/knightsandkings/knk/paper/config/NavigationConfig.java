@@ -115,11 +115,15 @@ public record NavigationConfig(
      * @param particle    a Bukkit {@code Particle} name (DUST takes the colour)
      * @param color       {@code #RRGGBB}
      * @param legSpacing  {@code navigation.trail-leg-spacing} (phase 6.2, #711; since F2, #771 item 3, also with {@code guidance-v2} off): blocks
-     *                    between the fixed anchors of a walk trail. Default 3.0, today's spacing (O20, DESIGN § 7.2.2)
+     *                    between the fixed anchors of a walk trail. Default 2.0 (the developer's choice in the live test of
+     *                    2026-11-19, smoke § 13 step 5; 3.0 before F3, O20, DESIGN § 7.2.2)
      */
     public record TrailConfig(int length, int periodTicks, String particle, String color, double legSpacing) {
-        /** Default of {@code navigation.trail-leg-spacing}: today's walk-trail spacing (O20). */
-        public static final double DEFAULT_LEG_SPACING = 3.0;
+        /**
+         * Default of {@code navigation.trail-leg-spacing}: 2.0, the developer's choice in the live test of 2026-11-19
+         * (fix link F3; 3.0, {@link net.knightsandkings.knk.paper.navigation.TrailRenderer#LEG_SPACING}, before).
+         */
+        public static final double DEFAULT_LEG_SPACING = 2.0;
 
         /** Without {@code trail-leg-spacing} (callers from before #711): the default. */
         public TrailConfig(int length, int periodTicks, String particle, String color) {
@@ -444,17 +448,33 @@ public record NavigationConfig(
      * @param roadToItsEnd   {@code navigation.road-to-its-end}: a running road route is never replaced by direct mode
      *                       when the road network is swapped while the player is within {@code max-snap-distance} of the
      *                       destination; the last walk leg starts at the road's end. Default false (today: direct mode)
+     * @param goalWalkWeight {@code navigation.road-goal-walk-weight} (fix link F3, live smoke test of 2026-11-19): with
+     *                       {@code road-goal-reachable}, a candidate's score is its road length plus this many times
+     *                       its walk length, the least winning, so the road carries the route as far as it usefully goes
+     *                       and the walk starts as late as it can (1..100, default {@link #DEFAULT_GOAL_WALK_WEIGHT};
+     *                       1 is F2's road plus walk)
      */
-    public record RouteEndsConfig(boolean reachableGoal, int goalCandidates, boolean roadToItsEnd) {
+    public record RouteEndsConfig(boolean reachableGoal, int goalCandidates, boolean roadToItsEnd, double goalWalkWeight) {
         public static final int DEFAULT_GOAL_CANDIDATES = 12;
 
+        /** Default of {@code navigation.road-goal-walk-weight}: a block walked counts as four blocks of road. */
+        public static final double DEFAULT_GOAL_WALK_WEIGHT = 4;
+
+        /** Without {@code road-goal-walk-weight} (callers from before F3): the default weight. */
+        public RouteEndsConfig(boolean reachableGoal, int goalCandidates, boolean roadToItsEnd) {
+            this(reachableGoal, goalCandidates, roadToItsEnd, DEFAULT_GOAL_WALK_WEIGHT);
+        }
+
         public static RouteEndsConfig defaults() {
-            return new RouteEndsConfig(false, DEFAULT_GOAL_CANDIDATES, false);
+            return new RouteEndsConfig(false, DEFAULT_GOAL_CANDIDATES, false, DEFAULT_GOAL_WALK_WEIGHT);
         }
 
         public void validate() {
             if (goalCandidates < 1 || goalCandidates > 32) {
                 throw new IllegalArgumentException("navigation.road-goal-candidates must be 1..32 (got: " + goalCandidates + ")");
+            }
+            if (!(goalWalkWeight >= 1 && goalWalkWeight <= 100)) {
+                throw new IllegalArgumentException("navigation.road-goal-walk-weight must be 1..100 (got: " + goalWalkWeight + ")");
             }
         }
     }

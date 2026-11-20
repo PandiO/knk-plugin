@@ -62,6 +62,16 @@ final class DevWorldSnapshot {
         return new DevWorldSnapshot(states, network(loaded.snapshot()));
     }
 
+    /**
+     * Both snapshots' blocks in one (the keep-tower window starts at y 66, the stair-house one ends at y 96), {@code top}
+     * winning where both have a block; {@code top}'s road graph.
+     */
+    static DevWorldSnapshot merged(DevWorldSnapshot top, DevWorldSnapshot below) {
+        Map<Long, String> states = new HashMap<>(below.states);
+        states.putAll(top.states);
+        return new DevWorldSnapshot(states, top.network);
+    }
+
     private static RoadNetworkSnapshot network(NavSnapshot snapshot) {
         RoadNetworkSnapshot.Builder b = RoadNetworkSnapshot.builder(WORLD);
         Set<Integer> nodes = new HashSet<>();

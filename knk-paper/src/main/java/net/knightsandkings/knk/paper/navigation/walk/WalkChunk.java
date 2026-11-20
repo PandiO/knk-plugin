@@ -49,10 +49,17 @@ public final class WalkChunk {
     private final short[] floorIds;
     private final String[] palette;
     private final long[] doors;
+    /** F3 (#710): the door blocks that stood open at capture time, sorted (a subset of {@link #doors}). */
+    private final long[] openDoors;
     private final long capturedAt;
 
     WalkChunk(int chunkX, int chunkZ, int minSection, byte[][] sections, byte[] uniform, long[] floorKeys,
               short[] floorIds, String[] palette, long[] doors, long capturedAt) {
+        this(chunkX, chunkZ, minSection, sections, uniform, floorKeys, floorIds, palette, doors, new long[0], capturedAt);
+    }
+
+    WalkChunk(int chunkX, int chunkZ, int minSection, byte[][] sections, byte[] uniform, long[] floorKeys,
+              short[] floorIds, String[] palette, long[] doors, long[] openDoors, long capturedAt) {
         if (sections.length != uniform.length) {
             throw new IllegalArgumentException("sections and uniform differ in length");
         }
@@ -68,6 +75,7 @@ public final class WalkChunk {
         this.floorIds = floorIds;
         this.palette = palette;
         this.doors = doors;
+        this.openDoors = openDoors == null ? new long[0] : openDoors;
         this.capturedAt = capturedAt;
     }
 
@@ -127,6 +135,14 @@ public final class WalkChunk {
     /** Packed {@link BlockKey}s of every door block in the captured band (both halves of a door). */
     public long[] doorBlocks() {
         return doors.clone();
+    }
+
+    /**
+     * F3 (#710): packed {@link BlockKey}s of the door blocks that stood open when the chunk was captured. An open door
+     * is passed without a click, so a player's door check does not deny it.
+     */
+    public long[] openDoorBlocks() {
+        return openDoors.clone();
     }
 
     public int floorCount() {

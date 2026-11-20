@@ -220,7 +220,7 @@ public final class TrailRenderer {
      * ({@code WalkPathShaper.Shaped#trail()}, computed and checked against the walls on the walk thread): drawn the same
      * way, {@code trail-leg-spacing} apart in the leg colour (O20), so its particles follow the curve. Fix link F2
      * (PandiO/knk-workspace#771 item 3): the spacing is {@code navigation.trail-leg-spacing} with {@code guidance-v2} off
-     * too; its default 3.0 is {@link #LEG_SPACING}, today's spacing.
+     * too; its default is 2.0 since F3 (3.0, {@link #LEG_SPACING}, before).
      */
     public void drawPath(Player viewer, List<double[]> floorPoints) {
         double length = budget.isLagging() ? Math.max(4, config.length() / 2.0) : config.length();

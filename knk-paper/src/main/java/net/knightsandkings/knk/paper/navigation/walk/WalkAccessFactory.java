@@ -176,9 +176,11 @@ public final class WalkAccessFactory {
     public WalkAccess prepare(Player player, World world, GateCells gates, WalkSnapshotService.WalkCapture capture,
                               int headroom, Set<String> destinationRegions) {
         Objects.requireNonNull(player, "player");
+        // F3 (#710): a door that stands open is passed without a click, so the player's door check is not asked for it
+        Set<Long> open = capture.openDoorBlocks();
         return prepare(bypass.test(player), doorIds -> gateRule.apply(player, doorIds),
-            (x, y, z) -> doorUse.mayUse(player, world, x, y, z), () -> moverRegions.apply(player), null, world, gates,
-            capture, headroom, destinationRegions);
+            (x, y, z) -> open.contains(BlockKey.pack(x, y, z)) || doorUse.mayUse(player, world, x, y, z),
+            () -> moverRegions.apply(player), null, world, gates, capture, headroom, destinationRegions);
     }
 
     /**
