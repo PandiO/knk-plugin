@@ -3262,6 +3262,8 @@ public class KnKPlugin extends JavaPlugin {
                 npcNavigation.setSnapshotSources(() -> regionDomainResolver, () -> gateManager);
                 // link C1 (PandiO/knk-workspace#700): off-road legs with the walk navigator's search
                 npcNavigation.setWalkSources(() -> npcWalkSources, () -> walkAccessFactory);
+                // link G1 (PandiO/knk-workspace#814): road goal candidates within the players' snap distance
+                npcNavigation.setRoadGoalReach(() -> config.navigation().routerParameters().maxSnapDistance());
             } catch (RuntimeException | LinkageError e) {
                 getLogger().log(java.util.logging.Level.WARNING, "[NPC] navigation module failed to start", e);
             }
