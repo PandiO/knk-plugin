@@ -159,6 +159,33 @@ class SurveyCounterTest {
     }
 
     @Test
+    void anOverlapSharesOnlyTheUnitTypesItsStructureCounts_875() {
+        FakeBlocks blocks = new FakeBlocks();
+        blocks.fill(2, 64, 2, 4, 64, 2, "WHEAT"); // three wheat inside a logger's radius
+        tree(blocks, 12, 2, 4, "OAK_LOG", "OAK_LEAVES");
+        AreaShape loggerRadius = new AreaShape.Cuboid(0, 0, 0, 30, 100, 5);
+        SurveyProfile farmAndTrees = SurveyProfile.of(EnumSet.of(UnitType.CROP, UnitType.TREE));
+
+        // the logger counts trees only: the crops are the farm's alone, the tree is split
+        SurveyCounter.Result typed = count(blocks, farmAndTrees, BOX, List.of(),
+                List.of(new SharedArea(201, 40, loggerRadius, EnumSet.of(UnitType.TREE))), PlaceholderOverlay.NONE);
+        assertEquals(List.of(new SurveyUnit("CROP:WHEAT", 3, 1, null), new SurveyUnit("TREE:OAK:SMALL", 1, 2, null)),
+                typed.units());
+
+        // without unit types (an API before #875) the overlap shares every unit, as before
+        SurveyCounter.Result untyped = count(blocks, farmAndTrees, BOX, List.of(),
+                List.of(new SharedArea(201, 40, loggerRadius)), PlaceholderOverlay.NONE);
+        assertEquals(List.of(new SurveyUnit("CROP:WHEAT", 3, 2, null), new SurveyUnit("TREE:OAK:SMALL", 1, 2, null)),
+                untyped.units());
+
+        // an overlap that counts nothing (empty set) shares nothing
+        SurveyCounter.Result none = count(blocks, farmAndTrees, BOX, List.of(),
+                List.of(new SharedArea(201, 40, loggerRadius, EnumSet.noneOf(UnitType.class))), PlaceholderOverlay.NONE);
+        assertEquals(List.of(new SurveyUnit("CROP:WHEAT", 3, 1, null), new SurveyUnit("TREE:OAK:SMALL", 1, 1, null)),
+                none.units());
+    }
+
+    @Test
     void placeholdersCountAsTheirOriginal() {
         FakeBlocks blocks = new FakeBlocks();
         blocks.fill(0, 60, 0, 1, 60, 0, "STONE"); // (0,60,0) is depleted stone waiting to become coal ore

@@ -325,6 +325,8 @@ public class KnKPlugin extends JavaPlugin {
     /** Yield-area surveys (PandiO/knk-workspace#679): null unless production.enabled. */
     private net.knightsandkings.knk.paper.production.SurveyModule surveyModule;
     private net.knightsandkings.knk.paper.production.AreaOutlineRenderer areaOutlineRenderer;
+    /** Transport lanes (PandiO/knk-workspace#681): null unless production.enabled. */
+    private net.knightsandkings.knk.paper.production.LaneModule laneModule;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
     /** Overview map reports (PandiO/knk-workspace#735); off unless map.reporting.enabled. */
@@ -774,6 +776,17 @@ public class KnKPlugin extends JavaPlugin {
                         new net.knightsandkings.knk.paper.production.CaptureRadiusTaskHandler(worldTasksApi, areaOutlineRenderer,
                             task -> getServer().getScheduler().runTask(this, task)));
                 }
+            }
+
+            // Transport lanes (PandiO/knk-workspace#681): the headless lane measurer over the road snapshot (read-only) and the
+            // road connections; only with production.enabled (default false, A21).
+            var laneSettings = net.knightsandkings.knk.paper.production.LaneConfig.read(getConfig());
+            if (laneSettings.enabled()) {
+                laneModule = new net.knightsandkings.knk.paper.production.LaneModule(this, laneSettings,
+                    apiClient.getTransportLanesApi(),
+                    world -> roadNetworkCache == null ? null : roadNetworkCache.snapshot(world),
+                    () -> config == null ? null : config.navigation().routerParameters());
+                laneModule.start();
             }
 
             // Start headless WorldTask poller (webapp-initiated tasks that need no player)
@@ -1411,6 +1424,10 @@ public class KnKPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (laneModule != null) { // transport lanes (#681)
+            laneModule.stop();
+            laneModule = null;
+        }
         if (surveyModule != null) {
             surveyModule.stop();
             surveyModule = null;
@@ -3364,6 +3381,12 @@ public class KnKPlugin extends JavaPlugin {
                 net.knightsandkings.knk.paper.commands.ProductionAdminCommand.metadata(),
                 productionCommand::execute,
                 productionCommand::complete);
+            // Transport lanes (PandiO/knk-workspace#681): /knk logistics lanes measure|status; answers "off" without production.enabled
+            var logisticsCommand = new net.knightsandkings.knk.paper.commands.LogisticsAdminCommand(() -> laneModule, this);
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.commands.LogisticsAdminCommand.metadata(),
+                logisticsCommand::execute,
+                logisticsCommand::complete);
             if (managedRegions != null) {
                 var regionsCommand = new net.knightsandkings.knk.paper.commands.RegionsAdminCommand(managedRegions, domainAccessSync, this,
                     tempRegionRetentionTask);

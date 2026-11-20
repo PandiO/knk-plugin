@@ -34,12 +34,30 @@ import net.knightsandkings.knk.core.production.survey.SurveyProfile.UnitType;
  *   <li>{@code ENTITY}: the animals seen in the area per type (§ 8.7), {@code ENTITY:<TYPE>}.</li>
  * </ol>
  * Shared split (G7): each unit's {@code sharedBy} is 1 + the number of other structures whose shared areas contain the
- * unit's position (a tree's lowest log, a water column's top block). Rows are one per (key, sharedBy).
+ * unit's position (a tree's lowest log, a water column's top block) and count the unit's type (PandiO/knk-workspace#875;
+ * an overlap whose unit types the API did not send counts every type). Rows are one per (key, sharedBy).
  */
 public final class SurveyCounter {
 
-    /** A shared area of another structure that overlaps the surveyed one. */
-    public record SharedArea(int areaId, int structureId, AreaShape shape) {
+    /**
+     * A shared area of another structure that overlaps the surveyed one.
+     *
+     * @param unitTypes the unit types that structure's kind counts (#875); null when unknown: it shares every unit
+     */
+    public record SharedArea(int areaId, int structureId, AreaShape shape, Set<UnitType> unitTypes) {
+        public SharedArea {
+            unitTypes = unitTypes == null ? null : Set.copyOf(unitTypes);
+        }
+
+        /** An overlap without unit types: it shares every unit (the L11 contract before #875). */
+        public SharedArea(int areaId, int structureId, AreaShape shape) {
+            this(areaId, structureId, shape, null);
+        }
+
+        /** Whether this area's structure takes a share of a unit of {@code type}. */
+        public boolean shares(UnitType type) {
+            return unitTypes == null || type == null || unitTypes.contains(type);
+        }
     }
 
     /** An entity seen in the area's chunks (captured on the main thread). */
@@ -208,7 +226,7 @@ public final class SurveyCounter {
                         String biome = chunk.biome(x & 15, topWater, z & 15);
                         boolean openSky = chunk.highestY(x & 15, z & 15) <= topWater;
                         long[] agg = water.computeIfAbsent(SurveyUnit.key("WATER", biome), k -> new TreeMap<>())
-                                .computeIfAbsent(sharedBy(x, topWater, z), k -> new long[3]);
+                                .computeIfAbsent(sharedBy(x, topWater, z, UnitType.WATER), k -> new long[3]);
                         agg[0] += waterBlocks;
                         agg[1]++;
                         agg[2] += openSky ? 1 : 0;
@@ -312,18 +330,36 @@ public final class SurveyCounter {
         }
 
         private void add(String key, int x, int y, int z) {
-            rows.computeIfAbsent(key, k -> new TreeMap<>()).computeIfAbsent(sharedBy(x, y, z), k -> new long[1])[0]++;
+            rows.computeIfAbsent(key, k -> new TreeMap<>()).computeIfAbsent(sharedBy(x, y, z, unitTypeOf(key)),
+                    k -> new long[1])[0]++;
         }
 
-        /** 1 + the distinct other structures whose shared areas contain the position (G7). */
-        private int sharedBy(int x, int y, int z) {
+        /** The unit type of a key ({@code TREE:OAK:SMALL} → TREE); null for an unknown prefix (shared by all). */
+        static UnitType unitTypeOf(String key) {
+            int colon = key == null ? -1 : key.indexOf(':');
+            String prefix = colon < 0 ? key : key.substring(0, colon);
+            if (prefix == null) {
+                return null;
+            }
+            try {
+                return UnitType.valueOf(prefix);
+            } catch (IllegalArgumentException e) {
+                return null;
+            }
+        }
+
+        /**
+         * 1 + the distinct other structures whose shared areas contain the position (G7) and count units of {@code type}
+         * (#875).
+         */
+        private int sharedBy(int x, int y, int z, UnitType type) {
             List<SharedArea> shared = in.shared();
             if (shared.isEmpty()) {
                 return 1;
             }
             Set<Integer> structures = null;
             for (SharedArea area : shared) {
-                if (area.structureId() != in.structureId() && area.shape().contains(x, y, z)) {
+                if (area.structureId() != in.structureId() && area.shares(type) && area.shape().contains(x, y, z)) {
                     if (structures == null) {
                         structures = new HashSet<>();
                     }
