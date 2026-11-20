@@ -76,6 +76,19 @@ public interface SiegeMatchObserver {
     /** Plugin disable, after every lobby was stopped. */
     default void shutdown() { }
 
+    // Siege shop L1 (PandiO/knk-workspace#866): the events siege points are earned from.
+
+    /**
+     * A member of the running match died, after the roster counted it (main thread).
+     *
+     * @param killerId     the member credited with the killing blow (the victim for a suicide), null without one
+     * @param killerStreak the killer's streak including this kill, 0 without a credited kill
+     */
+    default void memberDied(SiegeLobbyRuntime lobby, SiegeMatch match, UUID victimId, UUID killerId, int killerStreak) { }
+
+    /** A member took effective gate HP off one of the match's gates, after the contributions counted it (main thread). */
+    default void gateDamaged(SiegeLobbyRuntime lobby, SiegeMatch match, UUID playerId, double loss) { }
+
     // KNG-34 link 6 (diagnostic telemetry): lobby participation, reported with stable codes only.
 
     /**

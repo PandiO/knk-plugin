@@ -24,6 +24,9 @@ public final class KnkSiegeMatchRecords {
      * @param activeSeconds this member's active (not AFK) seconds in the match (#166)
      * @param matchSeconds  their time in the match: first joining it to the end (or their last leave), time away
      *                      within the rejoin window included (#166; the server pays participation from the share)
+     * @param siegePointsEarned siege points this member earned in the match (siege shop P27, PandiO/knk-workspace#866);
+     *                          null without siege points ({@code siege.points.enabled} off): not sent, as before
+     * @param siegePointsSpent  siege points this member spent; null without siege points
      */
     public record ParticipantResult(
             int userId,
@@ -35,13 +38,24 @@ public final class KnkSiegeMatchRecords {
             Instant leftAt,
             double gateDamage,
             long activeSeconds,
-            long matchSeconds
+            long matchSeconds,
+            Long siegePointsEarned,
+            Long siegePointsSpent
     ) {
         public ParticipantResult {
             if (!(gateDamage > 0)) gateDamage = 0; // NaN and negatives
             if (Double.isInfinite(gateDamage)) gateDamage = Double.MAX_VALUE;
             matchSeconds = Math.max(0, matchSeconds);
             activeSeconds = Math.max(0, Math.min(activeSeconds, matchSeconds));
+            if (siegePointsEarned != null && siegePointsEarned < 0) siegePointsEarned = 0L;
+            if (siegePointsSpent != null && siegePointsSpent < 0) siegePointsSpent = 0L;
+        }
+
+        /** Without siege points (before PandiO/knk-workspace#866, or with {@code siege.points.enabled} off). */
+        public ParticipantResult(int userId, int siegeTeamId, int kills, int deaths, int highestKillStreak, int captures,
+                                 Instant leftAt, double gateDamage, long activeSeconds, long matchSeconds) {
+            this(userId, siegeTeamId, kills, deaths, highestKillStreak, captures, leftAt, gateDamage, activeSeconds,
+                    matchSeconds, null, null);
         }
 
         /** Without gate damage and activity (before #165/#166). */
@@ -57,7 +71,13 @@ public final class KnkSiegeMatchRecords {
         /** This result with the member's gate damage (#165) and activity (#166) in the match. */
         public ParticipantResult withContribution(double gateDamage, long activeSeconds, long matchSeconds) {
             return new ParticipantResult(userId, siegeTeamId, kills, deaths, highestKillStreak, captures, leftAt, gateDamage,
-                    activeSeconds, matchSeconds);
+                    activeSeconds, matchSeconds, siegePointsEarned, siegePointsSpent);
+        }
+
+        /** This result with the member's siege points earned and spent in the match (#866). */
+        public ParticipantResult withSiegePoints(long earned, long spent) {
+            return new ParticipantResult(userId, siegeTeamId, kills, deaths, highestKillStreak, captures, leftAt, gateDamage,
+                    activeSeconds, matchSeconds, earned, spent);
         }
     }
 
