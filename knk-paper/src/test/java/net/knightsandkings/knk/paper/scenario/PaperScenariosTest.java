@@ -54,8 +54,7 @@ class PaperScenariosTest {
             "gate-closing-moves-vehicle-with-rider", "gate-side-by-side-doors", "gate-opening-leaves-neighbours",
             "gate-blocks-never-suffocate", "lootbox-area-rename-keeps-drawn-bounds", "lootbox-area-rerun-replaces-in-place",
             "temp-region-sweep-keeps-lootbox-area-region", "lootbox-spawns-on-ground-in-range", "lootbox-spawns-under-roof",
-            "lootbox-switched-off-spawns-nothing", "landmark-region-rename-keeps-drawn-bounds",
-            "landmark-region-rerun-replaces-in-place", "production-area-region-rename-keeps-drawn-bounds", "npc-corners-line", "walk-trail-stairhouse", "walk-trail-cursor-stairhouse", "plaza-line-brink",
+            "lootbox-switched-off-spawns-nothing", "npc-corners-line", "walk-trail-stairhouse", "walk-trail-cursor-stairhouse", "plaza-line-brink",
             "plaza-line-cinix-south-square", "plaza-line-cinix-northern-gate-square", "npc-corners-walk", "npc-stuck-ladder",
             "npc-group-narrows", "npc-group-gate-finish-trip", "npc-group-access-change", "npc-group-realtime-entry",
             "npc-exit-denied-leader", "npc-group-exit-denied", "npc-group-cache-refresh-held",
@@ -71,7 +70,9 @@ class PaperScenariosTest {
             "player-command-needs-grant", "player-heal-needs-grant", "player-chat-group-colours", "player-join-loading-hold", "player-menu-click",
             "player-tp-into-closed-gate", "player-rejoin-in-closed-gate", "territory-border-crossing", "rural-structure-region",
             "production-area-survey", "storage-display-double-chest", "player-kit-overflow-inbox",
-            "player-inbox-claim-partial", "player-harvest-regenerate", "player-harvest-tree"), names);
+            "player-inbox-claim-partial", "player-harvest-regenerate", "player-harvest-tree",
+            "landmark-region-rename-keeps-drawn-bounds", "landmark-region-rerun-replaces-in-place",
+            "production-area-region-rename-keeps-drawn-bounds"), names);
     }
 
     @SuppressWarnings("unchecked")

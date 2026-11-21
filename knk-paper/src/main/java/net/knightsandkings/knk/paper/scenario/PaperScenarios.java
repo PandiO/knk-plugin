@@ -90,11 +90,6 @@ public final class PaperScenarios {
             .register(new LootboxSpawnOnGroundScenario())
             .register(new LootboxSpawnUnderRoofScenario())
             .register(new LootboxSwitchedOffScenario())
-            // landmark regions drawn through the form's region task (PandiO/knk-workspace#945)
-            .register(new LandmarkRegionRenameScenario())
-            .register(new LandmarkRegionReplaceScenario())
-            // production area regions drawn through the form's region task (PandiO/knk-workspace#946)
-            .register(new ProductionAreaRegionRenameScenario())
             // NPC wall corners and stuck recovery (implementation plan 4b.2 item 18, PandiO/knk-workspace#521); the
             // walking ones need Citizens, which CI's paper-boot server has as a pinned build
             .register(new NpcCornersLineScenario())
@@ -174,6 +169,12 @@ public final class PaperScenarios {
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerInboxClaimScenario())
             // P8 (PandiO/knk-workspace#134): harvest and regenerate in a production area; a felled tree restored by snapshot
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestRegenerateScenario())
-            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestTreeScenario());
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestTreeScenario())
+            // Landmark and production area regions drawn through the form's region task (PandiO/knk-workspace#945,
+            // #946). Last on purpose: a scene sits at origin.x + index x 64, and npc-replay-quarry-to-keep fails when
+            // its scene moves (PandiO/knk-workspace#958), so new scenarios go after the NPC replays.
+            .register(new LandmarkRegionRenameScenario())
+            .register(new LandmarkRegionReplaceScenario())
+            .register(new ProductionAreaRegionRenameScenario());
     }
 }
