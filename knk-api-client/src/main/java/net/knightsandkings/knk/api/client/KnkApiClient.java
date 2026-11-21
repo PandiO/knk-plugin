@@ -158,6 +158,8 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.StorageContainersApi storageContainersApi;
     private final net.knightsandkings.knk.core.ports.api.StructureMenusApi structureMenusApi;
     private final net.knightsandkings.knk.core.ports.api.TransportLanesApi transportLanesApi;
+    /** Item delivery and the reward inbox (PandiO/knk-workspace#684). */
+    private final net.knightsandkings.knk.core.ports.api.ItemDeliveryApi itemDeliveryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
@@ -254,6 +256,8 @@ public class KnkApiClient {
                 objectMapper, authProvider, executor, debugLogging);
         this.transportLanesApi = new net.knightsandkings.knk.api.impl.TransportLanesApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
+        this.itemDeliveryApi = new net.knightsandkings.knk.api.impl.ItemDeliveryApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -324,6 +328,11 @@ public class KnkApiClient {
     /** In-game structure menus (PandiO/knk-workspace#74): overview, structure menu, orders and the staff buttons' routes. */
     public net.knightsandkings.knk.core.ports.api.StructureMenusApi getStructureMenusApi() {
         return structureMenusApi;
+    }
+
+    /** Item delivery and the reward inbox (PandiO/knk-workspace#684): deliveries, the inbox view and claims. */
+    public net.knightsandkings.knk.core.ports.api.ItemDeliveryApi getItemDeliveryApi() {
+        return itemDeliveryApi;
     }
 
     /** Transport lanes (PandiO/knk-workspace#681): the lane list, lane reports and road connections. */

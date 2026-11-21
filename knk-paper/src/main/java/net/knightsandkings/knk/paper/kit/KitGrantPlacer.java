@@ -39,7 +39,9 @@ import java.util.logging.Logger;
  *   <li>Occupied with a non-matching item (or a merge remainder) -&gt; first empty slot in the
  *       player's general inventory ({@link PlayerInventory#firstEmpty()}, indices 0-35 - a
  *       displaced item never bumps into a different armor slot).</li>
- *   <li>No empty slot anywhere -&gt; drop on the ground rather than losing it silently.</li>
+ *   <li>No empty slot anywhere -&gt; drop on the ground rather than losing it silently. With the reward inbox on
+ *       ({@code production.enabled}, PandiO/knk-workspace#684) the caller passes an {@link Overflow} instead, which
+ *       takes the leftover for the player's inbox; without one (the flag off) it drops exactly as before.</li>
  * </ol>
  * <p>
  * Split into an async {@link #resolveAsync} phase (network calls, safe off the main thread) and a
@@ -69,15 +71,38 @@ public final class KitGrantPlacer {
     private record PendingSlot(SlotKind kind, int itemBlueprintId, Integer quantity, Integer contentSlotIndex) {
     }
 
-    /** One resolved, ready-to-place item, not yet touching any {@link Player}. */
-    public record ResolvedItem(SlotKind kind, Integer contentSlotIndex, ItemStack itemStack, int maxStackSize) {
+    /**
+     * One resolved, ready-to-place item, not yet touching any {@link Player}. {@code itemBlueprintId} is the blueprint it
+     * was built from (the reward inbox's fallback when item identity can't resolve the stack, #684); null when unknown.
+     */
+    public record ResolvedItem(SlotKind kind, Integer contentSlotIndex, ItemStack itemStack, int maxStackSize,
+                               Integer itemBlueprintId) {
+        public ResolvedItem(SlotKind kind, Integer contentSlotIndex, ItemStack itemStack, int maxStackSize) {
+            this(kind, contentSlotIndex, itemStack, maxStackSize, null);
+        }
     }
 
-    /** Outcome summary for chat feedback - how many items landed in each of the four ways. */
-    public record PlacementSummary(int placed, int merged, int displaced, int dropped, int unresolved) {
+    /**
+     * Outcome summary for chat feedback - how many items landed in each way. {@code inboxed}: leftovers an
+     * {@link Overflow} took for the reward inbox (#684) instead of dropping them.
+     */
+    public record PlacementSummary(int placed, int merged, int displaced, int dropped, int unresolved, int inboxed) {
+        public PlacementSummary(int placed, int merged, int displaced, int dropped, int unresolved) {
+            this(placed, merged, displaced, dropped, unresolved, 0);
+        }
+
         static PlacementSummary empty() {
             return new PlacementSummary(0, 0, 0, 0, 0);
         }
+    }
+
+    /**
+     * Where a leftover goes when no slot is free (step 4), PandiO/knk-workspace#684. Main thread. Returns true when it took
+     * the stack (the reward inbox); false leaves it to be dropped at the player's feet as before.
+     */
+    @FunctionalInterface
+    public interface Overflow {
+        boolean take(ResolvedItem item, ItemStack leftover);
     }
 
     /**
@@ -188,7 +213,7 @@ public final class KitGrantPlacer {
 
         int maxStackSize = BlueprintItemAssembler.maxStackSize(blueprint, itemStack);
 
-        return new ResolvedItem(slot.kind(), slot.contentSlotIndex(), itemStack, maxStackSize);
+        return new ResolvedItem(slot.kind(), slot.contentSlotIndex(), itemStack, maxStackSize, blueprint.id());
     }
 
     /** The blueprint's icon material key (its material ref's namespace key, else its own) - shared with the menus. */
@@ -216,6 +241,14 @@ public final class KitGrantPlacer {
      * Main-thread only - touches {@link Player}/{@link org.bukkit.inventory.Inventory}.
      */
     public static PlacementSummary place(Player player, List<ResolvedItem> items) {
+        return place(player, items, null);
+    }
+
+    /**
+     * {@link #place(Player, List)} with an {@link Overflow} for step 4 (#684): a leftover it takes is counted as
+     * {@code inboxed} instead of being dropped. {@code overflow} null = today's drop.
+     */
+    public static PlacementSummary place(Player player, List<ResolvedItem> items, Overflow overflow) {
         Objects.requireNonNull(player, "player must not be null");
         Objects.requireNonNull(items, "items must not be null");
 
@@ -223,19 +256,21 @@ public final class KitGrantPlacer {
         int merged = 0;
         int displaced = 0;
         int dropped = 0;
+        int inboxed = 0;
 
         for (ResolvedItem item : items) {
-            PlacementSummary result = placeOne(player, item);
+            PlacementSummary result = placeOne(player, item, overflow);
             placed += result.placed();
             merged += result.merged();
             displaced += result.displaced();
             dropped += result.dropped();
+            inboxed += result.inboxed();
         }
 
-        return new PlacementSummary(placed, merged, displaced, dropped, 0);
+        return new PlacementSummary(placed, merged, displaced, dropped, 0, inboxed);
     }
 
-    private static PlacementSummary placeOne(Player player, ResolvedItem item) {
+    private static PlacementSummary placeOne(Player player, ResolvedItem item, Overflow overflow) {
         SlotAccessor accessor = accessorFor(player, item);
         ItemStack toPlace = item.itemStack();
 
@@ -271,6 +306,9 @@ public final class KitGrantPlacer {
             return merged ? new PlacementSummary(0, 1, 0, 0, 0) : new PlacementSummary(0, 0, 1, 0, 0);
         }
 
+        if (overflow != null && overflow.take(item, toPlace)) {
+            return merged ? new PlacementSummary(0, 1, 0, 0, 0, 1) : new PlacementSummary(0, 0, 0, 0, 0, 1);
+        }
         player.getWorld().dropItemNaturally(player.getLocation(), toPlace);
         return merged ? new PlacementSummary(0, 1, 0, 0, 0) : new PlacementSummary(0, 0, 0, 1, 0);
     }
