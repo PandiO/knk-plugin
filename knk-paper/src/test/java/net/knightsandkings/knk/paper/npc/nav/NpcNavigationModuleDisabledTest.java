@@ -103,6 +103,21 @@ class NpcNavigationModuleDisabledTest {
         org.mockito.Mockito.verifyNoInteractions(roadNavigation);
     }
 
+    /** PandiO/knk-workspace#954: protect is a nav action (refused above while off) and completes on and off. */
+    @Test
+    void protectIsListedInTheUsageAndCompletesOnAndOff() throws Exception {
+        NpcNavigationModule module = startWithShippedConfig(new ArrayList<>());
+        CommandSender sender = sender();
+
+        assertTrue(NpcNavigationModule.NAV_ACTIONS.contains("protect"));
+        assertTrue(NpcNavigationModule.NAV_USAGE.contains("|protect on|off [npc]|"), NpcNavigationModule.NAV_USAGE);
+        assertEquals(List.of("protect"), module.complete(sender, new String[] {"nav", "pro"}));
+        assertEquals(List.of("on", "off"), module.complete(sender, new String[] {"nav", "protect", ""}));
+        assertEquals(List.of("off"), module.complete(sender, new String[] {"nav", "protect", "of"}));
+        assertEquals(List.of(), module.complete(sender, new String[] {"nav", "protect", "off", ""}));
+        module.stop();
+    }
+
     @Test
     void theCommandIsStillRegisteredSoStatusCanSayWhy() throws Exception {
         YamlConfiguration empty = new YamlConfiguration();
