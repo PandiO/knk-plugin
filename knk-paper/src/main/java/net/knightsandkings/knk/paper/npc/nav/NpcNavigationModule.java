@@ -443,6 +443,9 @@ public final class NpcNavigationModule {
             if (args.length == 3 && args[1].equalsIgnoreCase("stats")) {
                 return filter(List.of("reset"), args[2]);
             }
+            if (args.length == 3 && args[1].equalsIgnoreCase("protect")) {
+                return filter(List.of("on", "off"), args[2]);
+            }
         }
         return List.of();
     }
@@ -556,10 +559,11 @@ public final class NpcNavigationModule {
     // ==================== /knk npc nav ====================
 
     static final List<String> NAV_ACTIONS = List.of("from", "to", "route", "baseline", "spawn", "group", "goto", "patrol",
-        "stats", "trace", "clear", "scene", "snapshot");
+        "stats", "trace", "protect", "clear", "scene", "snapshot");
     static final String NAV_USAGE = "/knk npc nav <from|to|route list|save|load|delete <name>|baseline|spawn <n> [profile]"
         + "|group <n> [formation] [profile] [finish-trip|follow-leader]|goto|patrol|stats [reset]|trace [npc] [seconds]"
-        + "|clear|scene corners|snapshot <route>>";
+        + "|protect on|off [npc]|clear|scene corners|snapshot <route>>";
+    static final String PROTECT_USAGE = "/knk npc nav protect <on|off> [npc] (the route NPC nearest you by default)";
     /** The toggle words of {@code /knk npc nav group} (group-followers-finish-trip; implementation plan 4b.3 item 8). */
     static final List<String> TRIP_WORDS = List.of("finish-trip", "follow-leader");
     /** The formations of {@code /knk npc nav group}, by config name. */
@@ -581,6 +585,8 @@ public final class NpcNavigationModule {
      * goto | patrol                  every NPC walks to you once | walks the route again
      * stats [reset]                  the counters (also written to npc-logs/); reset zeroes them
      * trace [npc] [seconds]          per-tick trace of one NPC (nearest by default, 30 s) to npc-logs/
+     * protect on|off [npc]           Citizens' protection of one NPC (nearest by default): off lets an attack hurt it
+     *                                and knock it back (smoke test step 13, #954)
      * clear                          remove every route NPC
      * scene corners                  build the corner test scene (4b.2 item 19) at testing.scenarios.origin, only
      *                                while testing.scenarios.enabled, and save the route corner-scene across it
@@ -666,6 +672,7 @@ public final class NpcNavigationModule {
                 }
                 sender.sendMessage(runner.startTrace(sender instanceof Player player ? feetOf(player) : null, name, seconds));
             }
+            case "protect" -> navProtect(sender, args);
             case "clear" -> sender.sendMessage("Removed " + runner.clear() + " route NPCs.");
             case "scene" -> navScene(sender, args);
             default -> sender.sendMessage(NAV_USAGE);
@@ -704,6 +711,26 @@ public final class NpcNavigationModule {
         org.bukkit.Location l = player.getLocation();
         return new net.knightsandkings.knk.core.navigation.shape.NavPoint(l.getWorld().getName(), l.getBlockX() + 0.5, l.getBlockY(),
             l.getBlockZ() + 0.5);
+    }
+
+    /**
+     * {@code /knk npc nav protect <on|off> [npc]}: Citizens' protection of one route NPC, the one nearest the player
+     * unless named (smoke test step 13, PandiO/knk-workspace#954). Citizens' own {@code /npc select} and its
+     * protection toggle can't reach K&K's NPCs, which live in K&K's own Citizens registry.
+     */
+    private void navProtect(CommandSender sender, String[] args) {
+        String word = args.length > 2 ? args[2].toLowerCase(Locale.ROOT) : "";
+        if (!word.equals("on") && !word.equals("off")) {
+            sender.sendMessage(PROTECT_USAGE);
+            return;
+        }
+        String name = args.length > 3 ? args[3] : null;
+        if (name == null && !(sender instanceof Player)) {
+            sender.sendMessage("Name the NPC from the console: /knk npc nav protect " + word + " <npc>");
+            return;
+        }
+        sender.sendMessage(runner.setProtected(sender instanceof Player player ? feetOf(player) : null, name,
+            word.equals("on"), CitizensBootstrap::setProtected));
     }
 
     private void navSpawn(CommandSender sender, String[] args) {

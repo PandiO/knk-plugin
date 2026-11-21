@@ -307,6 +307,41 @@ class NpcNavRunnerTest {
         assertEquals("No test NPC nobody", runner.startTrace(FROM, "nobody", 1));
     }
 
+    /** Smoke test step 13 (PandiO/knk-workspace#954): Citizens' /npc select can't reach K&K's NPCs, this can. */
+    @Test
+    void protectSwitchesTheNearestOrTheNamedNpc() {
+        runner.spawn(2, NpcAccessProfile.DEFAULT);
+        ticks(2);
+        assertEquals(2, movers.size());
+        Mover first = movers.get(0);
+        Mover second = movers.get(1);
+        second.position = new NavPoint(WORLD, 30.5, 65, 0.5);
+        NavPoint nearSecond = new NavPoint(WORLD, 29.5, 65, 0.5);
+        java.util.Map<String, Boolean> set = new java.util.LinkedHashMap<>();
+        java.util.function.BiPredicate<NpcMover, Boolean> citizens = (mover, on) -> {
+            set.put(mover.name(), on);
+            return true;
+        };
+
+        String off = runner.setProtected(nearSecond, null, false, citizens);
+        assertEquals(java.util.Map.of(second.name, false), set, "the NPC nearest the player");
+        assertTrue(off.startsWith(second.name + " is unprotected: attacks hurt it and knock it back"), off);
+        assertTrue(off.endsWith("/knk npc nav protect on " + second.name + " undoes it."), off);
+
+        set.clear();
+        String on = runner.setProtected(nearSecond, first.name.toUpperCase(java.util.Locale.ROOT), true, citizens);
+        assertEquals(java.util.Map.of(first.name, true), set, "by name, in any case, wherever the player stands");
+        assertEquals(first.name + " is protected again (Citizens' default).", on);
+
+        set.clear();
+        assertEquals("No test NPC nobody", runner.setProtected(nearSecond, "nobody", false, citizens));
+        assertEquals("No test NPC near you",
+            runner.setProtected(new NavPoint("other_world", 0.5, 65, 0.5), null, false, citizens));
+        assertTrue(set.isEmpty(), "nothing set when no NPC matches");
+        assertEquals(first.name + " is not a Citizens NPC: its protection can't be changed.",
+            runner.setProtected(nearSecond, first.name, false, (mover, value) -> false));
+    }
+
     @Test
     void theReportHasTheRuleNumbers() {
         runner.spawn(1, NpcAccessProfile.DEFAULT);

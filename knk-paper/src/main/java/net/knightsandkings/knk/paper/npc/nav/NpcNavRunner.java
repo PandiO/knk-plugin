@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 
 import net.knightsandkings.knk.core.navigation.shape.FreeWidth;
@@ -563,14 +564,11 @@ public final class NpcNavRunner {
         return Math.hypot(a.x() + t * dx - x, a.z() + t * dz - z);
     }
 
-    // ==================== trace ====================
-
     /**
-     * Traces one NPC every tick for {@code seconds} into its own file: position, on ground, movement since the last
-     * tick, navigation state, and JUMP when it leaves the ground at a jump's upward speed (for the staircases; link B4). {@code name} null:
-     * the NPC nearest {@code near}.
+     * The spawned route NPC called {@code name} (any case), or with {@code name} null the one nearest {@code near}
+     * (distance across plus height); null when there is none.
      */
-    public String startTrace(NavPoint near, String name, int seconds) {
+    private Walker pick(NavPoint near, String name) {
         Walker pick = null;
         double best = Double.MAX_VALUE;
         for (Walker walker : walkers.values()) {
@@ -579,8 +577,7 @@ public final class NpcNavRunner {
                 continue;
             }
             if (name != null && walker.mover.name().equalsIgnoreCase(name)) {
-                pick = walker;
-                break;
+                return walker;
             }
             if (name == null && near != null && at.world().equals(near.world())) {
                 double d = at.horizontalDistance(near) + Math.abs(at.y() - near.y());
@@ -590,6 +587,42 @@ public final class NpcNavRunner {
                 }
             }
         }
+        return pick;
+    }
+
+    // ==================== protect ====================
+
+    /**
+     * Switches Citizens' protection of one route NPC ({@code name}, or the one nearest {@code near}), for the
+     * knockback step of the NPC movement smoke test (step 13, PandiO/knk-workspace#954). Off: an attack hurts the NPC
+     * and knocks it back, and it can die; on: Citizens' default again. K&K spawns its NPCs in its own Citizens
+     * registry, so Citizens' {@code /npc select} can't reach them. {@code protector} sets it on the NPC's body and
+     * says whether it could (only a Citizens NPC can).
+     */
+    public String setProtected(NavPoint near, String name, boolean on, BiPredicate<NpcMover, Boolean> protector) {
+        Walker pick = pick(near, name);
+        if (pick == null) {
+            return "No test NPC " + (name == null ? "near you" : name);
+        }
+        String npc = pick.mover.name();
+        if (!protector.test(pick.mover, on)) {
+            return npc + " is not a Citizens NPC: its protection can't be changed.";
+        }
+        log.fileOnly(npc + (on ? " protected again" : " unprotected (attacks hurt it and knock it back)"));
+        return on ? npc + " is protected again (Citizens' default)."
+            : npc + " is unprotected: attacks hurt it and knock it back, and it can die. /knk npc nav protect on "
+                + npc + " undoes it.";
+    }
+
+    // ==================== trace ====================
+
+    /**
+     * Traces one NPC every tick for {@code seconds} into its own file: position, on ground, movement since the last
+     * tick, navigation state, and JUMP when it leaves the ground at a jump's upward speed (for the staircases; link B4). {@code name} null:
+     * the NPC nearest {@code near}.
+     */
+    public String startTrace(NavPoint near, String name, int seconds) {
+        Walker pick = pick(near, name);
         if (pick == null) {
             return "No test NPC " + (name == null ? "near you" : name);
         }
