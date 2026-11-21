@@ -49,9 +49,18 @@ public final class HarvestGate {
     private final HarvestCooldowns cooldowns;
     private final Regenerating regenerating;
     private final boolean denyAtEmptyPool;
+    private final java.util.function.ToDoubleFunction<HarvestArea> poolFill;
 
     public HarvestGate(HarvestCatalog catalog, HarvestAreaIndex index, RequirementEvaluator requirements,
                        HarvestCooldowns cooldowns, Regenerating regenerating, boolean denyAtEmptyPool) {
+        this(catalog, index, requirements, cooldowns, regenerating, denyAtEmptyPool, HarvestArea::poolFill);
+    }
+
+    /** @param poolFill an area's fill now (the latest report answer), else the catalogue's */
+    public HarvestGate(HarvestCatalog catalog, HarvestAreaIndex index, RequirementEvaluator requirements,
+                       HarvestCooldowns cooldowns, Regenerating regenerating, boolean denyAtEmptyPool,
+                       java.util.function.ToDoubleFunction<HarvestArea> poolFill) {
+        this.poolFill = poolFill == null ? HarvestArea::poolFill : poolFill;
         this.catalog = catalog == null ? HarvestCatalog.EMPTY : catalog;
         this.index = index == null ? HarvestAreaIndex.EMPTY : index;
         this.requirements = requirements == null ? RequirementEvaluator.ALWAYS : requirements;
@@ -125,7 +134,7 @@ public final class HarvestGate {
         if (wait > 0) {
             return "wait " + Math.max(1, (wait + 999) / 1000) + " s";
         }
-        if (denyAtEmptyPool && area.poolFill() <= 0) {
+        if (denyAtEmptyPool && poolFill.applyAsDouble(area) <= 0) {
             return structureName(area) + " is exhausted for now; come back later";
         }
         return null;

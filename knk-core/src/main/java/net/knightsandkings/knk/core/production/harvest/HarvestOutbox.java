@@ -20,8 +20,8 @@ public final class HarvestOutbox {
     public record Entry(String key, UUID player, int userId, int ruleId, int areaId, int breaks, int fortuneLevel,
                         long harvestedAt, int attempts, long nextAttemptAt) {
 
-        Entry plusBreak() {
-            return new Entry(key, player, userId, ruleId, areaId, breaks + 1, fortuneLevel, harvestedAt, attempts,
+        Entry plusBreaks(int more) {
+            return new Entry(key, player, userId, ruleId, areaId, breaks + more, fortuneLevel, harvestedAt, attempts,
                     nextAttemptAt);
         }
 
@@ -69,14 +69,20 @@ public final class HarvestOutbox {
 
     /** Records one break; returns the key of the entry it joined. */
     public String add(UUID player, int userId, int ruleId, int areaId, int fortuneLevel, long atMillis) {
+        return add(player, userId, ruleId, areaId, fortuneLevel, atMillis, 1);
+    }
+
+    /** Records {@code breaks} breaks at once (a felled tree's logs); returns the key of the entry they joined. */
+    public String add(UUID player, int userId, int ruleId, int areaId, int fortuneLevel, long atMillis, int breaks) {
+        int count = Math.max(1, breaks);
         Group group = new Group(player, ruleId, areaId, Math.max(0, fortuneLevel));
         String key = open.get(group);
         Entry entry = key == null ? null : entries.get(key);
         if (entry != null && entry.userId() == userId) {
-            entries.put(key, entry.plusBreak());
+            entries.put(key, entry.plusBreaks(count));
         } else {
             key = keyPrefix + UUID.randomUUID();
-            entries.put(key, new Entry(key, player, userId, ruleId, areaId, 1, group.fortuneLevel(), atMillis, 0, 0));
+            entries.put(key, new Entry(key, player, userId, ruleId, areaId, count, group.fortuneLevel(), atMillis, 0, 0));
             open.put(group, key);
         }
         dirty = true;

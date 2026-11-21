@@ -336,6 +336,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.production.terminal.StorageTerminalModule storageTerminalModule;
     // Reward inbox, /inbox and kit/lootbox leftovers to the inbox (PandiO/knk-workspace#684): only with production.enabled.
     private net.knightsandkings.knk.paper.production.inbox.InboxModule inboxModule;
+    // Player harvesting in yield areas and block regeneration (PandiO/knk-workspace#134): only with production.enabled.
+    private volatile net.knightsandkings.knk.paper.production.harvest.HarvestModule harvestModule;
     private net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature structuresMenuFeature;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
@@ -779,7 +781,7 @@ public class KnKPlugin extends JavaPlugin {
             areaOutlineRenderer = new net.knightsandkings.knk.paper.production.AreaOutlineRenderer(this);
             if (surveySettings.enabled()) {
                 surveyModule = new net.knightsandkings.knk.paper.production.SurveyModule(this, surveySettings,
-                    apiClient.getProductionSurveyApi());
+                    apiClient.getProductionSurveyApi(), harvestPlaceholders()); // #134: regenerating blocks count
                 surveyModule.start();
                 if (worldTaskHandlerRegistry != null && worldTasksApi != null) {
                     worldTaskHandlerRegistry.registerHandler(net.knightsandkings.knk.core.production.survey.CaptureRadius.TASK_TYPE,
@@ -1084,6 +1086,8 @@ public class KnKPlugin extends JavaPlugin {
             initializeStorageTerminals();
             // Reward inbox (PandiO/knk-workspace#684): only with production.enabled (A21).
             initializeRewardInbox();
+            // Player harvesting and block regeneration (PandiO/knk-workspace#134): only with production.enabled (A21).
+            initializeHarvesting();
             this.structuresMenuFeature = new net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature(
                 apiClient.getStructureMenusApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC(),
                 MenuService.mainThreadExecutor(this),
@@ -1461,8 +1465,56 @@ public class KnKPlugin extends JavaPlugin {
         return surveyModule;
     }
 
+    /** Player harvesting (PandiO/knk-workspace#134): the running module; null while production.enabled is off. */
+    public net.knightsandkings.knk.paper.production.harvest.HarvestModule getHarvestModule() {
+        return harvestModule;
+    }
+
+    /** Surveys read blocks waiting to regenerate as their original (#134, L12); nothing while harvesting is off. */
+    private net.knightsandkings.knk.core.production.survey.PlaceholderOverlay harvestPlaceholders() {
+        return (world, x, y, z) -> {
+            var harvest = harvestModule;
+            return harvest == null ? null : harvest.overlay().originalAt(world, x, y, z);
+        };
+    }
+
+    /**
+     * Player harvesting in yield areas and block regeneration (PandiO/knk-workspace#134, PRODUCTION_KINDS § 6-§ 7): the
+     * harvest listener, placeholders and the persisted regeneration queue, batched harvest reports and the worker's share.
+     * Only with production.enabled (A21); off, breaks in production areas behave as before.
+     */
+    private void initializeHarvesting() {
+        var settings = net.knightsandkings.knk.paper.production.harvest.HarvestConfig.read(getConfig());
+        if (!settings.enabled() || apiClient == null) {
+            return;
+        }
+        var permissions = commandPermissions();
+        var requirements = new net.knightsandkings.knk.paper.production.harvest.HarvestRequirements(permissions::has,
+            uuid -> cacheManager.getUserCache().getStale(uuid)
+                .map(net.knightsandkings.knk.core.domain.users.UserSummary::experiencePoints).orElse(null),
+            () -> apiClient.getTitleBracketsQueryApi().listAll());
+        harvestModule = new net.knightsandkings.knk.paper.production.harvest.HarvestModule(this, settings,
+            apiClient.getHarvestApi(),
+            new net.knightsandkings.knk.paper.production.terminal.BlueprintItems(itemBlueprintsDataAccess,
+                minecraftMaterialRefsDataAccess),
+            uuid -> cacheManager.getUserCache().getStale(uuid)
+                .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+            requirements, requirements::refresh,
+            new net.knightsandkings.knk.paper.production.SurveyRegionShapes(),
+            player -> permissions.has(player, net.knightsandkings.knk.paper.commands.ProductionAdminCommand.PERMISSION),
+            (player, nodes) -> permissions.warm(player, nodes, () -> { }),
+            worldTaskLeases != null ? worldTaskLeases.serverId() : getServer().getName(),
+            getDataFolder().toPath().resolve("production").resolve("harvest"),
+            java.time.Clock.systemUTC());
+        harvestModule.start();
+    }
+
     @Override
     public void onDisable() {
+        if (harvestModule != null) { // player harvesting (#134): saves the regeneration queue and the report outbox
+            harvestModule.stop();
+            harvestModule = null;
+        }
         if (laneModule != null) { // transport lanes (#681)
             laneModule.stop();
             laneModule = null;
@@ -3438,7 +3490,8 @@ public class KnKPlugin extends JavaPlugin {
                 territoryCommand::complete);
             // Yield-area surveys (PandiO/knk-workspace#679): /knk production survey|area show; answers "off" without production.enabled
             var productionCommand = new net.knightsandkings.knk.paper.commands.ProductionAdminCommand(
-                () -> surveyModule, areaOutlineRenderer, this);
+                () -> surveyModule, areaOutlineRenderer, this)
+                .withHarvest(() -> harvestModule); // player harvesting (#134): /knk production harvest status|refresh
             knkAdminCommand.registerSubcommand(
                 net.knightsandkings.knk.paper.commands.ProductionAdminCommand.metadata(),
                 productionCommand::execute,
