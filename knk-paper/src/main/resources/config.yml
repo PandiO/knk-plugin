@@ -514,7 +514,10 @@ menus:
   # console and Bedrock players, who can't type commands easily. It is a pointer, not a game item: it never drops
   # on the ground (death included), never goes into a chest, crafting grid, item frame or kit scan, and can't be
   # placed. A player's own item in the slot is moved to a free slot; with a full inventory nothing is given.
-  # Read at startup (restart or /reload to change it).
+  # Read at startup (restart or /reload to change it). Since PandiO/knk-workspace#871 the web app's game settings page
+  # (Menu item card: look, an action per click, siege overrides) replaces these keys as soon as the API answers and
+  # applies its changes without a restart; these keys are the fallback while the API is unreachable at startup.
+  # A shift-click counts as the plain click here (SHIFT_LEFT_CLICK / SHIFT_RIGHT_CLICK may also be listed in open-on).
   menu-item:
     enabled: true
     give-to: all              # all | bedrock (Floodgate players only)

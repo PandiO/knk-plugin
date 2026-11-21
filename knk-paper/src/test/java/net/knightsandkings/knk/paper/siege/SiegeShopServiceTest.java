@@ -288,8 +288,8 @@ class SiegeShopServiceTest {
         assertEquals(List.of("&aSiege weapons", "&aConsumables"), shop.categories(alice).stream().map(c -> c.getName()).toList());
         ShopEntryView trebuchet = shop.entries(alice, 1).get(0);
         assertEquals("DISABLED", trebuchet.getDisplayMode());
-        assertTrue(trebuchet.getLines().contains("&cLocked: unlock it in /menu → Minigames → Siege unlocks."));
-        assertEquals("Locked: unlock it in /menu → Minigames → Siege unlocks.", plain(shop.buy(alice, 21)));
+        assertTrue(trebuchet.getLines().contains("&cLocked: unlock it in /menu → Siege Minigame → Siege unlocks."));
+        assertEquals("Locked: unlock it in /menu → Siege Minigame → Siege unlocks.", plain(shop.buy(alice, 21)));
 
         unlocks.put(31, Set.of(5));
         endMatch();

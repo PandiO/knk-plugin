@@ -73,6 +73,7 @@ class MenuOpenerConfigTest {
         MenuOpenerSettings s = MenuOpenerConfig.read(yaml, LOG);
         assertEquals(Audience.ALL, s.audience());
         assertEquals(8, s.slot());
-        assertEquals(EnumSet.allOf(Click.class), s.openOn());
+        assertEquals(MenuOpenerSettings.defaults().openOn(), s.openOn());
+        assertEquals(EnumSet.allOf(Click.class), s.clicks().keySet(), "every click opens the menu, as before");
     }
 }
