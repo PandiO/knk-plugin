@@ -123,7 +123,7 @@ public class TempRegionReleasePass {
                 return;
             }
             result.removed().add(name);
-            LOGGER.info("Removed temp region " + name + " (" + describe(release.reason()) + "; no domain or lootbox area uses it)");
+            LOGGER.info("Removed temp region " + name + " (" + describe(release.reason()) + "; no domain, lootbox area or landmark uses it)");
             outcome = TempRegionRelease.Outcome.REMOVED;
         } else if (decision == ReleaseDecision.MISSING) {
             result.missing().add(name);

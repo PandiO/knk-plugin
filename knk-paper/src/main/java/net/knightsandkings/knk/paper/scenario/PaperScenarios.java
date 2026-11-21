@@ -14,6 +14,8 @@ import net.knightsandkings.knk.paper.scenario.scenarios.GateOpenCloseScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateOpeningLeavesNeighboursScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateSideBySideScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GlobalRegionExplosionScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.LandmarkRegionRenameScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.LandmarkRegionReplaceScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxAreaRenameScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxAreaReplaceScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnOnGroundScenario;
@@ -87,6 +89,9 @@ public final class PaperScenarios {
             .register(new LootboxSpawnOnGroundScenario())
             .register(new LootboxSpawnUnderRoofScenario())
             .register(new LootboxSwitchedOffScenario())
+            // landmark regions drawn through the form's region task (PandiO/knk-workspace#945)
+            .register(new LandmarkRegionRenameScenario())
+            .register(new LandmarkRegionReplaceScenario())
             // NPC wall corners and stuck recovery (implementation plan 4b.2 item 18, PandiO/knk-workspace#521); the
             // walking ones need Citizens, which CI's paper-boot server has as a pinned build
             .register(new NpcCornersLineScenario())

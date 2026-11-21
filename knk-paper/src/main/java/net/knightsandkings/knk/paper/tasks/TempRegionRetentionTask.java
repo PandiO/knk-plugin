@@ -7,7 +7,9 @@ import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxArea;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
+import net.knightsandkings.knk.core.domain.landmarks.KnkLandmark;
 import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
+import net.knightsandkings.knk.core.ports.api.LandmarksApi;
 import net.knightsandkings.knk.core.ports.api.LootboxesQueryApi;
 import net.knightsandkings.knk.core.regions.RegionRenamePlan;
 import net.knightsandkings.knk.core.regions.SubRegionMirror;
@@ -41,7 +43,8 @@ import java.util.logging.Logger;
  * with the same fresh API lookup ({@link TempRegionCleanupPolicy#decideOrphanedSubRegion}).
  *
  * PandiO/knk-workspace#34: the fresh lookup also asks the lootbox spawn areas ({@link #regionUsageVia}), so an area
- * whose drawn region could not be renamed to {@code lootbox_area_<id>} keeps it.
+ * whose drawn region could not be renamed to {@code lootbox_area_<id>} keeps it. PandiO/knk-workspace#945: and the
+ * landmarks ({@link #landmarkUsageVia}), for a landmark region that could not be renamed to {@code landmark_<id>}.
  *
  * PandiO/knk-workspace#269: with {@link #setReleasePass} it also runs {@link TempRegionReleasePass} every few minutes,
  * which removes the temp regions the API released (abandoned drafts, tasks closed without a result) without waiting for
@@ -155,11 +158,56 @@ public class TempRegionRetentionTask {
     }
 
     /**
-     * #34: the fresh lookup the cleanup makes before deleting: a domain ({@link #domainUsageVia}) or a lootbox spawn area
-     * ({@link #lootboxAreaUsageVia}) using the region keeps it; deleted only when both answer unused.
+     * PandiO/knk-workspace#945: whether a landmark's extent is the region, from a fresh {@code GET api/landmarks} (every
+     * landmark, whatever {@code navigation.landmarks} says on this server): in use / unused, or unknown when the API can't
+     * be asked. A landmark whose drawn region could not be renamed to {@code landmark_<id>} keeps it. A 404 is an API
+     * from before landmarks (no such route), which has none: unused. Not world-qualified, like the domain lookup.
+     * Blocks; call off the main thread.
      */
-    public static Function<String, Usage> regionUsageVia(DomainsQueryApi domainsQueryApi, LootboxesQueryApi lootboxesQueryApi) {
-        return TempRegionCleanupPolicy.inUseByAny(domainUsageVia(domainsQueryApi), lootboxAreaUsageVia(lootboxesQueryApi));
+    public static Function<String, Usage> landmarkUsageVia(LandmarksApi landmarksApi) {
+        return regionId -> {
+            if (landmarksApi == null) {
+                return Usage.UNKNOWN;
+            }
+            try {
+                List<KnkLandmark> landmarks = landmarksApi.list(null).get(LOOKUP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (landmarks == null) {
+                    return Usage.UNKNOWN;
+                }
+                for (KnkLandmark landmark : landmarks) {
+                    if (landmark != null && landmark.regionId() != null && landmark.regionId().trim().equalsIgnoreCase(regionId)) {
+                        return Usage.IN_USE;
+                    }
+                }
+                return Usage.UNUSED;
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause() instanceof java.util.concurrent.CompletionException completion
+                        && completion.getCause() != null ? completion.getCause() : e.getCause();
+                if (cause instanceof ApiException apiException && apiException.getStatusCode() == 404) {
+                    return Usage.UNUSED;
+                }
+                LOGGER.warning("Could not check whether a landmark uses temp region " + regionId + "; keeping it: "
+                        + (cause != null ? cause.getMessage() : e.getMessage()));
+                return Usage.UNKNOWN;
+            } catch (TimeoutException e) {
+                LOGGER.warning("Timed out checking whether a landmark uses temp region " + regionId + "; keeping it");
+                return Usage.UNKNOWN;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return Usage.UNKNOWN;
+            }
+        };
+    }
+
+    /**
+     * #34: the fresh lookup the cleanup makes before deleting: a domain ({@link #domainUsageVia}), a lootbox spawn area
+     * ({@link #lootboxAreaUsageVia}) or, since #945, a landmark ({@link #landmarkUsageVia}) using the region keeps it;
+     * deleted only when all of them answer unused.
+     */
+    public static Function<String, Usage> regionUsageVia(DomainsQueryApi domainsQueryApi, LootboxesQueryApi lootboxesQueryApi,
+                                                         LandmarksApi landmarksApi) {
+        return TempRegionCleanupPolicy.inUseByAny(domainUsageVia(domainsQueryApi), lootboxAreaUsageVia(lootboxesQueryApi),
+                landmarkUsageVia(landmarksApi));
     }
 
     /**
@@ -250,10 +298,10 @@ public class TempRegionRetentionTask {
             int keptUnknown = sweep.usageUnknown().size();
             if (deletedCount > 0 || keptInUse > 0 || keptUnknown > 0) {
                 LOGGER.info("Temp region retention cleanup completed. Deleted " + deletedCount + ", kept " + keptInUse
-                        + " used by a domain or lootbox area" + (keptUnknown > 0 ? ", kept " + keptUnknown + " because the API could not be asked" : ""));
+                        + " used by a domain, lootbox area or landmark" + (keptUnknown > 0 ? ", kept " + keptUnknown + " because the API could not be asked" : ""));
             }
             if (keptInUse > 0) {
-                LOGGER.info("Temp-named regions used by a domain or lootbox area can be renamed (domain_<id>, lootbox_area_<id>) with POST /api/Regions/finalize-temp-names");
+                LOGGER.info("Temp-named regions used by a domain, lootbox area or landmark can be renamed (domain_<id>, lootbox_area_<id>, landmark_<id>) with POST /api/Regions/finalize-temp-names");
             }
         } catch (Exception e) {
             LOGGER.warning("Error running temp region retention cleanup: " + e.getMessage());

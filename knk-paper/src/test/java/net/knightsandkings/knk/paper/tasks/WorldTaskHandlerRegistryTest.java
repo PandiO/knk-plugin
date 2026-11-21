@@ -93,4 +93,40 @@ class WorldTaskHandlerRegistryTest {
         verify(typeOnly, org.mockito.Mockito.times(2)).cancel(player);
         verify(typeOnly).setLifecycle(lifecycle);
     }
+
+    // PandiO/knk-workspace#944: the region handler is found by task type, so it runs on the Landmark form's RegionId.
+    @Test
+    void theRegionTaskOnAFieldNotNamedWgRegionId_findsTheRegionHandler() {
+        WorldTaskHandlerRegistry registry = new WorldTaskHandlerRegistry();
+        WgRegionIdTaskHandler region = new WgRegionIdTaskHandler(mock(net.knightsandkings.knk.core.ports.api.WorldTasksApi.class),
+                mock(org.bukkit.plugin.Plugin.class));
+        region.registerWith(registry);
+
+        for (String type : java.util.List.of("ReagionCreate", "RegionCreate", "RegionClaim")) {
+            assertEquals(Optional.of(region), registry.getHandler(type, "RegionId"), type);
+        }
+        // Older configurations: the field name still finds it, whatever the task type.
+        assertEquals(Optional.of(region), registry.getHandler("Custom", "WgRegionId"));
+        assertEquals(Optional.of(region), registry.getHandler("WgRegionId"));
+        assertEquals(region, registry.getWgRegionIdHandler());
+        assertEquals(Optional.empty(), registry.getHandler("LocationSelection", "RegionId"));
+    }
+
+    // #944: registered under four keys, the region handler is still one handler (no double cancel, no double lifecycle).
+    @Test
+    void theRegionHandlerUnderSeveralKeys_isCancelledOnce() {
+        WorldTaskHandlerRegistry registry = new WorldTaskHandlerRegistry();
+        IWorldTaskHandler region = mock(IWorldTaskHandler.class);
+        Player player = mock(Player.class);
+        when(region.getFieldName()).thenReturn("WgRegionId");
+        when(region.isHandling(player)).thenReturn(true);
+        registry.registerHandler(region);
+        registry.registerHandler("ReagionCreate", region);
+        registry.registerHandler("RegionClaim", region);
+
+        registry.cancelAllTasks(player);
+
+        verify(region, org.mockito.Mockito.times(1)).cancel(player);
+        assertEquals(Optional.of(region), registry.getActiveHandler(player));
+    }
 }
