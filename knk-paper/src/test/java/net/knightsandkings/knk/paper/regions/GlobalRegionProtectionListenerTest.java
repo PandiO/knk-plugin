@@ -111,6 +111,17 @@ class GlobalRegionProtectionListenerTest {
     }
 
     @Test
+    void aHarvestAnotherRuleAllowsPassesOutsideEveryRegion_134() {
+        listener.setAllowedBreaks((who, block) -> block.getType() == Material.OAK_LOG);
+        BlockBreakEvent log = new BlockBreakEvent(block(Material.OAK_LOG, 5), player);
+        listener.onBreak(log);
+        assertFalse(log.isCancelled());
+        BlockBreakEvent stone = new BlockBreakEvent(block(Material.STONE, 5), player);
+        listener.onBreak(stone);
+        assertTrue(stone.isCancelled());
+    }
+
+    @Test
     void placingOutsideEveryRegionIsRefused() {
         BlockPlaceEvent event = place(5);
         listener.onPlace(event);

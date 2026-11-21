@@ -1236,6 +1236,30 @@ production:
   # (production.delivery). Needs production.enabled; off, kits and lootboxes drop leftovers at the player's feet as before.
   inbox:
     join-summary: true             # tell a player who joins with items in their inbox (count, expiry within 7 days, near-cap)
+  # Player harvesting and block regeneration (#134, P8): inside a production area, a player who meets a harvest rule
+  # (permission or title, tool, cooldown; rules are written in the web app) may break or kill the rule's targets; the
+  # vanilla drops are replaced by the rule's blueprint items (the worker's share; the rest goes to the structure's Output)
+  # and the block gets a placeholder (depleted block, replanted crop, air, or a sapling for a whole felled tree) until it
+  # regenerates. Other players are refused the rule's targets; every other block is left to WorldGuard as before.
+  # Reads GET api/Harvest/catalog, sends POST api/Harvest/reports. Regeneration jobs, unanswered reports and owed shares
+  # are kept in plugins/KnightsAndKings/production/harvest/. Needs production.enabled; staff with
+  # knk.admin.world.production are left to WorldGuard (not refused, not harvested).
+  harvest:
+    catalog-refresh-minutes: 5     # how often the rules, areas and pool fill are re-read (also /knk production harvest refresh)
+    report-flush-seconds: 2        # how often waiting harvests are sent; the share is paid when the API answers
+    report-batch: 200              # entries per report (the API takes at most production.harvest.maxEntriesPerReport)
+    regen-blocks-per-tick: 64      # blocks restored per server tick at most (main-thread budget)
+    regen-retry-seconds: 5         # a restore blocked by a player or mob standing in the block is tried again after this
+    save-seconds: 10               # how often changed regeneration jobs, reports and owed shares are written to disk
+    deny-at-empty-pool: false      # true: refuse harvests while the area's pool is empty (the API books them either way)
+    tree-max-logs: 256             # a log cluster with more logs is not felled whole (a building or a giant tree)
+    tree-max-leaves: 1500          # leaves taken with a felled tree at most
+    max-area-chunks: 256           # an area spanning more chunks is left out of harvesting
+    messages:                      # & colour codes; {reason}, {amount}, {item}, {area}
+      denied: "&cYou can't harvest this here: {reason}."
+      regenerating: "&7This block is regenerating."
+      paid: "&a+{amount} {item} &7(your share of the harvest)"
+      rejected: "&cYour harvest at {area} was not booked: {reason}."
 lootboxes:
   enabled: true
   # Sent with every spawn so the drop log shows which server made the box.

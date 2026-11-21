@@ -59,6 +59,14 @@ public final class SurveyModule implements Listener {
     private final List<BukkitTask> tasks = new ArrayList<>();
 
     public SurveyModule(Plugin plugin, SurveySettings settings, ProductionSurveyApi api) {
+        this(plugin, settings, api, PlaceholderOverlay.NONE);
+    }
+
+    /**
+     * @param placeholders blocks waiting to regenerate (player harvesting, PandiO/knk-workspace#134): surveys count them as
+     *                     their original
+     */
+    public SurveyModule(Plugin plugin, SurveySettings settings, ProductionSurveyApi api, PlaceholderOverlay placeholders) {
         this.plugin = plugin;
         this.settings = settings;
         this.api = api;
@@ -71,7 +79,7 @@ public final class SurveyModule implements Listener {
         this.runner = new SurveyRunner(settings, api, name -> {
             World world = Bukkit.getWorld(name);
             return world == null ? null : SurveyWorld.of(world);
-        }, regions, PlaceholderOverlay.NONE, counting, this::onMain, plugin.getLogger(), Clock.systemUTC());
+        }, regions, placeholders == null ? PlaceholderOverlay.NONE : placeholders, counting, this::onMain, plugin.getLogger(), Clock.systemUTC());
         this.notable = new NotableChangeTracker(settings.notableChangeBlocks(),
                 TimeUnit.MINUTES.toMillis(settings.notableCooldownMinutes()));
         runner.addListener(outcome -> notable.surveyed(outcome.due().area().areaId()));

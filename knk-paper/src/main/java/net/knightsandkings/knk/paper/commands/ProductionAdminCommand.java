@@ -16,6 +16,7 @@ import net.knightsandkings.knk.core.production.survey.AreaSpec;
 import net.knightsandkings.knk.paper.production.AreaOutlineRenderer;
 import net.knightsandkings.knk.paper.production.SurveyModule;
 import net.knightsandkings.knk.paper.production.SurveyRunner;
+import net.knightsandkings.knk.paper.production.harvest.HarvestModule;
 
 /**
  * {@code /knk production} (PandiO/knk-workspace#679, PRODUCTION_KINDS § 3.2-§ 3.3, node {@value #PERMISSION}):
@@ -26,6 +27,8 @@ import net.knightsandkings.knk.paper.production.SurveyRunner;
  *   <li>{@code survey status}: the queue, the survey running now, the last results and the notable-change counters.</li>
  *   <li>{@code area show <structure> [area] [seconds]}: draws the structure's areas with particles for the sender
  *       (default 30 s).</li>
+ *   <li>{@code harvest status}: player harvesting (PandiO/knk-workspace#134): the catalogue, blocks waiting to regenerate,
+ *       reports waiting for the API; {@code harvest refresh} re-reads the harvest catalogue now.</li>
  * </ol>
  * With {@code production.enabled: false} every form answers that production is off.
  */
@@ -38,6 +41,7 @@ public final class ProductionAdminCommand {
     private final Supplier<SurveyModule> module;
     private final AreaOutlineRenderer renderer;
     private final Plugin plugin;
+    private Supplier<HarvestModule> harvest = () -> null;
 
     /** @param module the running surveys; null while {@code production.enabled} is off */
     public ProductionAdminCommand(Supplier<SurveyModule> module, AreaOutlineRenderer renderer, Plugin plugin) {
@@ -46,23 +50,33 @@ public final class ProductionAdminCommand {
         this.plugin = plugin;
     }
 
+    /** Player harvesting (#134): the running module, null while it is off. */
+    public ProductionAdminCommand withHarvest(Supplier<HarvestModule> harvestModule) {
+        this.harvest = harvestModule == null ? () -> null : harvestModule;
+        return this;
+    }
+
     public static CommandMetadata metadata() {
         return new CommandMetadata(
                 "production",
                 "Survey a production structure's yield areas now, show the survey queue, or draw an area (production.enabled)",
-                "/knk production <survey <structure> [area]|survey status|area show <structure> [area] [seconds]>",
+                "/knk production <survey <structure> [area]|survey status|area show <structure> [area] [seconds]|harvest <status|refresh>>",
                 PERMISSION,
-                List.of("/knk production survey 12", "/knk production survey status", "/knk production area show 12"));
+                List.of("/knk production survey 12", "/knk production survey status", "/knk production area show 12",
+                        "/knk production harvest status"));
     }
 
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length == 1) {
-            return filter(List.of("survey", "area"), args[0]);
+            return filter(List.of("survey", "area", "harvest"), args[0]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("survey")) {
             List<String> options = new ArrayList<>(List.of("status"));
             options.addAll(structureIds());
             return filter(options, args[1]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("harvest")) {
+            return filter(List.of("status", "refresh"), args[1]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("area")) {
             return filter(List.of("show"), args[1]);
@@ -93,7 +107,9 @@ public final class ProductionAdminCommand {
             return true;
         }
         String action = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
-        if (action.equals("survey") && args.length >= 2 && args[1].equalsIgnoreCase("status")) {
+        if (action.equals("harvest")) {
+            harvest(sender, args);
+        } else if (action.equals("survey") && args.length >= 2 && args[1].equalsIgnoreCase("status")) {
             status(sender, surveys);
         } else if (action.equals("survey") && args.length >= 2) {
             survey(sender, surveys, args);
@@ -103,6 +119,30 @@ public final class ProductionAdminCommand {
             sender.sendMessage(ChatColor.YELLOW + "Usage: " + metadata().usage());
         }
         return true;
+    }
+
+    private void harvest(CommandSender sender, String[] args) {
+        HarvestModule module = harvest.get();
+        if (module == null) {
+            sender.sendMessage(ChatColor.RED + "Player harvesting is not running on this server.");
+            return;
+        }
+        String what = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "status";
+        if (what.equals("refresh")) {
+            sender.sendMessage(ChatColor.GRAY + "Reading the harvest catalogue...");
+            module.refreshCatalog().whenComplete((catalog, error) -> reply(sender, error != null
+                    ? ChatColor.RED + "Catalogue not read: " + SurveyRunner.describe(error)
+                    : ChatColor.GREEN + "Catalogue read: " + catalog.rules().size() + " rules, " + catalog.areas().size()
+                            + " areas" + (catalog.featureEnabled() ? "" : ChatColor.YELLOW + " (the API's flag is off)")));
+            return;
+        }
+        if (!what.equals("status")) {
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /knk production harvest <status|refresh>");
+            return;
+        }
+        for (String line : module.status()) {
+            sender.sendMessage(ChatColor.GRAY + line);
+        }
     }
 
     private void survey(CommandSender sender, SurveyModule surveys, String[] args) {

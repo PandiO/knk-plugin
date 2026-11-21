@@ -90,6 +90,8 @@ public final class GlobalRegionProtectionListener implements Listener {
     private final Predicate<Player> bypass;
     private final LongSupplier clock;
     private final Map<UUID, Long> lastNoticeAt = new ConcurrentHashMap<>();
+    /** Breaks another rule lets through out here (player harvesting in a yield area, PandiO/knk-workspace#134). */
+    private volatile java.util.function.BiPredicate<Player, org.bukkit.block.Block> allowedBreaks = (player, block) -> false;
 
     /**
      * @param enabled        the config switch, read on every event so a config reload takes effect
@@ -167,9 +169,18 @@ public final class GlobalRegionProtectionListener implements Listener {
     // HIGH like the hub's building rules: after the LOWEST join-loading guard, before the gate listener at HIGHEST
     // (gate doors sit in their structure's region, so the rule never reaches them).
 
+    /**
+     * Breaks that are allowed out here although the player may not build (PandiO/knk-workspace#134: a harvest of a
+     * rule's target in a yield area outside every region, such as a logger's radius in the wilderness).
+     */
+    public void setAllowedBreaks(java.util.function.BiPredicate<Player, org.bukkit.block.Block> allowed) {
+        this.allowedBreaks = allowed == null ? (player, block) -> false : allowed;
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
-        if (restricted(event.getPlayer(), event.getBlock().getLocation())) {
+        if (restricted(event.getPlayer(), event.getBlock().getLocation())
+                && !allowedBreaks.test(event.getPlayer(), event.getBlock())) {
             event.setCancelled(true);
             notify(event.getPlayer(), BUILD_NOTICE);
         }
