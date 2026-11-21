@@ -160,6 +160,9 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
                     if (!trip.hatchOpen() && !everOpened.get()) {
                         failures.add("the hatch was never opened");
                     }
+                    if (!failures.isEmpty()) {
+                        failures.add(lineNear(n, npc.get(), at));
+                    }
                 } else if (trip.arrives()) {
                     if (!(result.get() instanceof NavigationResult.Arrived)) {
                         failures.add("the NPC did not arrive: " + (result.get() == null ? "still walking after "
@@ -193,6 +196,31 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
                 n.remove(new ArrayList<>(n.movers()));
                 return failures.isEmpty() ? null : String.join("; ", failures) + n.tail(20);
             });
+    }
+
+    /** For a failed trip down: the route line's points and the trail's first waypoints round the NPC (scene). */
+    private static String lineNear(ScenarioNpcs npcs, NpcMover m, NavPoint at) {
+        StringBuilder out = new StringBuilder("line near it:");
+        net.knightsandkings.knk.core.npc.nav.RouteFollower f = npcs.service().followerOf(m.id());
+        if (f != null && at != null) {
+            for (NavPoint p : f.line()) {
+                if (p.horizontalDistance(at) <= 4 && Math.abs(p.y() - at.y()) <= 5) {
+                    out.append(' ').append(exact(p));
+                }
+            }
+        }
+        out.append("; trail:");
+        List<NavPoint> trail = npcs.service().trailOf(m.id());
+        if (trail != null) {
+            for (NavPoint p : trail.subList(0, Math.min(8, trail.size()))) {
+                out.append(' ').append(exact(p));
+            }
+        }
+        return out.append("; at ").append(at == null ? "-" : exact(at)).toString();
+    }
+
+    private static String exact(NavPoint p) {
+        return String.format(Locale.ROOT, "(%.2f %.2f %.2f)", p.x(), p.y(), p.z());
     }
 
     private static long stuckSpells(ScenarioNpcs npcs) {
