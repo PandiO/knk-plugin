@@ -164,7 +164,7 @@ jobs:
         # Production P4b (#679) adds production-area-survey (a few seconds): 68.
         # Production P6 (#74) adds storage-display-double-chest (about 3 s): 69.
         env:
-          MIN_SCENARIOS: 71
+          MIN_SCENARIOS: 73
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"

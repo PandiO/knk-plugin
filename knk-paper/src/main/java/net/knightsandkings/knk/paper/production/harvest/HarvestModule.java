@@ -95,6 +95,9 @@ public final class HarvestModule implements Listener {
     private record Pending(UUID player, HarvestGate.Decision decision) {
     }
 
+    private record BlockKey(UUID world, int x, int y, int z) {
+    }
+
     private final Plugin plugin;
     private final HarvestSettings settings;
     private final HarvestApi api;
@@ -112,7 +115,7 @@ public final class HarvestModule implements Listener {
     private final HarvestOutbox outbox;
     private final OwedPay owed = new OwedPay();
     private final HarvestCooldowns cooldowns = new HarvestCooldowns();
-    private final Map<Long, Pending> pending = new HashMap<>();
+    private final Map<BlockKey, Pending> pending = new HashMap<>();
     private final Map<Integer, Double> liveFill = new ConcurrentHashMap<>();
     private final Map<String, Long> lastMessage = new HashMap<>();
     private final List<BukkitTask> tasks = new ArrayList<>();
@@ -338,7 +341,11 @@ public final class HarvestModule implements Listener {
     /** The LOW decision for this break, if it allowed a harvest by {@code player} (the WorldGuard listener asks). */
     boolean allowed(Player player, Block block) {
         Pending p = pending.get(key(block));
-        return p != null && p.player().equals(player.getUniqueId()) && p.decision().kind() == HarvestGate.Kind.ALLOW;
+        if (p == null) {
+            // WorldGuard asked before this plugin's LOW handler ran: decide now, the later handlers decide again
+            return !bypass.test(player) && decide(player, block).kind() == HarvestGate.Kind.ALLOW;
+        }
+        return p.player().equals(player.getUniqueId()) && p.decision().kind() == HarvestGate.Kind.ALLOW;
     }
 
     /** Whether {@code player} may harvest {@code entity} (the WorldGuard damage check asks). */
@@ -778,8 +785,8 @@ public final class HarvestModule implements Listener {
         player.sendMessage(ChatColor.translateAlternateColorCodes('&', message));
     }
 
-    private static long key(Block block) {
-        return PlaceholderOverlay.key(block.getX(), block.getY(), block.getZ()) ^ ((long) block.getWorld().getName().hashCode() << 7);
+    private static BlockKey key(Block block) {
+        return new BlockKey(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ());
     }
 
     static String describe(Throwable error) {

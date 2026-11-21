@@ -139,9 +139,11 @@ public final class TreeFeller {
                     continue;
                 }
                 String data = blocks.at(nx, ny, nz);
-                if (isNaturalLeaves(data)) {
+                int steps = p[3] + 1;
+                if (isNaturalLeaves(data) && steps <= leafDistance(data)) {
+                    // a leaf whose distance is below the steps from this tree is nearer another tree's log: not ours
                     leaves.put(key, new Pos(nx, ny, nz, data));
-                    queue.add(new int[] {nx, ny, nz, p[3] + 1});
+                    queue.add(new int[] {nx, ny, nz, steps});
                     if (leaves.size() >= maxLeaves) {
                         break;
                     }
@@ -150,6 +152,19 @@ public final class TreeFeller {
         }
         return List.copyOf(leaves.values());
     }
+
+    /** A leaf's {@code distance} to the nearest log (1-7), or 7 when the block has none. */
+    static int leafDistance(String blockData) {
+        if (blockData != null) {
+            java.util.regex.Matcher m = DISTANCE.matcher(blockData);
+            if (m.find()) {
+                return Integer.parseInt(m.group(1));
+            }
+        }
+        return 7;
+    }
+
+    private static final java.util.regex.Pattern DISTANCE = java.util.regex.Pattern.compile("[\\[,]distance=(\\d+)");
 
     private static Pos base(java.util.Collection<Pos> logs) {
         return logs.stream().min(Comparator.comparingInt(Pos::y).thenComparingInt(Pos::x).thenComparingInt(Pos::z))

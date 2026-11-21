@@ -163,6 +163,9 @@ public final class PaperScenarios {
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.StorageDisplayDoubleChestScenario())
             // P7b (PandiO/knk-workspace#684): kit leftovers and offline kits to the reward inbox; claim with partial space
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerKitOverflowInboxScenario())
-            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerInboxClaimScenario());
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerInboxClaimScenario())
+            // P8 (PandiO/knk-workspace#134): harvest and regenerate in a production area; a felled tree restored by snapshot
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestRegenerateScenario())
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestTreeScenario());
     }
 }

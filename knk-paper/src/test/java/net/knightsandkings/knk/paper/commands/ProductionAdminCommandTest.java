@@ -119,7 +119,15 @@ class ProductionAdminCommandTest {
         String said = drain(staff);
         assertTrue(said.contains("Area #6 \"Pit 6\" of structure #12 Quarry: Cuboid, exclusive, x 0..9, y 60..70, z 0..9"), said);
         assertTrue(said.contains("Drawing 1 outline(s) for 5 s."), said);
-        assertEquals(List.of("survey", "area"), command.complete(staff, new String[] {""}));
+        assertEquals(List.of("survey", "area", "harvest"), command.complete(staff, new String[] {""}));
         assertEquals(List.of("status", "12"), command.complete(staff, new String[] {"survey", ""}));
+        assertEquals(List.of("status", "refresh"), command.complete(staff, new String[] {"harvest", ""}));
+    }
+
+    @Test
+    void harvestStatusWithoutTheHarvestModuleSaysItIsNotRunning_134() {
+        module.set(new SurveyModule(plugin, SurveySettings.defaults(true), api));
+        command.execute(staff, new String[] {"harvest", "status"});
+        assertTrue(drain(staff).contains("Player harvesting is not running on this server."));
     }
 }
