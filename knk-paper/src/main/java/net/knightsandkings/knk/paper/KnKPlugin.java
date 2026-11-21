@@ -2715,13 +2715,16 @@ public class KnKPlugin extends JavaPlugin {
         pluginManager.registerEvents(new WorldGuardRegionListener(regionTracker), this);
         // QOL hotfix 2026-10-25: where only __global__ applies, default players neither build nor use decorations and
         // crafting blocks, and explosions break nothing (regions.global.protection; doors and storage stay usable).
-        pluginManager.registerEvents(new net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener(
+        var globalProtection = new net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener(
             () -> getConfig().getBoolean(net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.CONFIG_PATH, true),
             net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.craftingBlocks(
                 getConfig().getStringList(net.knightsandkings.knk.paper.regions.GlobalRegionProtectionListener.CRAFTING_BLOCKS_PATH),
                 getLogger()::warning),
             regionTracker.regionIds()::at,
-            player -> hasRegionBypass(player) || hasWorldGuardRegionBypass(player)), this);
+            player -> hasRegionBypass(player) || hasWorldGuardRegionBypass(player));
+        // Player harvesting (#134): a qualified harvest in a yield area outside every region (a logger's radius) passes.
+        globalProtection.setAllowedBreaks(net.knightsandkings.knk.paper.production.harvest.HarvestModule::anyAllowsBreak);
+        pluginManager.registerEvents(globalProtection, this);
         // PandiO/knk-workspace#157: storage in regions that refuse it (towns and other domains) for players in staff or
         // owner mode and holders of knk.region.bypass.containers (Moderator and Admin), before WorldGuard's own check.
         pluginManager.registerEvents(new net.knightsandkings.knk.paper.regions.ContainerAccessWorldGuardListener(

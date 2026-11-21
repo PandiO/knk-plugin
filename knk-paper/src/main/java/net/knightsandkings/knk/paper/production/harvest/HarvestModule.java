@@ -24,7 +24,6 @@ import java.util.function.Predicate;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
-import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.enchantments.Enchantment;
@@ -97,6 +96,9 @@ public final class HarvestModule implements Listener {
 
     private record BlockKey(UUID world, int x, int y, int z) {
     }
+
+    /** The running modules (normally one; a scenario adds its own), for the global-region protection's question. */
+    private static final Set<HarvestModule> RUNNING = ConcurrentHashMap.newKeySet();
 
     private final Plugin plugin;
     private final HarvestSettings settings;
@@ -179,6 +181,7 @@ public final class HarvestModule implements Listener {
         broken.forEach(line -> plugin.getLogger().warning("Harvest: skipped a broken outbox line: " + line));
         int owing = owed.load(store.read(HarvestStore.OWED));
         Bukkit.getPluginManager().registerEvents(this, plugin);
+        RUNNING.add(this);
         try {
             worldGuardListener = new HarvestWorldGuardListener(this);
             Bukkit.getPluginManager().registerEvents(worldGuardListener, plugin);
@@ -198,6 +201,7 @@ public final class HarvestModule implements Listener {
     }
 
     public void stop() {
+        RUNNING.remove(this);
         HandlerList.unregisterAll(this);
         if (worldGuardListener != null) {
             HandlerList.unregisterAll(worldGuardListener);
@@ -348,6 +352,24 @@ public final class HarvestModule implements Listener {
         return p.player().equals(player.getUniqueId()) && p.decision().kind() == HarvestGate.Kind.ALLOW;
     }
 
+    /**
+     * Whether this break is a harvest the gate allowed (the global-region protection asks, so a qualified harvest in a
+     * yield area outside every region passes it).
+     */
+    public boolean allowsBreak(Player player, Block block) {
+        return allowed(player, block);
+    }
+
+    /** Whether a running module allows this break as a harvest (the global-region protection asks). */
+    public static boolean anyAllowsBreak(Player player, Block block) {
+        for (HarvestModule module : RUNNING) {
+            if (module.allowsBreak(player, block)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Whether {@code player} may harvest {@code entity} (the WorldGuard damage check asks). */
     boolean allowed(Player player, Entity entity) {
         return !bypass.test(player) && decide(player, entity).kind() == HarvestGate.Kind.ALLOW;
@@ -482,17 +504,25 @@ public final class HarvestModule implements Listener {
         return material.createBlockData().getAsString();
     }
 
-    /** A sapling of {@code saplingName} when the ground under (x, y, z) takes one, else air. */
+    /** Ground a sapling takes, for servers where the game's own check is not available. */
+    private static final Set<String> SAPLING_GROUND = Set.of("DIRT", "GRASS_BLOCK", "PODZOL", "COARSE_DIRT", "ROOTED_DIRT",
+            "MYCELIUM", "MOSS_BLOCK", "PALE_MOSS_BLOCK", "MUD", "MUDDY_MANGROVE_ROOTS", "FARMLAND", "CRIMSON_NYLIUM",
+            "WARPED_NYLIUM", "SOUL_SOIL");
+
+    /** A sapling of {@code saplingName} when the ground under (x, y, z) takes one (the game's check), else air. */
     static String sapling(World world, int x, int y, int z, String saplingName) {
         Material sapling = Material.matchMaterial(saplingName);
         if (sapling == null || !sapling.isBlock()) {
             sapling = Material.OAK_SAPLING;
         }
-        Material ground = world.getBlockAt(x, y - 1, z).getType();
-        boolean fungus = sapling == Material.CRIMSON_FUNGUS || sapling == Material.WARPED_FUNGUS;
-        boolean fits = fungus ? (ground == Material.CRIMSON_NYLIUM || ground == Material.WARPED_NYLIUM || Tag.DIRT.isTagged(ground))
-                : Tag.DIRT.isTagged(ground) || ground == Material.FARMLAND;
-        return fits ? sapling.createBlockData().getAsString() : AIR;
+        var data = sapling.createBlockData();
+        boolean fits;
+        try {
+            fits = data.isSupported(world.getBlockAt(x, y, z));
+        } catch (RuntimeException | LinkageError e) {
+            fits = SAPLING_GROUND.contains(world.getBlockAt(x, y - 1, z).getType().name());
+        }
+        return fits ? data.getAsString() : AIR;
     }
 
     private static String species(String material) {

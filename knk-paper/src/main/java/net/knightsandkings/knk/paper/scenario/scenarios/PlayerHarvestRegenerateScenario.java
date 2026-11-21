@@ -55,6 +55,8 @@ public final class PlayerHarvestRegenerateScenario implements Scenario<ScenarioS
                 visitor.join();
             })
             .await("they are online", 200, () -> worker.online() && visitor.online())
+            .await("they have left the join's loading hold", 200,
+                () -> worker.received("You're all set!") && visitor.received("You're all set!"))
             .act("both stand on the floor holding an iron pickaxe", () -> {
                 worker.teleport(8.5, 1, 8.5);
                 visitor.teleport(12.5, 1, 12.5);

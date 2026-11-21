@@ -49,7 +49,7 @@ public final class PlayerHarvestTreeScenario implements Scenario<ScenarioScene> 
                                 scene.block(x, y, z).setType(Material.OAK_LEAVES, false);
                                 Leaves leaves = (Leaves) scene.block(x, y, z).getBlockData();
                                 leaves.setPersistent(false);
-                                leaves.setDistance(1);
+                                leaves.setDistance(Math.abs(x - 16) + Math.abs(z - 16) + (y == 5 ? 1 : 0)); // as the game counts it
                                 scene.block(x, y, z).setBlockData(leaves, false);
                             }
                         }
@@ -63,6 +63,7 @@ public final class PlayerHarvestTreeScenario implements Scenario<ScenarioScene> 
                 worker.join();
             })
             .await("they are online", 200, worker::online)
+            .await("they have left the join's loading hold", 200, () -> worker.received("You're all set!"))
             .act("they stand next to the tree holding an axe", () -> {
                 worker.teleport(13.5, 1, 16.5);
                 worker.inventory().clear();
