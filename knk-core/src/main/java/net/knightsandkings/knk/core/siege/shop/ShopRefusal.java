@@ -53,7 +53,7 @@ public record ShopRefusal(Reason reason, String message) {
     }
 
     public static ShopRefusal locked() {
-        return new ShopRefusal(Reason.LOCKED, "Locked: unlock it in /menu → Minigames → Siege unlocks.");
+        return new ShopRefusal(Reason.LOCKED, "Locked: unlock it in /menu → Siege Minigame → Siege unlocks.");
     }
 
     public static ShopRefusal limitReached(int cap) {

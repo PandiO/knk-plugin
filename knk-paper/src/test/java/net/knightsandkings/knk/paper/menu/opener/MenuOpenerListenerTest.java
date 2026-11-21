@@ -196,4 +196,66 @@ class MenuOpenerListenerTest {
         listener.onDeath(death);
         assertEquals(List.of(other), drops);
     }
+
+    // ==================== #871: actions per click and situation ====================
+
+    /** A listener on the API's seeded table (DESIGN § 4.3.4) with the player in a running PvP match. */
+    private MenuOpenerListener inAMatch(List<net.knightsandkings.knk.core.menu.opener.MenuItemAction> ran) {
+        var situations = new net.knightsandkings.knk.core.menu.opener.MenuItemSituations();
+        situations.provide(net.knightsandkings.knk.core.menu.opener.MenuItemSituations.SIEGE_MATCH, id -> true);
+        var main = net.knightsandkings.knk.core.menu.opener.MenuItemAction.openMenu("main");
+        var information = net.knightsandkings.knk.core.menu.opener.MenuItemAction.openMenu("siege.information");
+        java.util.Map<Click, net.knightsandkings.knk.core.menu.opener.MenuItemAction> clicks = new java.util.EnumMap<>(Click.class);
+        for (Click click : Click.values()) {
+            clicks.put(click, main);
+        }
+        settings = net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings.withActions(true, Audience.ALL, true, true,
+            null, null, null, 8, false, false, clicks, java.util.Map.of("siege.match", java.util.Map.of(
+                Click.LEFT_CLICK, information, Click.RIGHT_CLICK, information,
+                Click.SHIFT_RIGHT_CLICK, net.knightsandkings.knk.core.menu.opener.MenuItemAction.openMenu("siege.shop"))));
+        MenuOpenerService service = new MenuOpenerService(() -> settings, uuid -> false, items,
+            new net.knightsandkings.knk.core.menu.opener.MenuItemActionResolver(situations), (p, action) -> ran.add(action),
+            (task, ticks) -> task.run(), () -> now, 3);
+        return new MenuOpenerListener(service, top -> ownTops.contains(top), block -> block == door);
+    }
+
+    @Test
+    void inAMatchAClickOpensTheSiegeMenuAndShiftRightTheShop_A30() {
+        List<net.knightsandkings.knk.core.menu.opener.MenuItemAction> ran = new ArrayList<>();
+        MenuOpenerListener match = inAMatch(ran);
+        opener = items.create(settings);
+
+        match.onInteract(interact(Action.RIGHT_CLICK_AIR, opener, null));
+        nextClick();
+        when(player.isSneaking()).thenReturn(true);
+        match.onInteract(interact(Action.RIGHT_CLICK_BLOCK, opener, door)); // sneaking: also on a door
+        nextClick();
+        match.onInteract(interact(Action.LEFT_CLICK_AIR, opener, null));
+
+        assertEquals(List.of(net.knightsandkings.knk.core.menu.opener.MenuItemAction.openMenu("siege.information"),
+            net.knightsandkings.knk.core.menu.opener.MenuItemAction.openMenu("siege.shop"),
+            net.knightsandkings.knk.core.menu.opener.MenuItemAction.openMenu("main")), ran,
+            "shift-left is not in the match override, so it opens the main menu");
+    }
+
+    @Test
+    void aLeftClickThatDoesNothingLeavesTheSwingAlone() {
+        settings = net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings.withActions(true, Audience.ALL, true, true,
+            null, null, null, 8, false, false,
+            java.util.Map.of(Click.RIGHT_CLICK, net.knightsandkings.knk.core.menu.opener.MenuItemAction.openMenu("main")),
+            java.util.Map.of());
+        PlayerInteractEvent left = interact(Action.LEFT_CLICK_AIR, opener, null);
+        listener.onInteract(left);
+        assertTrue(opened.isEmpty());
+        assertEquals(Event.Result.DEFAULT, left.useItemInHand());
+    }
+
+    @Test
+    void withTheConfigFileSettingsAShiftClickOpensTheMenuAsBefore_A31() {
+        when(player.isSneaking()).thenReturn(true);
+        listener.onInteract(interact(Action.LEFT_CLICK_AIR, opener, null));
+        nextClick();
+        listener.onInteract(interact(Action.RIGHT_CLICK_AIR, opener, null));
+        assertEquals(2, opened.size());
+    }
 }

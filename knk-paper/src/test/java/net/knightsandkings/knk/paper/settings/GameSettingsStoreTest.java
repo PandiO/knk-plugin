@@ -53,6 +53,24 @@ class GameSettingsStoreTest {
     }
 
     @Test
+    void roundTripsTheMenuItemSection_871() {
+        GameSettingsStore store = new GameSettingsStore(folder, 5);
+        KnkGameSettings base = settings("x");
+        var action = new net.knightsandkings.knk.core.domain.settings.KnkMenuItemSettings.Action("OpenMenu", "siege.shop", null);
+        KnkGameSettings saved = new KnkGameSettings(base.joinSpawnMode(), base.joinSpawnReference(), base.joinAnnouncement(),
+            base.leaveAnnouncement(), base.defaultRespawnPolicy(), base.worldSettings(), base.updatedAt(), base.motd(),
+            base.groupOverrides(), base.hub(), base.chatTokens(),
+            new net.knightsandkings.knk.core.domain.settings.KnkMenuItemSettings(true, "all", true, true, "NETHER_STAR",
+                "&6Menu", List.of("&7a"), 8, false, false, java.util.Map.of("LEFT_CLICK", action),
+                java.util.Map.of("siege.match", java.util.Map.of("SHIFT_RIGHT_CLICK", action))));
+
+        store.save(saved);
+
+        assertEquals(saved, new GameSettingsStore(folder, 5).load().orElseThrow());
+        assertEquals(null, base.menuItem(), "an older cache file has no section");
+    }
+
+    @Test
     void nothingCachedYet() {
         assertTrue(new GameSettingsStore(folder, 5).load().isEmpty());
     }

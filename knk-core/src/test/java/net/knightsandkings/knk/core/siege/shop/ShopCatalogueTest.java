@@ -47,7 +47,7 @@ class ShopCatalogueTest {
 
         ShopEntryView locked = new ShopEntryView(ShopFixtures.trebuchet(), new ShopPurchaseService.EntryState(0, 200, 0, false),
                 1000, null, ShopRefusal.locked());
-        assertEquals("&cLocked: unlock it in /menu → Minigames → Siege unlocks.", locked.getLines().get(locked.getLines().size() - 1));
+        assertEquals("&cLocked: unlock it in /menu → Siege Minigame → Siege unlocks.", locked.getLines().get(locked.getLines().size() - 1));
         assertEquals("DISABLED", locked.getDisplayMode());
         assertEquals("CROSSBOW", locked.getMaterial());
 
