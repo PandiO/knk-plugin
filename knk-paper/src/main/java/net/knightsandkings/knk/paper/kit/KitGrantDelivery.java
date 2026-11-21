@@ -67,6 +67,14 @@ public final class KitGrantDelivery {
 
     private final Map<UUID, List<Taken>> heldItems = new HashMap<>();
 
+    // Reward inbox (PandiO/knk-workspace#684): null while production.enabled is off, then placement is exactly as before.
+    private volatile java.util.function.Supplier<KitRewardRouter> rewardRouter = () -> null;
+
+    /** The reward inbox router (#684); a supplier answering null (the flag off) keeps today's placement. */
+    public void setRewardRouter(java.util.function.Supplier<KitRewardRouter> router) {
+        this.rewardRouter = router != null ? router : () -> null;
+    }
+
     public KitGrantDelivery(
             Executor mainThread,
             KitsCommandApi kitsCommandApi,
@@ -157,6 +165,17 @@ public final class KitGrantDelivery {
                     return;
                 }
                 if (!player.isOnline()) {
+                    KitRewardRouter router = rewardRouter.get();
+                    if (router != null) {
+                        // #684: taken in the moment the player left: the items go to their reward inbox.
+                        router.deliverOffline(userId, items,
+                                net.knightsandkings.knk.core.production.inbox.RewardKeys.kitClaim(delivery.claimId()),
+                                delivery.kitName());
+                        LOGGER.info("Kit claim " + delivery.claimId() + " (\"" + delivery.kitName() + "\") for user " + userId
+                                + " was taken as its player logged out; sent to their reward inbox");
+                        finish(player, id, given, done);
+                        return;
+                    }
                     // Taken in the moment the player left: the API counts it delivered, so say which one for staff.
                     LOGGER.warning("Kit claim " + delivery.claimId() + " (\"" + delivery.kitName() + "\") for user " + userId
                             + " was taken but its player logged out before the items were placed; grant it again if needed");
@@ -196,7 +215,13 @@ public final class KitGrantDelivery {
     /** Main thread: places a taken delivery's items and tells the player; false when placing failed (logged). */
     private boolean place(Player player, KnkKitDelivery delivery, List<KitGrantPlacer.ResolvedItem> items) {
         try {
-            KitGrantPlacer.PlacementSummary summary = placer.apply(player, items);
+            KitRewardRouter router = rewardRouter.get();
+            Integer userId = router == null ? null : userIdOf.apply(player);
+            KitGrantPlacer.PlacementSummary summary = router != null && userId != null
+                    ? router.place(player, userId, items,
+                            net.knightsandkings.knk.core.production.inbox.RewardKeys.kitClaim(delivery.claimId()),
+                            delivery.kitName())
+                    : placer.apply(player, items);
             player.sendMessage(ChatColor.GREEN + "A staff member gave you the \"" + delivery.kitName() + "\" kit.");
             if (summary != null && summary.dropped() > 0) {
                 player.sendMessage(ChatColor.GRAY + "Some of it didn't fit and was dropped at your feet.");

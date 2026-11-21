@@ -160,6 +160,9 @@ public final class PaperScenarios {
             // P4b (PandiO/knk-workspace#679): a yield-area survey of real blocks from chunk snapshots
             .register(new ProductionAreaSurveyScenario())
             // P6 (PandiO/knk-workspace#74): a display double chest keeps its tagged sample from a hopper
-            .register(new net.knightsandkings.knk.paper.scenario.scenarios.StorageDisplayDoubleChestScenario());
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.StorageDisplayDoubleChestScenario())
+            // P7b (PandiO/knk-workspace#684): kit leftovers and offline kits to the reward inbox; claim with partial space
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerKitOverflowInboxScenario())
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerInboxClaimScenario());
     }
 }

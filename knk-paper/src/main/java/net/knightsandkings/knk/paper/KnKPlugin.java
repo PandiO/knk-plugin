@@ -334,6 +334,8 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.production.LaneModule laneModule;
     // Storage terminals, displays and structure menus (PandiO/knk-workspace#74): only with production.enabled.
     private net.knightsandkings.knk.paper.production.terminal.StorageTerminalModule storageTerminalModule;
+    // Reward inbox, /inbox and kit/lootbox leftovers to the inbox (PandiO/knk-workspace#684): only with production.enabled.
+    private net.knightsandkings.knk.paper.production.inbox.InboxModule inboxModule;
     private net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature structuresMenuFeature;
     private TempRegionRetentionTask tempRegionRetentionTask;
     private ManagedRegionsBootstrap managedRegions;
@@ -985,6 +987,8 @@ public class KnKPlugin extends JavaPlugin {
                 minecraftMaterialRefsDataAccess, knkPermissible, cacheManager.getUserCache()
             );
             initializeKitGrantDelivery();
+            // Reward inbox (#684): read per grant, so kits place exactly as before while production.enabled is off.
+            this.kitGrantFlow.setRewardRouter(this::kitRewardRouter);
             // Content port CP3/CP8: title brackets are seeded data - cache the list for 10 minutes.
             this.titleBracketsDataAccess = new net.knightsandkings.knk.core.dataaccess.TitleBracketsDataAccess(
                 apiClient.getTitleBracketsQueryApi(), java.time.Duration.ofMinutes(10)
@@ -1078,6 +1082,8 @@ public class KnKPlugin extends JavaPlugin {
             // registered so the seeded menus validate; with production.enabled off its menus are blocked below (A21) and the
             // terminal module is not built.
             initializeStorageTerminals();
+            // Reward inbox (PandiO/knk-workspace#684): only with production.enabled (A21).
+            initializeRewardInbox();
             this.structuresMenuFeature = new net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature(
                 apiClient.getStructureMenusApi(), cacheManager.getUserCache(), java.time.Clock.systemUTC(),
                 MenuService.mainThreadExecutor(this),
@@ -1464,6 +1470,10 @@ public class KnKPlugin extends JavaPlugin {
         if (storageTerminalModule != null) { // storage terminals (#74)
             storageTerminalModule.stop();
             storageTerminalModule = null;
+        }
+        if (inboxModule != null) { // reward inbox (#684)
+            inboxModule.stop();
+            inboxModule = null;
         }
         if (surveyModule != null) {
             surveyModule.stop();
@@ -2675,6 +2685,7 @@ public class KnKPlugin extends JavaPlugin {
             pluginManager.registerEvents(new net.knightsandkings.knk.paper.listeners.GameSettingsWeatherCommandListener(gameSettingsManager), this);
         }
         PlayerListener playerListener = new PlayerListener(usersDataAccess, gameSettingsManager, this.getCacheManager(), knkPermissible, usersCommandApi, kitsCommandApi, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, ignoreService, newPlayerWindow);
+        playerListener.setKitRewardRouter(this::kitRewardRouter); // first-join kits through the reward inbox (#684)
         playerListener.setHubAdmitted(uuid -> hubService != null && hubService.consumeAdmitted(uuid));
         // #486: read when a player connects (the realtime erasure sync is set up later in onEnable).
         playerListener.setBeforeAccountLookup(uuid -> {
@@ -4530,6 +4541,8 @@ public class KnKPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(offlineStorage, this);
 
         registerTabCommand("fly", new net.knightsandkings.knk.paper.commands.FlyCommand(support));
+        // Reward inbox (PandiO/knk-workspace#684): every player's own inbox, no node; "off" without production.enabled.
+        registerTabCommand("inbox", new net.knightsandkings.knk.paper.commands.InboxCommand(() -> inboxModule));
         // PandiO/knk-workspace#158: vanilla /gamemode is op-only (in-house grants never reach Bukkit permissions).
         registerTabCommand("gamemode", new net.knightsandkings.knk.paper.commands.GamemodeCommand(support));
         registerTabCommand("heal", new net.knightsandkings.knk.paper.commands.RestoreCommand(
@@ -4572,6 +4585,8 @@ public class KnKPlugin extends JavaPlugin {
                 mainThread, itemBlueprintsDataAccess, minecraftMaterialRefsDataAccess, enchantmentDefinitionsDataAccess, commandApi,
                 new net.knightsandkings.knk.paper.item.BlueprintItemAssembler(
                     new net.knightsandkings.knk.api.impl.enchantment.LocalEnchantmentRepositoryImpl()));
+            // Reward inbox (#684): leftovers go to the inbox only while production.enabled is on.
+            delivery.setLeftoverRouter(() -> inboxModule == null ? null : inboxModule.rewards());
             var scheduler = new net.knightsandkings.knk.paper.lootbox.LootboxSpawnScheduler(
                 this, runtime, regions, commandApi, announcer,
                 new net.knightsandkings.knk.core.lootbox.LootboxSpawnPlanner(
@@ -4679,6 +4694,7 @@ public class KnKPlugin extends JavaPlugin {
             uuid -> siegeService != null && siegeService.activeLobbyOf(uuid).isPresent(),
             loadout -> net.knightsandkings.knk.paper.kit.KitGrantPlacer.resolveAsync(loadout, items, materials),
             net.knightsandkings.knk.paper.kit.KitGrantPlacer::place);
+        kitGrantDelivery.setRewardRouter(this::kitRewardRouter); // reward inbox (#684), null while production.enabled is off
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.listeners.KitDeliveryJoinListener(this, kitGrantDelivery, userIdOf), this);
         if (playerNotificationPoller != null) {
@@ -4883,6 +4899,44 @@ public class KnKPlugin extends JavaPlugin {
     }
 
     /** Bukkit-or-in-house permission checks for commands (KNG-24); Bukkit-only when the API isn't configured. */
+    /**
+     * Reward inbox (PandiO/knk-workspace#684, production DESIGN § 4.6): /inbox, the InboxUpdated notices, the join summary,
+     * and kit and lootbox leftovers to the inbox. Only with production.enabled (A21); off, kits and lootboxes keep today's
+     * delivery (#261) and /inbox says the inbox is off.
+     */
+    private void initializeRewardInbox() {
+        var settings = net.knightsandkings.knk.paper.production.inbox.InboxConfig.read(getConfig());
+        if (!settings.enabled()) {
+            return;
+        }
+        var mainThread = MenuService.mainThreadExecutor(this);
+        var rewards = new net.knightsandkings.knk.paper.production.inbox.RewardInbox(apiClient.getItemDeliveryApi(), mainThread,
+            () -> itemIdentityService == null ? null : itemIdentityService::resolve);
+        inboxModule = new net.knightsandkings.knk.paper.production.inbox.InboxModule(this, settings,
+            apiClient.getItemDeliveryApi(),
+            new net.knightsandkings.knk.paper.production.terminal.BlueprintItems(itemBlueprintsDataAccess,
+                minecraftMaterialRefsDataAccess),
+            uuid -> cacheManager.getUserCache().getStale(uuid)
+                .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null),
+            uuid -> siegeService != null && siegeService.activeLobbyOf(uuid).isPresent(),
+            rewards, mainThread, java.time.Clock.systemUTC());
+        inboxModule.start();
+        if (playerNotificationPoller != null) {
+            playerNotificationPoller.setInboxHandler((player, notification) -> {
+                var inbox = inboxModule;
+                if (inbox != null) {
+                    inbox.onNotice(player, notification);
+                }
+            });
+        }
+    }
+
+    /** The kit flows' reward inbox router (#684): null while production.enabled is off (today's placement). */
+    private net.knightsandkings.knk.paper.kit.KitRewardRouter kitRewardRouter() {
+        var inbox = inboxModule;
+        return inbox == null ? null : inbox.rewards();
+    }
+
     /** Storage terminals and displays (PandiO/knk-workspace#74); only with production.enabled (A21). */
     private void initializeStorageTerminals() {
         var settings = net.knightsandkings.knk.paper.production.terminal.StorageTerminalConfig.read(getConfig());

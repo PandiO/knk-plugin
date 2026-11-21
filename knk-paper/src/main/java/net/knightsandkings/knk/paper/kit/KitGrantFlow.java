@@ -46,6 +46,8 @@ public final class KitGrantFlow {
     private final MinecraftMaterialRefsDataAccess minecraftMaterialRefsDataAccess;
     private final KnkPermissible knkPermissible;
     private final UserCache userCache;
+    // Reward inbox (PandiO/knk-workspace#684): null while production.enabled is off, then every grant places as before.
+    private volatile java.util.function.Supplier<KitRewardRouter> rewardRouter = () -> null;
 
     public KitGrantFlow(
             Executor mainThread,
@@ -61,6 +63,11 @@ public final class KitGrantFlow {
         this.minecraftMaterialRefsDataAccess = minecraftMaterialRefsDataAccess;
         this.knkPermissible = knkPermissible;
         this.userCache = userCache;
+    }
+
+    /** The reward inbox router (#684); a supplier answering null (the flag off) keeps today's placement. */
+    public void setRewardRouter(java.util.function.Supplier<KitRewardRouter> router) {
+        this.rewardRouter = router != null ? router : () -> null;
     }
 
     /** Checks a {@code knk.kit.*} node through {@link KnkPermissible}; tells the player when denied. */
@@ -100,7 +107,7 @@ public final class KitGrantFlow {
         if (!requirePermission(player, GET_NODE)) {
             return CompletableFuture.completedFuture(false);
         }
-        return grantAndPlace(kitsCommandApi.claimAsync(userId, kitId), player, player, kitName, "claimed");
+        return grantAndPlace(kitsCommandApi.claimAsync(userId, kitId), player, player, userId, kitId, kitName, "claimed");
     }
 
     /** {@code /kit give <player> <name>}: staff grant, no cooldown/cost (server-side rule). */
@@ -111,7 +118,8 @@ public final class KitGrantFlow {
         // The sender's id makes the API's audit entry name them; null (not cached yet) is
         // recorded as a system grant rather than blocking the give.
         Integer actorUserId = resolveUserId(sender);
-        return grantAndPlace(kitsCommandApi.giveAsync(actorUserId, recipientUserId, kitId), sender, recipient, kitName, "given");
+        return grantAndPlace(kitsCommandApi.giveAsync(actorUserId, recipientUserId, kitId), sender, recipient, recipientUserId,
+                kitId, kitName, "given");
     }
 
     /** {@code /kit purchase <name>} and the menu's {@code kits.purchase}: one-time premium purchase (gems). */
@@ -136,6 +144,8 @@ public final class KitGrantFlow {
             CompletableFuture<KnkKitClaimResult> grant,
             CommandSender sender,
             Player recipient,
+            int recipientUserId,
+            int kitId,
             String kitName,
             String verb
     ) {
@@ -157,11 +167,24 @@ public final class KitGrantFlow {
                         done.complete(false);
                         return;
                     }
+                    KitRewardRouter router = rewardRouter.get();
+                    String key = router == null ? null
+                            : net.knightsandkings.knk.core.production.inbox.RewardKeys.kitGrant(kitId, recipientUserId);
                     if (!recipient.isOnline()) {
-                        done.complete(false);
+                        if (router == null) {
+                            done.complete(false);
+                            return;
+                        }
+                        // #684: the recipient left before the items were placed: they go to the reward inbox.
+                        router.deliverOffline(recipientUserId, resolvedItems, key, kitName);
+                        sender.sendMessage(ChatColor.GREEN + "Kit \"" + kitName + "\" " + verb + "; " + recipient.getName()
+                                + " went offline, so it went to their reward inbox.");
+                        done.complete(true);
                         return;
                     }
-                    KitGrantPlacer.PlacementSummary summary = KitGrantPlacer.place(recipient, resolvedItems);
+                    KitGrantPlacer.PlacementSummary summary = router == null
+                            ? KitGrantPlacer.place(recipient, resolvedItems)
+                            : router.place(recipient, recipientUserId, resolvedItems, key, kitName);
                     sender.sendMessage(ChatColor.GREEN + "Kit \"" + kitName + "\" " + verb + " to " +
                             ChatColor.AQUA + recipient.getName() + ChatColor.GREEN + ".");
                     if (summary.displaced() > 0 || summary.dropped() > 0) {

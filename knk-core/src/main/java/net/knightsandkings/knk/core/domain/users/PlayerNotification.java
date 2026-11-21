@@ -16,8 +16,20 @@ public record PlayerNotification(
     net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert, // set when type is TYPE_CURRENCY_ALERT
     net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged, // set when type is TYPE_LOOTBOX_WORLD_CHANGED
     net.knightsandkings.knk.core.domain.location.LocationOrphanDigest locationOrphanDigest, // set when type is TYPE_LOCATION_ORPHAN_DIGEST
-    AccountLinkedNotice accountLinked // set when type is TYPE_ACCOUNT_LINKED
+    AccountLinkedNotice accountLinked, // set when type is TYPE_ACCOUNT_LINKED
+    net.knightsandkings.knk.core.production.inbox.InboxNotice inbox // set when type is TYPE_INBOX_UPDATED
 ) {
+    /** Without an inbox notice - every type before TYPE_INBOX_UPDATED. */
+    public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
+                              net.knightsandkings.knk.core.domain.currency.PaymentNotice payment,
+                              net.knightsandkings.knk.core.domain.currency.CurrencyAlertNotice currencyAlert,
+                              net.knightsandkings.knk.core.lootbox.KnkLootboxWorldChange lootboxWorldChanged,
+                              net.knightsandkings.knk.core.domain.location.LocationOrphanDigest locationOrphanDigest,
+                              AccountLinkedNotice accountLinked) {
+        this(id, userId, uuid, username, type, titleChange, payment, currencyAlert, lootboxWorldChanged, locationOrphanDigest,
+            accountLinked, null);
+    }
+
     /** Without an account-linked notice - every type before TYPE_ACCOUNT_LINKED. */
     public PlayerNotification(long id, int userId, String uuid, String username, String type, TitleChangeResult titleChange,
                               net.knightsandkings.knk.core.domain.currency.PaymentNotice payment,
@@ -107,4 +119,10 @@ public record PlayerNotification(
      * next join when they are offline, so a code given away is noticed.
      */
     public static final String TYPE_ACCOUNT_LINKED = "AccountLinked";
+    /**
+     * The player's reward inbox changed or needs attention (P7, PandiO/knk-workspace#60 and #684): items arrived (with the
+     * amount lost at the hard cap and a near-cap warning), items expire soon, or items expired. Payload in
+     * {@link #inbox()}. The inbox itself is the record, so a lost notice loses no items.
+     */
+    public static final String TYPE_INBOX_UPDATED = "InboxUpdated";
 }

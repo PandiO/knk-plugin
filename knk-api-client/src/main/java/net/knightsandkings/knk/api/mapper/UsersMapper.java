@@ -184,7 +184,8 @@ public class UsersMapper {
             net.knightsandkings.knk.api.impl.LocationRetentionApiImpl.mapDigest(dto.locationOrphanDigest()),
             dto.accountLinked() == null ? null
                 : new net.knightsandkings.knk.core.domain.users.AccountLinkedNotice(dto.accountLinked().maskedEmail(),
-                    dto.accountLinked().via())
+                    dto.accountLinked().via()),
+            net.knightsandkings.knk.api.impl.ItemDeliveryApiImpl.toNotice(dto.inbox())
         );
     }
 

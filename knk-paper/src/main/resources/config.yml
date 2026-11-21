@@ -1231,6 +1231,11 @@ production:
   storage:
     refresh-minutes: 5             # how often the bound containers are re-read (a binding made in the web app shows after this)
     display-refresh-seconds: 30    # at most one refresh of a display this often (chunk load and terminal moves ask for one)
+  # Reward inbox (#684, P7): /inbox opens the player's reward inbox (claim what fits); kit and lootbox items that don't fit
+  # go to the inbox instead of the ground (offline players' kits too). Inbox cap, expiry and warnings are API game settings
+  # (production.delivery). Needs production.enabled; off, kits and lootboxes drop leftovers at the player's feet as before.
+  inbox:
+    join-summary: true             # tell a player who joins with items in their inbox (count, expiry within 7 days, near-cap)
 lootboxes:
   enabled: true
   # Sent with every spawn so the drop log shows which server made the box.

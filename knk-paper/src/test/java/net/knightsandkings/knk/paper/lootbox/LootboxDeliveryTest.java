@@ -314,4 +314,72 @@ class LootboxDeliveryTest {
 
         assertNull(decoyDelivery(assembler).decoy(new LootboxDelivery.DecoySource(blueprint(null), "minecraft:nope"), 3, 0, true, List.of()));
     }
+
+    // ===== reward inbox (PandiO/knk-workspace#684) =====
+
+    private LootboxDelivery breadDelivery(LootboxesCommandApi api, ItemStack stack) {
+        KnkItemBlueprint bread = new KnkItemBlueprint(77, "Bread", null, null, "minecraft:bread", "&fBread", null, 16, 64,
+                List.of(), 0, null, List.of(), List.of());
+        ItemBlueprintsDataAccess blueprints = mock(ItemBlueprintsDataAccess.class);
+        when(blueprints.getByIdAsync(77)).thenReturn(CompletableFuture.completedFuture(FetchResult.hit(bread)));
+        BlueprintItemAssembler assembler = mock(BlueprintItemAssembler.class);
+        when(assembler.assemble(any(), anyString(), anyList(), anyList(), any(), any()))
+                .thenReturn(new BlueprintItemAssembler.Result(stack, 0, List.of()));
+        when(api.markDelivered(anyInt(), any(), any(), any())).thenReturn(CompletableFuture.completedFuture(null));
+        return new LootboxDelivery(Runnable::run, blueprints, mock(MinecraftMaterialRefsDataAccess.class), null, api, assembler);
+    }
+
+    @Test
+    void withTheInboxOn_leftoversGoToTheRouter_andTheConfirmationWaitsForIt() {
+        ItemStack stack = mock(ItemStack.class);
+        ItemStack rest = mock(ItemStack.class);
+        LootboxesCommandApi api = mock(LootboxesCommandApi.class);
+        LootboxDelivery delivery = breadDelivery(api, stack);
+        PlayerInventory inventory = mock(PlayerInventory.class);
+        when(inventory.addItem(any(ItemStack.class))).thenReturn(new HashMap<>(Map.of(0, rest)));
+        Player player = playerWithInventory(inventory);
+        when(player.isOnline()).thenReturn(true);
+        List<List<ItemStack>> routed = new java.util.ArrayList<>();
+        List<java.util.function.BiConsumer<LootboxDeliveryMethod, String>> settle = new java.util.ArrayList<>();
+        delivery.setLeftoverRouter(() -> (p, c, leftovers, whenAllFit, settled) -> {
+            routed.add(leftovers);
+            settle.add(settled);
+        });
+
+        LootboxDelivery.Outcome outcome = delivery.deliver(player, claim(null, 16, List.of(), null, null), false).join();
+
+        assertTrue(outcome.given());
+        assertEquals(List.of(List.of(rest)), routed);
+        verify(api, never()).markDelivered(anyInt(), any(), any(), any());
+        verify(player, never()).getWorld();
+        settle.get(0).accept(LootboxDeliveryMethod.INVENTORY, "10 to the reward inbox (delivery #55)");
+        verify(api).markDelivered(eq(41), eq(LootboxDeliveryMethod.INVENTORY), eq("10 to the reward inbox (delivery #55)"), eq(9));
+        assertTrue(delivery.wasHandedOver(41));
+    }
+
+    @Test
+    void withTheInboxOn_aUniqueItemStillDropsOwnerLocked() {
+        ItemStack stack = mock(ItemStack.class);
+        ItemStack rest = mock(ItemStack.class);
+        LootboxesCommandApi api = mock(LootboxesCommandApi.class);
+        LootboxDelivery delivery = breadDelivery(api, stack);
+        PlayerInventory inventory = mock(PlayerInventory.class);
+        when(inventory.addItem(any(ItemStack.class))).thenReturn(new HashMap<>(Map.of(0, rest)));
+        Player player = playerWithInventory(inventory);
+        when(player.isOnline()).thenReturn(true);
+        World world = mock(World.class);
+        Location at = new Location(world, 1, 64, 1);
+        when(player.getLocation()).thenReturn(at);
+        when(player.getWorld()).thenReturn(world);
+        Item dropped = mock(Item.class);
+        when(world.dropItem(at, rest)).thenReturn(dropped);
+        List<Object> routed = new java.util.ArrayList<>();
+        delivery.setLeftoverRouter(() -> (p, c, leftovers, whenAllFit, settled) -> routed.add(leftovers));
+
+        delivery.deliver(player, claim(900L, 1, List.of(), null, null), false).join();
+
+        assertTrue(routed.isEmpty());
+        verify(dropped).setOwner(owner);
+        verify(api).markDelivered(eq(41), eq(LootboxDeliveryMethod.DROPPED_OWNED), any(), eq(9));
+    }
 }

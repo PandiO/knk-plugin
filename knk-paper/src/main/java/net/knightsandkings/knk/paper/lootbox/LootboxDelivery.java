@@ -48,7 +48,10 @@ import java.util.logging.Logger;
  *       couldn't take is logged as a warning and written to the claim's delivery note, never dropped silently. The
  *       last step stamps {@code knk_item_instance} when the claim has an instance (stackable items get no tag, so they
  *       stack with ordinary ones).</li>
- *   <li>Place: into the inventory; whatever doesn't fit drops at the player's feet, owner-locked and not for mobs.</li>
+ *   <li>Place: into the inventory; whatever doesn't fit drops at the player's feet, owner-locked and not for mobs. With
+ *       the reward inbox on ({@code production.enabled}, PandiO/knk-workspace#684) a stackable item's leftovers go to the
+ *       player's inbox through a {@link LeftoverRouter} instead, and the confirmation waits for its answer; a unique item
+ *       (instance) still drops, because it can't be claimed back in game yet (#897).</li>
  *   <li>Confirm {@code delivered} (retried a few times). A claim left unconfirmed is redelivered on the next join,
  *       where an instanced item already in the inventory or ender chest is confirmed instead of given twice.</li>
  * </ol>
@@ -83,6 +86,19 @@ public final class LootboxDelivery {
     private record Resolved(KnkItemBlueprint blueprint, String materialKey, Map<Integer, KnkEnchantmentDefinition> definitions) {
     }
 
+    /**
+     * Leftovers through the reward inbox (#684). Main thread. Takes what didn't fit and calls {@code settled} (main thread)
+     * with the method and a note for the confirmation once they are in the inbox, or were dropped owner-locked because
+     * the API refused ({@link LootboxDeliveryMethod#DROPPED_OWNED}).
+     */
+    public interface LeftoverRouter {
+        void route(Player player, KnkLootboxClaimResult claim, List<ItemStack> leftovers, LootboxDeliveryMethod whenAllFit,
+                   java.util.function.BiConsumer<LootboxDeliveryMethod, String> settled);
+    }
+
+    // Reward inbox (#684): null while production.enabled is off, then leftovers drop exactly as before.
+    private volatile java.util.function.Supplier<LeftoverRouter> leftoverRouter = () -> null;
+
     private final Executor mainThread;
     private final ItemBlueprintsDataAccess blueprints;
     private final MinecraftMaterialRefsDataAccess materials;
@@ -110,6 +126,11 @@ public final class LootboxDelivery {
         this.definitions = definitions;
         this.commandApi = commandApi;
         this.assembler = assembler;
+    }
+
+    /** The reward inbox router (#684); a supplier answering null (the flag off) keeps today's drop at the feet. */
+    public void setLeftoverRouter(java.util.function.Supplier<LeftoverRouter> router) {
+        this.leftoverRouter = router != null ? router : () -> null;
     }
 
     /** Whether the player has a free slot: the pre-check before any claim with {@code full-inventory: refuse}. */
@@ -196,17 +217,33 @@ public final class LootboxDelivery {
         // The prepared stack itself goes in (the reel only ever showed copies of it); `shown` is for the messages.
         ItemStack item = prepared.item();
         ItemStack shown = item.clone();
-        LootboxDeliveryMethod method = place(player, item, redelivery ? LootboxDeliveryMethod.REDELIVERED : LootboxDeliveryMethod.INVENTORY);
-        handedOver.put(claim.claimId(), method);
-
         String note = null;
         if (!prepared.skipped().isEmpty()) {
             note = "enchantments the item couldn't take: " + String.join(", ", prepared.skipped());
             LOGGER.warning("Lootbox claim " + claim.claimId() + " (blueprint " + claim.itemBlueprintId() + ", instance "
                     + claim.itemInstanceId() + "): " + note);
         }
-        acknowledge(claim, method, note);
-        return new Outcome(true, false, shown, method, prepared.skipped());
+        LootboxDeliveryMethod whenAllFit = redelivery ? LootboxDeliveryMethod.REDELIVERED : LootboxDeliveryMethod.INVENTORY;
+        LeftoverRouter router = claim.itemInstanceId() == null ? leftoverRouter.get() : null;
+        if (router == null) {
+            LootboxDeliveryMethod method = place(player, item, whenAllFit);
+            handedOver.put(claim.claimId(), method);
+            acknowledge(claim, method, note);
+            return new Outcome(true, false, shown, method, prepared.skipped());
+        }
+        // #684: what doesn't fit goes to the reward inbox; confirmed once the inbox (or the fallback drop) has it.
+        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(item);
+        handedOver.put(claim.claimId(), whenAllFit);
+        if (leftovers == null || leftovers.isEmpty()) {
+            acknowledge(claim, whenAllFit, note);
+        } else {
+            String skippedNote = note;
+            router.route(player, claim, new ArrayList<>(leftovers.values()), whenAllFit, (method, inboxNote) -> {
+                handedOver.put(claim.claimId(), method);
+                acknowledge(claim, method, joinNotes(skippedNote, inboxNote));
+            });
+        }
+        return new Outcome(true, false, shown, whenAllFit, prepared.skipped());
     }
 
     /** A pool item's blueprint and material, resolved once for the opening reel's passing items. */
@@ -385,6 +422,26 @@ public final class LootboxDelivery {
             dropped.setCanMobPickup(false);
         }
         return LootboxDeliveryMethod.DROPPED_OWNED;
+    }
+
+    static String joinNotes(String first, String second) {
+        if (first == null || first.isBlank()) {
+            return second;
+        }
+        if (second == null || second.isBlank()) {
+            return first;
+        }
+        return first + "; " + second;
+    }
+
+    /** Main thread: {@code stacks} dropped at the player's feet, owned by them and not for mobs (today's leftover drop). */
+    public static void dropOwned(Player player, List<ItemStack> stacks) {
+        Location at = player.getLocation();
+        for (ItemStack rest : stacks) {
+            Item dropped = player.getWorld().dropItem(at, rest);
+            dropped.setOwner(player.getUniqueId());
+            dropped.setCanMobPickup(false);
+        }
     }
 
     /** Whether the instance is already in the player's inventory or ender chest (the redelivery dedupe scan). */

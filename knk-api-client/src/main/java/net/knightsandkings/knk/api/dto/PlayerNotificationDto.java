@@ -16,5 +16,7 @@ public record PlayerNotificationDto(
     @JsonProperty("currencyAlert") net.knightsandkings.knk.api.dto.currency.CurrencyDtos.CurrencyAlertNotificationDto currencyAlert,
     @JsonProperty("lootboxWorldChanged") net.knightsandkings.knk.api.dto.LootboxDtos.WorldChangedNotificationDto lootboxWorldChanged,
     @JsonProperty("locationOrphanDigest") net.knightsandkings.knk.api.dto.LocationRetentionDtos.DigestNotification locationOrphanDigest,
-    @JsonProperty("accountLinked") net.knightsandkings.knk.api.dto.AdmissionDtos.AccountLinkedNotificationDto accountLinked
+    @JsonProperty("accountLinked") net.knightsandkings.knk.api.dto.AdmissionDtos.AccountLinkedNotificationDto accountLinked,
+    // InboxUpdated (P7, PandiO/knk-workspace#684)
+    @JsonProperty("inbox") net.knightsandkings.knk.api.dto.ItemDeliveryDtos.InboxNotificationDto inbox
 ) {}

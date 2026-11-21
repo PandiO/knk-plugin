@@ -118,6 +118,12 @@ commands:
     # node through KnkPermissible inside KitCommand, same reasoning /knk and /ownermode|/staffmode
     # have none (Bukkit would check its own permission tree before this executor ever ran).
 
+  # Reward inbox (PandiO/knk-workspace#684, production DESIGN § 4.6). No permission: every player opens their own inbox;
+  # it answers that the inbox is off while production.enabled is false.
+  inbox:
+    description: "Open your reward inbox: kit and lootbox items that didn't fit, gifts; claim what fits"
+    usage: "/inbox"
+
   # Currency ledger Phase 3 (docs/specs/currency-payments/DESIGN.md §3.6). No permission: entry -
   # each checks its knk.pay / knk.balance / knk.baltop / knk.transactions node through
   # KnkPermissible inside the executor (same reasoning as /kit); the API decides everything else.

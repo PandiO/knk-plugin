@@ -85,6 +85,8 @@ public class PlayerNotificationPoller {
     private volatile BiConsumer<Player, PlayerNotification> accountLinkedHandler;
     // A kit a staff member granted from the web app (PandiO/knk-workspace#261): hand its items over.
     private volatile Consumer<Player> kitDeliveryHandler;
+    /** Reward inbox notices (PandiO/knk-workspace#684); null while production.enabled is off. */
+    private volatile BiConsumer<Player, PlayerNotification> inboxHandler;
 
     public PlayerNotificationPoller(PlayerNotificationsApi notificationsApi, Plugin plugin) {
         this(notificationsApi, plugin,
@@ -136,6 +138,14 @@ public class PlayerNotificationPoller {
      */
     public void setKitDeliveryHandler(Consumer<Player> handler) {
         this.kitDeliveryHandler = handler;
+    }
+
+    /**
+     * What to do for a {@link PlayerNotification#TYPE_INBOX_UPDATED} whose player is online (#684): the loss and
+     * near-cap messages, expiry reminders. An offline player's stays queued for their next join.
+     */
+    public void setInboxHandler(BiConsumer<Player, PlayerNotification> handler) {
+        this.inboxHandler = handler;
     }
 
     /**
@@ -296,6 +306,8 @@ public class PlayerNotificationPoller {
                     accountLinkedHandler.accept(player, notification);
                 } else if (PlayerNotification.TYPE_KIT_DELIVERY_PENDING.equals(notification.type()) && kitDeliveryHandler != null) {
                     kitDeliveryHandler.accept(player);
+                } else if (PlayerNotification.TYPE_INBOX_UPDATED.equals(notification.type()) && inboxHandler != null) {
+                    inboxHandler.accept(player, notification);
                 }
             } catch (RuntimeException e) {
                 // Acknowledged anyway: retrying a notification that throws would only repeat

@@ -282,6 +282,14 @@ public class PlayerListener implements Listener {
 	 * DESIGN.md §4.4), for the first join UserAccountListener decided (#486). Runs off the main thread and never
 	 * blocks or delays the join; a failure here is logged and otherwise invisible to the player.
 	 */
+	// Reward inbox (PandiO/knk-workspace#684): null while production.enabled is off, then first-join kits place as before.
+	private volatile java.util.function.Supplier<net.knightsandkings.knk.paper.kit.KitRewardRouter> kitRewardRouter = () -> null;
+
+	/** The reward inbox router for first-join kits (#684); a supplier answering null keeps today's placement. */
+	public void setKitRewardRouter(java.util.function.Supplier<net.knightsandkings.knk.paper.kit.KitRewardRouter> router) {
+		this.kitRewardRouter = router != null ? router : () -> null;
+	}
+
 	public void requestFirstJoinKits(UUID uuid, int userId) {
 		if (kitsCommandApi == null) {
 			LOGGER.warning("First-join kits: the kits API is not available, nothing granted to user " + userId);
@@ -310,10 +318,20 @@ public class PlayerListener implements Listener {
 				}
 				Bukkit.getScheduler().runTask(KnKPlugin.getPlugin(KnKPlugin.class), () -> {
 					Player online = Bukkit.getPlayer(uuid);
+					net.knightsandkings.knk.paper.kit.KitRewardRouter router = kitRewardRouter.get();
+					String key = net.knightsandkings.knk.core.production.inbox.RewardKeys.firstJoin(userId);
 					if (online == null) {
+						if (router != null) {
+							// #684: the player left before the starter kit was placed: it waits in their reward inbox.
+							router.deliverOffline(userId, resolvedItems, key, "starter kit");
+						}
 						return;
 					}
-					KitGrantPlacer.place(online, resolvedItems);
+					if (router != null) {
+						router.place(online, userId, resolvedItems, key, "starter kit");
+					} else {
+						KitGrantPlacer.place(online, resolvedItems);
+					}
 					online.sendMessage(Component.text("You received your starter kit!").color(ColorOptions.messageachievement));
 				});
 			})
