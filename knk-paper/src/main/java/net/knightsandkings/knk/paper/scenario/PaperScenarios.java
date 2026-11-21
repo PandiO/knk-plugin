@@ -87,6 +87,10 @@ public final class PaperScenarios {
             .register(new LootboxSpawnOnGroundScenario())
             .register(new LootboxSpawnUnderRoofScenario())
             .register(new LootboxSwitchedOffScenario())
+            // THROWAWAY PROBE: three empty scenes, as the region scenarios of #945/#946 add here
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.IndexShiftProbeScenario(1))
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.IndexShiftProbeScenario(2))
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.IndexShiftProbeScenario(3))
             // NPC wall corners and stuck recovery (implementation plan 4b.2 item 18, PandiO/knk-workspace#521); the
             // walking ones need Citizens, which CI's paper-boot server has as a pinned build
             .register(new NpcCornersLineScenario())
