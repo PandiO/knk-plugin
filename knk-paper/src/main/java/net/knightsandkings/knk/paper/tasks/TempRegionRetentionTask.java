@@ -6,11 +6,12 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxArea;
-import net.knightsandkings.knk.core.lootbox.KnkLootboxRuntimeConfig;
 import net.knightsandkings.knk.core.domain.landmarks.KnkLandmark;
 import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
 import net.knightsandkings.knk.core.ports.api.LandmarksApi;
 import net.knightsandkings.knk.core.ports.api.LootboxesQueryApi;
+import net.knightsandkings.knk.core.ports.api.ProductionSurveyApi;
+import net.knightsandkings.knk.core.production.survey.AreaSpec;
 import net.knightsandkings.knk.core.regions.RegionRenamePlan;
 import net.knightsandkings.knk.core.regions.SubRegionMirror;
 import net.knightsandkings.knk.core.regions.TempRegionCleanupPolicy;
@@ -21,12 +22,17 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 /**
@@ -44,7 +50,8 @@ import java.util.logging.Logger;
  *
  * PandiO/knk-workspace#34: the fresh lookup also asks the lootbox spawn areas ({@link #regionUsageVia}), so an area
  * whose drawn region could not be renamed to {@code lootbox_area_<id>} keeps it. PandiO/knk-workspace#945: and the
- * landmarks ({@link #landmarkUsageVia}), for a landmark region that could not be renamed to {@code landmark_<id>}.
+ * landmarks ({@link #landmarkUsageVia}), for a landmark region that could not be renamed to {@code landmark_<id>}, and
+ * #946 the production areas ({@link #productionAreaUsageVia}, {@code production_area_<id>}).
  *
  * PandiO/knk-workspace#269: with {@link #setReleasePass} it also runs {@link TempRegionReleasePass} every few minutes,
  * which removes the temp regions the API released (abandoned drafts, tasks closed without a result) without waiting for
@@ -123,59 +130,78 @@ public class TempRegionRetentionTask {
     }
 
     /**
-     * #34: whether a lootbox spawn area stands on the region, from a fresh {@code GET api/LootboxSpawns/runtime-config}
-     * (it lists every area, disabled ones too): in use / unused, or unknown when the API can't be asked. Not
-     * world-qualified, like the domain lookup: an area on that id in any world keeps it. Blocks; call off the main thread.
+     * #34: whether a lootbox spawn area stands on the region, from {@code GET api/LootboxSpawns/runtime-config} (it lists
+     * every area, disabled ones too): in use / unused, or unknown when the API can't be asked. Not world-qualified, like
+     * the domain lookup: an area on that id in any world keeps it. Blocks; call off the main thread.
      */
     public static Function<String, Usage> lootboxAreaUsageVia(LootboxesQueryApi lootboxesQueryApi) {
-        return regionId -> {
-            if (lootboxesQueryApi == null) {
-                return Usage.UNKNOWN;
-            }
-            try {
-                KnkLootboxRuntimeConfig config = lootboxesQueryApi.getRuntimeConfig().get(LOOKUP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                if (config == null || config.areas() == null) {
-                    return Usage.UNKNOWN;
-                }
-                for (KnkLootboxArea area : config.areas()) {
-                    if (area.wgRegionId() != null && area.wgRegionId().trim().equalsIgnoreCase(regionId)) {
-                        return Usage.IN_USE;
-                    }
-                }
-                return Usage.UNUSED;
-            } catch (ExecutionException e) {
-                LOGGER.warning("Could not check whether a lootbox area uses temp region " + regionId + "; keeping it: "
-                        + (e.getCause() != null ? e.getCause().getMessage() : e.getMessage()));
-                return Usage.UNKNOWN;
-            } catch (TimeoutException e) {
-                LOGGER.warning("Timed out checking whether a lootbox area uses temp region " + regionId + "; keeping it");
-                return Usage.UNKNOWN;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return Usage.UNKNOWN;
-            }
-        };
+        return ownerUsageVia("lootbox area", lootboxesQueryApi == null ? null
+                : () -> lootboxesQueryApi.getRuntimeConfig().thenApply(config -> config == null ? null : config.areas()),
+                KnkLootboxArea::wgRegionId, false);
     }
 
     /**
-     * PandiO/knk-workspace#945: whether a landmark's extent is the region, from a fresh {@code GET api/landmarks} (every
-     * landmark, whatever {@code navigation.landmarks} says on this server): in use / unused, or unknown when the API can't
-     * be asked. A landmark whose drawn region could not be renamed to {@code landmark_<id>} keeps it. A 404 is an API
-     * from before landmarks (no such route), which has none: unused. Not world-qualified, like the domain lookup.
-     * Blocks; call off the main thread.
+     * PandiO/knk-workspace#945: whether a landmark's extent is the region, from {@code GET api/landmarks} (every landmark,
+     * whatever {@code navigation.landmarks} says on this server). A landmark whose drawn region could not be renamed to
+     * {@code landmark_<id>} keeps it. A 404 is an API from before landmarks (no such route), which has none.
      */
     public static Function<String, Usage> landmarkUsageVia(LandmarksApi landmarksApi) {
+        return ownerUsageVia("landmark", landmarksApi == null ? null : () -> landmarksApi.list(null), KnkLandmark::regionId, true);
+    }
+
+    /**
+     * PandiO/knk-workspace#946: whether a production area's region is the region, from {@code GET api/ProductionAreas}
+     * (every area; it answers while {@code Production:Enabled} is off too). An area whose drawn region could not be renamed
+     * to {@code production_area_<id>} keeps it, so its survey keeps finding it. A 404 is an API from before production
+     * areas, which has none.
+     */
+    public static Function<String, Usage> productionAreaUsageVia(ProductionSurveyApi productionSurveyApi) {
+        return ownerUsageVia("production area", productionSurveyApi == null ? null : productionSurveyApi::areas,
+                AreaSpec::wgRegionId, true);
+    }
+
+    /** How long one owner list ({@link #ownerUsageVia}) is reused: a sweep or release pass asks once, not per region. */
+    static final long OWNER_LIST_REUSE_MILLIS = 60_000;
+
+    /**
+     * #34, #945, #946: the fresh lookup over one kind of owner that lists all its rows in one call (lootbox areas,
+     * landmarks, production areas): in use when a row's region is {@code regionId} (ignoring case), unused when none is,
+     * unknown when the list can't be read (the region is kept). The list is fetched at most once a minute
+     * ({@link #OWNER_LIST_REUSE_MILLIS}): the cleanup asks per region, and those endpoints share the API's per-IP rate
+     * limits with the overview map. A region the cleanup or the release pass may remove is old or already released by
+     * the API (which checks every owner itself), so a list up to a minute old is safe. Blocks; call off the main thread.
+     *
+     * @param notFoundIsNone a 404 means the API has no such list yet (an older API), so no row can use the region
+     */
+    static <T> Function<String, Usage> ownerUsageVia(String owner, Supplier<CompletableFuture<? extends Collection<T>>> list,
+                                                     Function<T, String> regionOf, boolean notFoundIsNone) {
+        return ownerUsageVia(owner, list, regionOf, notFoundIsNone, System::currentTimeMillis);
+    }
+
+    static <T> Function<String, Usage> ownerUsageVia(String owner, Supplier<CompletableFuture<? extends Collection<T>>> list,
+                                                     Function<T, String> regionOf, boolean notFoundIsNone, LongSupplier clock) {
+        if (list == null) {
+            return regionId -> Usage.UNKNOWN;
+        }
+        AtomicReference<CachedOwners<T>> cache = new AtomicReference<>();
         return regionId -> {
-            if (landmarksApi == null) {
-                return Usage.UNKNOWN;
-            }
             try {
-                List<KnkLandmark> landmarks = landmarksApi.list(null).get(LOOKUP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                if (landmarks == null) {
-                    return Usage.UNKNOWN;
+                CachedOwners<T> cached = cache.get();
+                long now = clock.getAsLong();
+                Collection<T> rows;
+                if (cached != null && now - cached.fetchedAt() < OWNER_LIST_REUSE_MILLIS) {
+                    rows = cached.rows();
+                } else {
+                    Collection<T> fetched = list.get().get(LOOKUP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    if (fetched == null) {
+                        return Usage.UNKNOWN;
+                    }
+                    rows = new ArrayList<>(fetched);
+                    cache.set(new CachedOwners<>(rows, now));
                 }
-                for (KnkLandmark landmark : landmarks) {
-                    if (landmark != null && landmark.regionId() != null && landmark.regionId().trim().equalsIgnoreCase(regionId)) {
+                for (T row : rows) {
+                    String region = row == null ? null : regionOf.apply(row);
+                    if (region != null && region.trim().equalsIgnoreCase(regionId)) {
                         return Usage.IN_USE;
                     }
                 }
@@ -183,31 +209,38 @@ public class TempRegionRetentionTask {
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause() instanceof java.util.concurrent.CompletionException completion
                         && completion.getCause() != null ? completion.getCause() : e.getCause();
-                if (cause instanceof ApiException apiException && apiException.getStatusCode() == 404) {
+                if (notFoundIsNone && cause instanceof ApiException apiException && apiException.getStatusCode() == 404) {
                     return Usage.UNUSED;
                 }
-                LOGGER.warning("Could not check whether a landmark uses temp region " + regionId + "; keeping it: "
+                LOGGER.warning("Could not check whether a " + owner + " uses temp region " + regionId + "; keeping it: "
                         + (cause != null ? cause.getMessage() : e.getMessage()));
                 return Usage.UNKNOWN;
             } catch (TimeoutException e) {
-                LOGGER.warning("Timed out checking whether a landmark uses temp region " + regionId + "; keeping it");
+                LOGGER.warning("Timed out checking whether a " + owner + " uses temp region " + regionId + "; keeping it");
                 return Usage.UNKNOWN;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                return Usage.UNKNOWN;
+            } catch (RuntimeException e) {
+                LOGGER.warning("Could not check whether a " + owner + " uses temp region " + regionId + "; keeping it: "
+                        + e.getMessage());
                 return Usage.UNKNOWN;
             }
         };
     }
 
+    private record CachedOwners<T>(Collection<T> rows, long fetchedAt) {
+    }
+
     /**
      * #34: the fresh lookup the cleanup makes before deleting: a domain ({@link #domainUsageVia}), a lootbox spawn area
-     * ({@link #lootboxAreaUsageVia}) or, since #945, a landmark ({@link #landmarkUsageVia}) using the region keeps it;
-     * deleted only when all of them answer unused.
+     * ({@link #lootboxAreaUsageVia}), a landmark ({@link #landmarkUsageVia}, #945) or a production area
+     * ({@link #productionAreaUsageVia}, #946) using the region keeps it; deleted only when all of them answer unused.
      */
     public static Function<String, Usage> regionUsageVia(DomainsQueryApi domainsQueryApi, LootboxesQueryApi lootboxesQueryApi,
-                                                         LandmarksApi landmarksApi) {
+                                                         LandmarksApi landmarksApi, ProductionSurveyApi productionSurveyApi) {
         return TempRegionCleanupPolicy.inUseByAny(domainUsageVia(domainsQueryApi), lootboxAreaUsageVia(lootboxesQueryApi),
-                landmarkUsageVia(landmarksApi));
+                landmarkUsageVia(landmarksApi), productionAreaUsageVia(productionSurveyApi));
     }
 
     /**
@@ -298,10 +331,10 @@ public class TempRegionRetentionTask {
             int keptUnknown = sweep.usageUnknown().size();
             if (deletedCount > 0 || keptInUse > 0 || keptUnknown > 0) {
                 LOGGER.info("Temp region retention cleanup completed. Deleted " + deletedCount + ", kept " + keptInUse
-                        + " used by a domain, lootbox area or landmark" + (keptUnknown > 0 ? ", kept " + keptUnknown + " because the API could not be asked" : ""));
+                        + " used by a domain, lootbox area, landmark or production area" + (keptUnknown > 0 ? ", kept " + keptUnknown + " because the API could not be asked" : ""));
             }
             if (keptInUse > 0) {
-                LOGGER.info("Temp-named regions used by a domain, lootbox area or landmark can be renamed (domain_<id>, lootbox_area_<id>, landmark_<id>) with POST /api/Regions/finalize-temp-names");
+                LOGGER.info("Temp-named regions used by a domain, lootbox area, landmark or production area can be renamed (domain_<id>, lootbox_area_<id>, landmark_<id>, production_area_<id>) with POST /api/Regions/finalize-temp-names");
             }
         } catch (Exception e) {
             LOGGER.warning("Error running temp region retention cleanup: " + e.getMessage());

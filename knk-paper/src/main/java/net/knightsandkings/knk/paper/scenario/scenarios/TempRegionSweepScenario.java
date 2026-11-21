@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * § 4 step 2 and § 5, PandiO/knk-workspace#34): two {@code tempregion_worldtask_<n>} regions, both created 30 days
  * ago, no domain using either; a lootbox area (fake runtime config, as {@code GET api/LootboxSpawns/runtime-config}
  * sends it) uses the first. A report-only sweep with the 14-day retention (what {@code /knk regions temp} shows)
- * lists the first under "used by a domain, lootbox area or landmark" and the second as deletable, and removes neither.
+ * lists the first under "used by a domain, lootbox area, landmark or production area" and the second as deletable, and removes neither.
  * Report-only, because a deleting sweep would also remove other old temp regions of the server it runs on.
  */
 public final class TempRegionSweepScenario implements Scenario<ScenarioScene> {

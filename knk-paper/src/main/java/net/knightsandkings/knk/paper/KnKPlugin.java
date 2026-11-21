@@ -738,19 +738,20 @@ public class KnKPlugin extends JavaPlugin {
             regionHttpServer.start();
 
             // Start temp region retention task (regions.temp-retention.days, default 14; never deletes a region a domain
-            // or, since PandiO/knk-workspace#34, a lootbox spawn area, or since #945 a landmark uses). KNG-258: also
+            // or, since PandiO/knk-workspace#34, a lootbox spawn area, since #945 a landmark, since #946 a production area
+            // uses). KNG-258: also
             // orphaned domain sub-regions, counted from when they were orphaned.
             tempRegionRetentionTask = new TempRegionRetentionTask(this,
                     Math.max(1, getConfig().getLong("regions.temp-retention.days", 14)), managedRegions::protectsFromCleanup,
                     TempRegionRetentionTask.regionUsageVia(domainsQueryApi, apiClient.getLootboxesQueryApi(),
-                        apiClient.getLandmarksApi()),
+                        apiClient.getLandmarksApi(), apiClient.getProductionSurveyApi()),
                     domainAccessSync::listsSubRegion);
             // PandiO/knk-workspace#269: temp regions the API released (abandoned drafts) go without the 14-day wait.
             tempRegionRetentionTask.setReleasePass(new net.knightsandkings.knk.paper.tasks.TempRegionReleasePass(
                     apiClient.getTempRegionReleasesApi(), worldTaskLeases.serverId(),
                     net.knightsandkings.knk.paper.tasks.TempRegionReleasePass.worldGuard(this), managedRegions::protectsFromCleanup,
                     TempRegionRetentionTask.regionUsageVia(domainsQueryApi, apiClient.getLootboxesQueryApi(),
-                        apiClient.getLandmarksApi()),
+                        apiClient.getLandmarksApi(), apiClient.getProductionSurveyApi()),
                     wgRegionIdHandler::isHandlingTask),
                     getConfig().getLong("regions.temp-retention.release-interval-minutes", 5));
             tempRegionRetentionTask.start();
