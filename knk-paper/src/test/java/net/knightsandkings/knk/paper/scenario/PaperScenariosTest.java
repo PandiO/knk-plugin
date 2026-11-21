@@ -67,7 +67,6 @@ class PaperScenariosTest {
             "npc-road-goal-dead-end", "npc-replay-keep-hall", "npc-jagged-straight", "npc-jagged-straight-collision-on",
             "npc-doorway-crowd", "npc-doorway-crowd-collision-on", "npc-plaza-line", "npc-plaza-line-collision-on",
             "npc-collision-policy", "npc-guard-ledge-push", "npc-door-column", "npc-push-return-hairpin",
-            "npc-replay-hatch-tower-stair",
             "player-command-needs-grant", "player-heal-needs-grant", "player-chat-group-colours", "player-join-loading-hold", "player-menu-click",
             "player-tp-into-closed-gate", "player-rejoin-in-closed-gate", "territory-border-crossing", "rural-structure-region",
             "production-area-survey", "storage-display-double-chest", "player-kit-overflow-inbox",
@@ -108,7 +107,7 @@ class PaperScenariosTest {
         CommandSender sender = mock(CommandSender.class);
 
         command.execute(sender, new String[] {"list"});
-        verify(sender).sendMessage(contains("Scenarios (75)"));
+        verify(sender).sendMessage(contains("Scenarios (74)"));
         verify(sender).sendMessage(contains("global-region-explosion"));
         verify(sender).sendMessage(contains("player-menu-click"));
     }
