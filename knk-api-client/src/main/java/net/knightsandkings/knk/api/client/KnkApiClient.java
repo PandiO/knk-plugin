@@ -155,6 +155,8 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.TerritoryApi territoryApi;
     /** Yield-area surveys (PandiO/knk-workspace#679). */
     private final net.knightsandkings.knk.core.ports.api.ProductionSurveyApi productionSurveyApi;
+    // Player harvesting (PandiO/knk-workspace#134)
+    private final net.knightsandkings.knk.core.ports.api.HarvestApi harvestApi;
     private final net.knightsandkings.knk.core.ports.api.StorageContainersApi storageContainersApi;
     private final net.knightsandkings.knk.core.ports.api.StructureMenusApi structureMenusApi;
     private final net.knightsandkings.knk.core.ports.api.TransportLanesApi transportLanesApi;
@@ -250,6 +252,8 @@ public class KnkApiClient {
                 objectMapper, authProvider, executor, debugLogging);
         this.productionSurveyApi = new net.knightsandkings.knk.api.impl.ProductionSurveyApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
+        this.harvestApi = new net.knightsandkings.knk.api.impl.HarvestApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.storageContainersApi = new net.knightsandkings.knk.api.impl.StorageContainersApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
         this.structureMenusApi = new net.knightsandkings.knk.api.impl.StructureMenusApiImpl(baseUrl, httpClient,
@@ -318,6 +322,11 @@ public class KnkApiClient {
     /** Yield-area surveys (PandiO/knk-workspace#679): the survey queue, reports, "survey now" and the area list. */
     public net.knightsandkings.knk.core.ports.api.ProductionSurveyApi getProductionSurveyApi() {
         return productionSurveyApi;
+    }
+
+    /** Player harvesting (PandiO/knk-workspace#134): the harvest catalogue and the batched harvest reports. */
+    public net.knightsandkings.knk.core.ports.api.HarvestApi getHarvestApi() {
+        return harvestApi;
     }
 
     /** Storage terminals and displays (PandiO/knk-workspace#74): bindings, terminal pages, put and take, display samples. */
