@@ -92,8 +92,9 @@ public final class ShopDisplayPresenter {
         }
         Rendered existing = rendered.get(spot.id());
         if (existing != null && existing.isValid() && existing.spot().blockKey().equals(spot.blockKey())
+                && existing.spot().facing() == spot.facing()
                 && (existing.label() != null) == (labelLines != null && !labelLines.isEmpty())) {
-            paint(existing.model(), item, greyed, spot.facing(), scale);
+            paint(existing.model(), item, greyed, scale);
             if (existing.label() != null) {
                 existing.label().text(LegacyComponentSerializer.legacyAmpersand().deserialize(String.join("\n", labelLines)));
             }
@@ -106,9 +107,8 @@ public final class ShopDisplayPresenter {
         ItemDisplay model = world.spawn(top.clone().add(0, size / 2.0, 0), ItemDisplay.class, entity -> {
             tag(entity, spot.id());
             entity.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.FIXED);
-            entity.setBillboard(Display.Billboard.FIXED);
-            entity.setRotation(spot.facing().yaw(), 0f);
-            paint(entity, item, greyed, spot.facing(), scale);
+            // Billboard FIXED is a display's default: it faces the spawn location's yaw, the spot's facing.
+            paint(entity, item, greyed, scale);
         });
         Interaction hitbox = world.spawn(top, Interaction.class, entity -> {
             tag(entity, spot.id());
@@ -120,7 +120,7 @@ public final class ShopDisplayPresenter {
         if (labelLines != null && !labelLines.isEmpty()) {
             label = world.spawn(top.clone().add(0, size + 0.15, 0), TextDisplay.class, entity -> {
                 tag(entity, spot.id());
-                entity.setBillboard(Display.Billboard.CENTER);
+                billboard(entity, Display.Billboard.CENTER);
                 entity.text(LegacyComponentSerializer.legacyAmpersand().deserialize(String.join("\n", labelLines)));
             });
         }
@@ -128,10 +128,9 @@ public final class ShopDisplayPresenter {
         return true;
     }
 
-    private static void paint(ItemDisplay entity, ItemStack item, boolean greyed, DisplaySpot.Facing facing, double scale) {
+    private static void paint(ItemDisplay entity, ItemStack item, boolean greyed, double scale) {
         entity.setItemStack(item);
         entity.setBrightness(greyed ? GREYED : null);
-        entity.setRotation(facing.yaw(), 0f);
         float s = (float) scale;
         entity.setTransformation(new Transformation(new Vector3f(), new Quaternionf(), new Vector3f(s, s, s), new Quaternionf()));
     }
@@ -194,6 +193,15 @@ public final class ShopDisplayPresenter {
 
     public int size() {
         return rendered.size();
+    }
+
+    /** Turns the label towards every viewer; a server without billboards (a test double) keeps it fixed. */
+    static void billboard(Display entity, Display.Billboard billboard) {
+        try {
+            entity.setBillboard(billboard);
+        } catch (RuntimeException e) { // MockBukkit's "not implemented"; Paper always has it
+            // fixed label, still readable from the front
+        }
     }
 
     private static void tag(Entity entity, int spotId) {
