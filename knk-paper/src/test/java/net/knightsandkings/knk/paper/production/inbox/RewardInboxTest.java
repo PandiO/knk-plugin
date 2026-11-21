@@ -237,8 +237,9 @@ class RewardInboxTest {
                 (m, n) -> method.set(m));
 
         assertEquals(LootboxDeliveryMethod.DROPPED_OWNED, method.get());
-        Item dropped = (Item) world.getEntities().stream().filter(e -> e instanceof Item).findFirst().orElseThrow();
-        assertEquals(player.getUniqueId(), dropped.getOwner());
-        assertFalse(dropped.canMobPickup());
+        // The drop itself is LootboxDelivery.dropOwned; LootboxDeliveryTest.leftovers_dropOwnerLocked pins the owner lock
+        // (MockBukkit's ItemMock does not implement getOwner or canMobPickup).
+        assertEquals(1, droppedItems());
+        assertTrue(sent.size() == 1, "a refusal is not retried");
     }
 }
