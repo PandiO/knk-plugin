@@ -216,6 +216,35 @@ class PushWatchTest {
         assertEquals(1, watch.pushes());
     }
 
+    /**
+     * PandiO/knk-workspace#953: when the engine ends a waypoint list, the NPC's last steps and its body's slide to a
+     * stop fall between its last walking look and its first standing one (0.4 blocks at a trip's end on Paper). That
+     * move is its own; where it comes to stand is its spot from then on.
+     */
+    @Test
+    void theLastStepsOfAWalkThatStopsAreNoPush() {
+        PushWatch watch = walkingFor(4); // at x 2.5
+        assertNull(watch.look(at(2.95, 65, 0.5), 10, false, 0, 0), "its last steps and the slide");
+        assertEquals(at(2.95, 65, 0.5), watch.rest(), "where it came to stand");
+        assertNull(watch.look(at(3.0, 65, 0.5), 12, false, 0, 0), "the rest of the slide");
+        PushWatch.Push p = watch.look(at(3.4, 65, 0.5), 14, false, 0, 0);
+        assertNotNull(p, "then 0.45 from where it stands is a push");
+        assertEquals(at(2.95, 65, 0.5), p.from());
+    }
+
+    @Test
+    void aStopFasterThanAWalkOrRightAfterAnAttackIsStillAPush() {
+        PushWatch fast = walkingFor(4);
+        PushWatch.Push p = fast.look(at(4.0, 65, 0.5), 10, false, 0, 0);
+        assertNotNull(p, "1.5 blocks in one look is no walk");
+        assertEquals(at(2.5, 65, 0.5), p.from());
+        PushWatch hit = walkingFor(4);
+        hit.contact(new Contact(ContactKind.ATTACK, "steve", true), 9);
+        PushWatch.Push q = hit.look(at(2.0, 65, 1.0), 10, false, 0, 0);
+        assertNotNull(q, "knocked as it stopped");
+        assertEquals(ContactKind.ATTACK, q.kind());
+    }
+
     @Test
     void aResetForgetsWhereItWas() {
         PushWatch watch = new PushWatch();

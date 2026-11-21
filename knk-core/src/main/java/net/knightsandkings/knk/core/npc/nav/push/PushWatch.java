@@ -16,7 +16,9 @@ import net.knightsandkings.knk.core.npc.nav.NpcMover;
  *     moves are its own too (a turn at a waypoint) unless something touched it within {@link #CONTACT_TICKS}
  *     ({@link #contact}): then more than {@link #SIDEWAYS} blocks sideways is a push.</li>
  *     <li>A standing NPC (no order, waiting, held) explains nothing: {@link #STANDING_PUSH} blocks from where it came to
- *     stand is a push.</li>
+ *     stand is a push. Where it came to stand is where it is at the first look after it stopped walking: the move
+ *     since its last walking look is its last steps and the body's slide to a stop (PandiO/knk-workspace#953), unless
+ *     it was faster than a walk or right after an attack.</li>
  * </ol>
  * One push is one episode: the looks within {@link #EPISODE_TICKS} of the last unexplained one belong to it, so a
  * player leaning on an NPC for three seconds gives about three pushes, not thirty; those later looks come back as
@@ -158,9 +160,13 @@ public final class PushWatch {
             explained = step <= MAX_SPEED * dt + SLACK && (ownWalk(sx, sz, dirX, dirZ, touched, attacked)
                 || towardsWaypoint(towards, last, feet, touched, attacked));
         } else {
+            // it walked at the last look: the move since is the end of its walk, its last steps and the body sliding to
+            // a stop when the engine ends a waypoint list (PandiO/knk-workspace#953: 0.4 blocks at a trip's end); where
+            // it comes to stand is its spot, unless the move was faster than a walk or an attack's
+            boolean stopping = anchor != null && rest == null;
             anchor = null;
             if (rest == null) {
-                rest = last;
+                rest = stopping && !attacked && Math.hypot(sx, sz) <= MAX_SPEED * dt + SLACK ? feet : last;
             }
             explained = rest.horizontalDistance(feet) < STANDING_PUSH;
         }

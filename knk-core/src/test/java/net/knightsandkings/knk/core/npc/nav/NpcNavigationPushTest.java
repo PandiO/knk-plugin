@@ -352,7 +352,8 @@ class NpcNavigationPushTest {
     /**
      * The engine's walk over {@code ticks} ticks, as Citizens walks a waypoint list: the mover's last list at
      * {@link #ENGINE_SPEED} blocks a tick, each waypoint reached within the margin K&K gives ({@code waypoint-margin}
-     * 0.5), then the next; the last one walked to, then the arrival reported. A new list starts at its first waypoint.
+     * 0.5), then the next; at the last one the arrival is reported and the body stands at it (its last steps and slide,
+     * up to the margin, between two looks). A new list starts at its first waypoint.
      */
     private void engineWalk(FakeMover m, int ticks) {
         for (int t = 0; t < ticks; t++) {
@@ -366,7 +367,7 @@ class NpcNavigationPushTest {
                 while (left > 1e-9 && engineAt < way.size()) {
                     NavPoint aim = way.get(engineAt);
                     double d = m.position.horizontalDistance(aim);
-                    if (d <= (engineAt == way.size() - 1 ? 1e-6 : 0.5)) {
+                    if (d <= 0.5) {
                         engineAt++;
                         continue;
                     }
@@ -446,6 +447,24 @@ class NpcNavigationPushTest {
         assertFalse(service.returning(1));
         assertEquals(HAIRPIN_END, m.position, "it went on with its trip: " + log);
         assertEquals(1, metrics.total(Event.ARRIVED), "the trip ended");
+    }
+
+    /**
+     * PandiO/knk-workspace#953, the 0.4-block push at a trip's end on Paper: the engine ends the waypoint list and the
+     * NPC stops walking while its body takes its last steps and slides to a stop. That is no push.
+     */
+    @Test
+    void theLastStepsOfAWalkThatEndsAreNoPush() {
+        FakeMover m = walking(1, settings(true, false));
+        walk(m, 4);
+        m.position = feet(m.position.x() + 0.45, 0.5);
+        m.moving = false;
+        ticks(2);
+        assertEquals(0, metrics.total(Event.PUSHED), log.toString());
+        assertFalse(service.returning(1));
+        m.position = feet(m.position.x() + 0.6, 0.5); // then shoved from where it stands
+        ticks(2);
+        assertEquals(1, metrics.total(Event.PUSHED), "a push from where it came to stand: " + log);
     }
 
     /**
