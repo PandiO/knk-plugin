@@ -333,6 +333,12 @@ public final class NpcNavigationService {
          * a replan routes there again instead of searching every candidate anew; null until chosen.
          */
         NavPoint roadGoal;
+        /**
+         * PandiO/knk-workspace#848 (developer decision 2026-11-21): set when link G1's choice found no road point that
+         * reaches the goal on foot. {@link #roadGoal} is then the road point nearest the goal, the route ends there
+         * with no walk or hops after it, and the order ends there as failed with this reason; null otherwise.
+         */
+        String unreachable;
         Consumer<NavigationResult> onResult;
         long waitUntil;
         long queuedAtNanos;
@@ -582,6 +588,8 @@ public final class NpcNavigationService {
     /** Link G1: road goal choices made, and those that moved the goal off today's. */
     private long roadGoalChoices;
     private long roadGoalsMoved;
+    /** PandiO/knk-workspace#848: road goal choices where no road point reached the goal on foot. */
+    private long roadGoalsUnreachable;
     /** Main-thread time of push resistance's looks, for its share of the cost. */
     private long pushNanos;
     private java.util.function.IntToDoubleFunction plazaClearance = id -> Double.NaN;
@@ -701,6 +709,7 @@ public final class NpcNavigationService {
         }
         nav.goal = goalFeet;
         nav.roadGoal = null;
+        nav.unreachable = null;
         nav.onResult = onResult;
         nav.returnTo = null;
         nav.bodyReturn = false;
@@ -828,6 +837,14 @@ public final class NpcNavigationService {
     /** Link G1: road goal choices that took another road point than the router's goal. */
     public long roadGoalsMoved() {
         return roadGoalsMoved;
+    }
+
+    /**
+     * PandiO/knk-workspace#848: road goal choices where no road point reached the goal on foot, so the order went to
+     * the road point nearest the goal and ended there as failed.
+     */
+    public long roadGoalsUnreachable() {
+        return roadGoalsUnreachable;
     }
 
     /** The feet, with the NPC's place on its waypoint list brought up to date. */
@@ -1182,6 +1199,12 @@ public final class NpcNavigationService {
                 }
                 nav.blockedReported = false;
                 nav.reportedElement = null;
+                if (nav.unreachable != null) {
+                    // #848: the goal is not reachable on foot; the route ends at the road point nearest it, no walk
+                    startRoute(nav, generation, at, plan.line(), plan.gates(), plan.plazas(), from,
+                        plan.line().get(plan.line().size() - 1));
+                    return;
+                }
                 if (wantsRoadGoalChoice(nav, plan.line(), to)) {
                     chooseRoadGoal(nav, generation, plan, from, to);
                     return;
@@ -1428,7 +1451,8 @@ public final class NpcNavigationService {
      * {@code plan}), then one walk search from its end to the goal with the NPC's access and profile (off the main
      * thread, as C1's). The least road plus {@code road-goal-walk-weight} times walk wins
      * ({@link RoadGoalChoice#best(List, double)}); its route and walk are taken as they are, and the order keeps that
-     * goal for its replans. None reached: today's route with C1's join (the end and up to 3 points back).
+     * goal for its replans. None reached on foot (PandiO/knk-workspace#848, developer decision 2026-11-21): the route
+     * to the road point nearest the goal, with no walk or hops after it, and the order ends there as failed.
      */
     private void chooseRoadGoal(Nav nav, int generation, RoadPlanner.RoadPlan plan, NavPoint from, NavPoint to) {
         NavPoint roadEnd = plan.line().get(plan.line().size() - 1);
@@ -1515,7 +1539,10 @@ public final class NpcNavigationService {
         return length;
     }
 
-    /** Main thread: every candidate answered; the best one's route and walk, or today's with C1's join. */
+    /**
+     * Main thread: every candidate answered; the best one's route and walk, or with none reached on foot the route to
+     * the road point nearest the goal, where the order ends as failed (#848).
+     */
     private void roadGoalChosen(Nav nav, int generation, RoadPlanner.RoadPlan today, NavPoint from, NavPoint to,
                                 List<RoadGoals.Candidate> candidates, List<GoalOption> answered) {
         NavPoint at = nav.mover.position().orElse(null);
@@ -1539,10 +1566,22 @@ public final class NpcNavigationService {
                 chosenIndex = i;
             }
         }
-        ports.log().accept(roadGoalLog(nav, to, candidates, answered, chosenIndex, weight));
+        int nearestIndex = chosen == null ? nearestRoadEnd(answered, to) : -1;
+        ports.log().accept(roadGoalLog(nav, to, candidates, answered, chosenIndex, nearestIndex, weight));
         if (chosen == null) {
-            // none reached on foot: today's goal, walked as C1 does (the end, then up to 3 points back)
-            startRoute(nav, generation, at, today.line(), today.gates(), today.plazas(), from, to);
+            // none reached on foot (#848): the road point nearest the goal, no walk or hops after it, then failed
+            RoadPlanner.RoadPlan plan = nearestIndex < 0 ? today : answered.get(nearestIndex).plan();
+            NavPoint end = plan.line().get(plan.line().size() - 1);
+            if (nearestIndex > 0) {
+                roadGoalsMoved++;
+            }
+            roadGoalsUnreachable++;
+            nav.roadGoal = end;
+            nav.unreachable = String.format(Locale.ROOT, "the goal %s is not reachable on foot from any of the %d road"
+                + " points tried; stopped at the road point nearest it, %s (%.0f blocks from the goal)",
+                NavGeometry.block(HopPlanner.feet(to)), answered.size(), NavGeometry.block(HopPlanner.feet(end)),
+                Trail.dist3(end, to));
+            startRoute(nav, generation, at, plan.line(), plan.gates(), plan.plazas(), from, end);
             return;
         }
         if (chosenIndex > 0) {
@@ -1554,11 +1593,33 @@ public final class NpcNavigationService {
     }
 
     /**
+     * #848: the index in {@code answered} of the candidate whose road route ends nearest {@code to} (3D), among those
+     * with a road route; -1 when none has one.
+     */
+    private static int nearestRoadEnd(List<GoalOption> answered, NavPoint to) {
+        int nearest = -1;
+        double best = Double.MAX_VALUE;
+        for (int i = 0; i < answered.size(); i++) {
+            RoadPlanner.RoadPlan plan = answered.get(i).plan();
+            if (plan == null || plan.line().isEmpty()) {
+                continue;
+            }
+            double d = Trail.dist3(plan.line().get(plan.line().size() - 1), to);
+            if (d < best) {
+                best = d;
+                nearest = i;
+            }
+        }
+        return nearest;
+    }
+
+    /**
      * One line per road goal choice: every candidate with its road point, road and walk lengths (or why it is out) and
-     * score, and the chosen one; as the players' INFO line (F3).
+     * score, and the chosen one; as the players' INFO line (F3). With none chosen, the road point nearest the goal
+     * ({@code nearest}, an index in {@code answered}, or -1 for today's) where the order ends as failed (#848).
      */
     private static String roadGoalLog(Nav nav, NavPoint to, List<RoadGoals.Candidate> candidates,
-                                      List<GoalOption> answered, int chosen, double weight) {
+                                      List<GoalOption> answered, int chosen, int nearest, double weight) {
         StringBuilder sb = new StringBuilder(String.format(Locale.ROOT,
             "%s road goal for %s, %d candidates (walk weight %.1f):", nav.mover.name(),
             NavGeometry.block(HopPlanner.feet(to)), candidates.size(), weight));
@@ -1582,7 +1643,16 @@ public final class NpcNavigationService {
             sb.append(i == 0 ? " (today's);" : ";");
         }
         if (chosen < 0) {
-            sb.append(" none reached on foot: today's goal with the road join");
+            int index = Math.max(0, nearest);
+            GoalOption near = answered.isEmpty() ? null : answered.get(index);
+            NavPoint end = near == null || near.plan() == null || near.plan().line().isEmpty() ? null
+                : near.plan().line().get(near.plan().line().size() - 1);
+            sb.append(" none reached on foot: the road point nearest the goal, #").append(index + 1);
+            if (end != null) {
+                sb.append(String.format(Locale.ROOT, " (%s), %.0f blocks from it", NavGeometry.block(HopPlanner.feet(end)),
+                    Trail.dist3(end, to)));
+            }
+            sb.append("; the order ends there as failed");
         }
         return sb.toString();
     }
@@ -2616,6 +2686,8 @@ public final class NpcNavigationService {
             enqueue(nav);
         } else if (nav.blockedBy != null) {
             waitAtBlock(nav); // the partial route is walked: wait at the blocking element
+        } else if (nav.unreachable != null) {
+            end(nav, failed(nav.unreachable)); // #848: at the road point nearest a goal no road point reaches on foot
         } else {
             end(nav, new NavigationResult.Arrived());
         }
