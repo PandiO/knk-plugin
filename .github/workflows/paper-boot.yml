@@ -165,7 +165,7 @@ jobs:
         # Production P6 (#74) adds storage-display-double-chest (about 3 s): 69.
         # Production P8 (#134) adds player-harvest-regenerate and player-harvest-tree (a few seconds each): 73.
         env:
-          MIN_SCENARIOS: 73
+          MIN_SCENARIOS: 74
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"

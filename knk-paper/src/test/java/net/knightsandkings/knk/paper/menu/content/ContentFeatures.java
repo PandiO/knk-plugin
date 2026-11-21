@@ -75,6 +75,8 @@ final class ContentFeatures {
         features.add(new StructuresMenuFeature(mock(net.knightsandkings.knk.core.ports.api.StructureMenusApi.class),
                 new net.knightsandkings.knk.core.cache.UserCache(java.time.Duration.ofMinutes(5)), Clock.systemUTC(),
                 Runnable::run, player -> false, player -> null, mock(StructuresMenuFeature.StaffTools.class), () -> null));
+        // Production P10b (PandiO/knk-workspace#687): the shop menus.
+        features.add(new net.knightsandkings.knk.paper.production.shop.ShopMenuFeature(() -> null, () -> null));
         return features;
     }
 

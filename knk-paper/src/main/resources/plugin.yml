@@ -363,7 +363,7 @@ permissions:
     description: Access to /knk landmark create|list|show|move|delete|link|unlink, the staff-made named places players can /navigate to (off-road navigation phase 5.1, PandiO/knk-workspace#708; needs navigation.landmarks). Also gates landmark writes in the web app. Matched by knk.admin.world.*, knk.admin.* and *.
     default: false
   knk.admin.world.production:
-    description: Access to /knk production survey|area show (survey a production structure's yield areas now, the survey queue, draw an area's outline; PandiO/knk-workspace#679), /knk logistics (#681) and /knk storage bind|unbind|info|reload (bind a chest or barrel to a storage as a terminal or display; PandiO/knk-workspace#74); needs production.enabled. Matched by knk.admin.world.*, knk.admin.* and *.
+    description: Access to /knk production survey|area show (survey a production structure's yield areas now, the survey queue, draw an area's outline; PandiO/knk-workspace#679), /knk logistics (#681) and /knk storage bind|unbind|info|reload (bind a chest or barrel to a storage as a terminal or display; PandiO/knk-workspace#74) and /knk shop <id> (open a shop's menu for testing until shopkeepers; PandiO/knk-workspace#687); needs production.enabled. Matched by knk.admin.world.*, knk.admin.* and *.
     default: false
   knk.admin.world.territory:
     description: Access to /knk territory here|status|rebuild (territory lookup where you stand, the territory chunk cache, rebuild it now; PandiO/knk-workspace#689; needs production.enabled). Matched by knk.admin.world.*, knk.admin.* and *.
