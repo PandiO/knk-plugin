@@ -56,8 +56,21 @@ public final class Trail {
      * first of equals), or the one after that once reached or passed. Never moves back.
      */
     public void update(NavPoint feet) {
+        at = indexFor(feet);
+    }
+
+    /**
+     * The waypoint the NPC walks to with its feet here, as {@link #update} would find it, without moving the index
+     * (push resistance's question, PandiO/knk-workspace#953), or null once all are walked.
+     */
+    public NavPoint aheadOf(NavPoint feet) {
+        int i = indexFor(feet);
+        return i < points.size() ? points.get(i) : null;
+    }
+
+    private int indexFor(NavPoint feet) {
         if (feet == null || at >= points.size()) {
-            return;
+            return at;
         }
         int best = at;
         double bestD = Double.MAX_VALUE;
@@ -74,7 +87,7 @@ public final class Trail {
             && beyond(p, points.get(best + 1), feet) > PASSED)) {
             best++;
         }
-        at = Math.max(at, best);
+        return Math.max(at, best);
     }
 
     /** The waypoints not yet walked: from the one the NPC walks to, to the end (empty once all are walked). */

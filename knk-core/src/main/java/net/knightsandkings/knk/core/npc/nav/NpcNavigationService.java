@@ -2252,7 +2252,10 @@ public final class NpcNavigationService {
         boolean lineWalk = walking && nav.state == NpcNavState.MOVING && nav.onTrail && nav.follower != null
             && nav.returnTo == null && !nav.crowdHeld && !nav.moveOnly && !nav.ladder.isOpen();
         double[] dir = lineWalk ? walkingDirection(nav, at) : new double[] {0, 0};
-        PushWatch.Push p = nav.push.look(at, tick, walking, dir[0], dir[1]);
+        // and towards the waypoints the engine walks it to: where the line doubles back at a junction, the line's next
+        // point lies behind the NPC while its waypoints lead it on (PandiO/knk-workspace#953)
+        Trail trail = lineWalk ? nav.trail : null;
+        PushWatch.Push p = nav.push.look(at, tick, walking, dir[0], dir[1], trail == null ? null : trail::aheadOf);
         if (p != null) {
             onPushed(nav, p, at);
         }
@@ -2474,6 +2477,9 @@ public final class NpcNavigationService {
         double off = at.horizontalDistance(home);
         if (off <= RETURNED_BLOCKS && Math.abs(at.y() - home.y()) < 1.5) {
             returned(nav, at, "walked");
+            // the walk back ended this push (PandiO/knk-workspace#953): walking on is no push carrying it on, and
+            // only a new push, counted and logged, walks it back again (a teleport home ends it the same way)
+            nav.push.endEpisode();
             return;
         }
         int limit = nav.settings.pushTeleportTicks();
