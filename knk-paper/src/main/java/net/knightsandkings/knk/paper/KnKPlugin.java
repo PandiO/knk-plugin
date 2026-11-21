@@ -339,6 +339,8 @@ public class KnKPlugin extends JavaPlugin {
     // Shop menus, the sell menu and /knk shop (PandiO/knk-workspace#687): only with production.enabled.
     private net.knightsandkings.knk.paper.production.shop.ShopService shopService;
     private net.knightsandkings.knk.paper.production.shop.SellModule sellModule;
+    // Display stalls and /knk shop display (PandiO/knk-workspace#250): only with production.enabled.
+    private net.knightsandkings.knk.paper.production.shop.ShopDisplayModule shopDisplayModule;
     // Player harvesting in yield areas and block regeneration (PandiO/knk-workspace#134): only with production.enabled.
     private volatile net.knightsandkings.knk.paper.production.harvest.HarvestModule harvestModule;
     private net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature structuresMenuFeature;
@@ -1536,6 +1538,10 @@ public class KnKPlugin extends JavaPlugin {
         if (inboxModule != null) { // reward inbox (#684)
             inboxModule.stop();
             inboxModule = null;
+        }
+        if (shopDisplayModule != null) { // display stalls (#250): their non-persistent entities go now
+            shopDisplayModule.stop();
+            shopDisplayModule = null;
         }
         if (sellModule != null) { // shop sell menu (#687); picked items never leave the inventory before a sale
             sellModule.stop();
@@ -3521,7 +3527,8 @@ public class KnKPlugin extends JavaPlugin {
                 logisticsCommand::execute,
                 logisticsCommand::complete);
             // Shop menus (PandiO/knk-workspace#687): /knk shop <id> opens a shop's menu for testing until shopkeepers (P11)
-            var shopCommand = new net.knightsandkings.knk.paper.commands.ShopAdminCommand(() -> shopService);
+            // Display stalls (PandiO/knk-workspace#250): /knk shop display add|remove|pin|list|reload
+            var shopCommand = new net.knightsandkings.knk.paper.commands.ShopAdminCommand(() -> shopService, () -> shopDisplayModule);
             knkAdminCommand.registerSubcommand(
                 net.knightsandkings.knk.paper.commands.ShopAdminCommand.metadata(),
                 shopCommand::execute,
@@ -5030,6 +5037,14 @@ public class KnKPlugin extends JavaPlugin {
             () -> itemIdentityService == null ? null : itemIdentityService::resolve, mainThread, () -> menuService);
         sellModule.start();
         getLogger().info("Shop menus on (production.enabled): /knk shop <id>, the sell menu");
+        // Display stalls (PandiO/knk-workspace#250): registered spots show the shop's items; right-click opens shops.item,
+        // shift-right-click the confirmation (the quick buy).
+        shopDisplayModule = new net.knightsandkings.knk.paper.production.shop.ShopDisplayModule(this,
+            net.knightsandkings.knk.paper.production.shop.ShopDisplayConfig.read(getConfig()), apiClient.getShopDisplaySpotsApi(),
+            shopService, null, mainThread, java.time.Clock.systemUTC());
+        shopDisplayModule.start();
+        getServer().getPluginManager().registerEvents(
+            new net.knightsandkings.knk.paper.production.shop.ShopDisplayWorldGuardListener(), this);
     }
 
     /** The kit flows' reward inbox router (#684): null while production.enabled is off (today's placement). */

@@ -166,6 +166,8 @@ public final class PaperScenarios {
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerInboxClaimScenario())
             // Production P10b (PandiO/knk-workspace#687): a sale in the sell menu and a purchase after the confirmation.
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerShopSellAndBuyScenario())
+            // Production P12 (PandiO/knk-workspace#250): a display stall shows, respawns and opens a confirmed quick buy.
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.ShopDisplayStallScenario())
             // P8 (PandiO/knk-workspace#134): harvest and regenerate in a production area; a felled tree restored by snapshot
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestRegenerateScenario())
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestTreeScenario());
