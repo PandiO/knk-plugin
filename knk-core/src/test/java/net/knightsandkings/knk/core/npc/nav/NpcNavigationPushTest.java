@@ -342,6 +342,137 @@ class NpcNavigationPushTest {
         assertTrue(log.stream().anyMatch(l -> l.contains("teleported home")), log.toString());
     }
 
+    /** The waypoint list the test's engine walks, and the index of the waypoint it walks to. */
+    private List<NavPoint> engineList;
+    private int engineAt;
+
+    /** Blocks a tick the test's engine walks (Citizens' walk is about 0.22). */
+    private static final double ENGINE_SPEED = 0.25;
+
+    /**
+     * The engine's walk over {@code ticks} ticks, as Citizens walks a waypoint list: the mover's last list at
+     * {@link #ENGINE_SPEED} blocks a tick, each waypoint reached within the margin K&K gives ({@code waypoint-margin}
+     * 0.5), then the next; the last one walked to, then the arrival reported. A new list starts at its first waypoint.
+     */
+    private void engineWalk(FakeMover m, int ticks) {
+        for (int t = 0; t < ticks; t++) {
+            List<NavPoint> way = m.follows.isEmpty() ? null : m.follows.get(m.follows.size() - 1);
+            if (way != engineList) {
+                engineList = way;
+                engineAt = 0;
+            }
+            if (way != null && m.moving && m.lastWasFollow) {
+                double left = ENGINE_SPEED;
+                while (left > 1e-9 && engineAt < way.size()) {
+                    NavPoint aim = way.get(engineAt);
+                    double d = m.position.horizontalDistance(aim);
+                    if (d <= (engineAt == way.size() - 1 ? 1e-6 : 0.5)) {
+                        engineAt++;
+                        continue;
+                    }
+                    double step = Math.min(left, d);
+                    m.position = new NavPoint(WORLD, m.position.x() + (aim.x() - m.position.x()) * step / d,
+                        aim.y(), m.position.z() + (aim.z() - m.position.z()) * step / d);
+                    left -= step;
+                }
+                if (engineAt >= way.size()) {
+                    m.arrive();
+                }
+            }
+            service.tick();
+        }
+    }
+
+    private long logged(String text) {
+        return log.stream().filter(l -> l.contains(text)).count();
+    }
+
+    /** The route's end in {@link #walkingThroughAHairpin}. */
+    private static final NavPoint HAIRPIN_END = feet(45.5, 17.5);
+
+    /**
+     * An NPC walking a road whose line doubles back at a junction, as {@code northern-wearway-upper-keep-tower} does at
+     * 1338 44 -623 (the developer's snapshot of 2026-11-17: 1321 -624, 1338 -623, 1337 -625, 1340 -622, 1346 -616,
+     * 1351 -613), here moved to 5.5 6.5: east to 22.5 7.5, back to 21.5 5.5, on to 24.5 8.5 and north-east.
+     */
+    private FakeMover walkingThroughAHairpin(int id, Settings settings) {
+        FakeMover m = register(id, feet(5.5, 6.5), settings);
+        service.navigate(id, HAIRPIN_END, r -> { });
+        service.tick();
+        roadAsks.get(roadAsks.size() - 1).complete(RoadPlan.found(List.of(floor(5.5, 64, 6.5), floor(22.5, 64, 7.5),
+            floor(21.5, 64, 5.5), floor(24.5, 64, 8.5), floor(30.5, 64, 14.5), floor(35.5, 64, 17.5),
+            floor(45.5, 64, 17.5))));
+        assertEquals(NpcNavState.MOVING, service.state(id));
+        return m;
+    }
+
+    /**
+     * PandiO/knk-workspace#953, what the developer's NPC did at 1337 45 -624: its waypoints cut across the line's
+     * hairpin, while the line point after the one nearest it lies back down the hairpin. Its own walk there is no push.
+     */
+    @Test
+    void walkingThroughAHairpinOfItsLineIsNoPush() {
+        FakeMover m = walkingThroughAHairpin(1, settings(true, false));
+        engineWalk(m, 300);
+        assertEquals(0, metrics.total(Event.PUSHED), "nothing pushed it: " + log);
+        assertEquals(0, logged("returns"), log.toString());
+        assertEquals(HAIRPIN_END, m.position, "it walked on to its goal: " + log);
+        assertEquals(1, metrics.total(Event.ARRIVED));
+    }
+
+    /**
+     * PandiO/knk-workspace#953: one push of unknown kind as the NPC comes up to the hairpin, and it walks back once and
+     * goes on with its trip. On {@code next} at {@code 6f6c915f} its walk on round the hairpin was taken for that push
+     * carrying it on: "returns straight back" and "is back at" over and over, the trip never ending.
+     */
+    @Test
+    void afterOnePushOfUnknownKindTheNpcWalksBackOnceAndGoesOnWithItsTrip() {
+        FakeMover m = walkingThroughAHairpin(1, settings(true, false));
+        while (m.position.x() < 20.5) {
+            engineWalk(m, 1);
+        }
+        assertEquals(0, metrics.total(Event.PUSHED), "its own walk is no push: " + log);
+        NavPoint before = m.position;
+        // shoved half a block back down the road, nothing reported it (water, a piston, another plugin)
+        m.position = feet(before.x() - 0.6, before.z());
+        ticks(2);
+        assertEquals(1, metrics.total(Event.PUSHED), log.toString());
+        assertEquals(1, logged("by something unknown"), log.toString());
+        assertTrue(service.returning(1), "it walks back");
+        engineWalk(m, 400);
+        assertEquals(1, metrics.total(Event.PUSHED), "one push: " + log);
+        assertEquals(1, logged("returns straight back"), "one walk back, not return after return: " + log);
+        assertEquals(1, metrics.total(Event.PUSH_RETURNED), log.toString());
+        assertFalse(service.returning(1));
+        assertEquals(HAIRPIN_END, m.position, "it went on with its trip: " + log);
+        assertEquals(1, metrics.total(Event.ARRIVED), "the trip ended");
+    }
+
+    /**
+     * PandiO/knk-workspace#953: a walk back ends the push. A shove right after it, within the push's episode
+     * ({@code PushWatch.EPISODE_TICKS}), is a new push, counted and logged, and walks the NPC back again; on
+     * {@code next} at {@code 6f6c915f} it walked back without a new push, as the old one carrying it on.
+     */
+    @Test
+    void aShoveRightAfterAWalkBackIsANewPush() {
+        FakeMover m = walking(1, settings(true, false));
+        walk(m, 4);
+        NavPoint before = m.position;
+        m.position = feet(before.x() - 0.6, 0.5); // back down the road, nothing reported it
+        ticks(2);
+        assertEquals(1, metrics.total(Event.PUSHED));
+        m.position = before;
+        ticks(2);
+        assertFalse(service.returning(1), "back");
+        assertEquals(1, metrics.total(Event.PUSH_RETURNED));
+        m.position = feet(before.x() - 0.6, 0.5); // shoved again at once
+        ticks(2);
+        assertEquals(2, metrics.total(Event.PUSHED), "a new push: " + log);
+        assertEquals(2, logged("pushed 0.6 blocks"), log.toString());
+        assertTrue(service.returning(1), "it walks back again");
+        assertEquals(2, logged("returns straight back"), log.toString());
+    }
+
     @Test
     void aReturningNpcThatIsPushedAgainStillReturnsToWhereItWasFirst() {
         FakeMover m = register(1, feet(5.5, 5.5), settings(true, false));

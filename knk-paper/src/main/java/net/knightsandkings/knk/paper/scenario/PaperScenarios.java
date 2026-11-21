@@ -143,6 +143,9 @@ public final class PaperScenarios {
             .register(new NpcCollisionPolicyScenario())
             .register(new NpcGuardLedgePushScenario())
             .register(new NpcDoorColumnScenario())
+            // a walk back after a push of unknown kind, on a line that doubles back at a junction
+            // (PandiO/knk-workspace#953)
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.NpcPushReturnHairpinScenario())
             // Scripted players: commands, chat, joins, menus and teleports (PandiO/knk-workspace#540)
             .register(new PlayerCommandNeedsGrantScenario())
             // KnK takes the plain /heal over from WorldGuard (PandiO/knk-workspace#580). Not last: the run's end would
