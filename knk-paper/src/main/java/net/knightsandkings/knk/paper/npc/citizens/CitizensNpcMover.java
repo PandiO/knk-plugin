@@ -56,7 +56,9 @@ final class CitizensNpcMover implements NpcMover {
 
     /**
      * Keeps the body in its ladder column while it climbs (link H1, {@link ClimbHold}): its feet or head in a block it
-     * climbs, Citizens' current waypoint in the same block column.
+     * climbs, Citizens' current waypoint in the same block column. Down a ladder (PandiO/knk-workspace#956), with the
+     * waypoint straight below, Citizens' navigator is paused while the ladder lets the body down to the run's last
+     * waypoint ({@link ClimbHold#descentEnd}); then it follows the rest of the list.
      */
     @Override
     public boolean holdOnClimb() {
@@ -74,6 +76,23 @@ final class CitizensNpcMover implements NpcMover {
         boolean climbing = net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld.climbable(feet, climbables)
             || net.knightsandkings.knk.paper.npc.nav.BukkitNavWorld.climbable(
                 feet.getRelative(org.bukkit.block.BlockFace.UP), climbables);
+        if (descentEnd < 0) {
+            descentEnd = ClimbHold.descentEnd(climbing, at.getX(), at.getY(), at.getZ(), given, indexOf(dest));
+            if (descentEnd >= 0) {
+                npc.getNavigator().setPaused(true); // no steering: the ladder lets the body down
+            }
+        }
+        if (descentEnd >= 0) {
+            double[] bottom = given.get(descentEnd);
+            if (ClimbHold.landed(at.getY(), bottom)) {
+                endDescent(at.getWorld(), bottom);
+                return true;
+            }
+            double[] keep = ClimbHold.pull(true, at.getX(), at.getZ(), bottom[0], bottom[2]);
+            Vector v = body.getVelocity();
+            body.setVelocity(new Vector(keep == null ? 0 : keep[0], v.getY(), keep == null ? 0 : keep[1]));
+            return true;
+        }
         double[] pull = ClimbHold.pull(climbing, at.getX(), at.getZ(), dest.getX(), dest.getZ());
         if (pull == null) {
             return false;
@@ -81,6 +100,61 @@ final class CitizensNpcMover implements NpcMover {
         Vector v = body.getVelocity();
         body.setVelocity(new Vector(pull[0], v.getY(), pull[1]));
         return true;
+    }
+
+    /**
+     * The waypoint list last given to Citizens by {@link #follow} (feet, after {@link #throughDoorway}), and its
+     * margin; empty after any other order. A ladder descent ({@link ClimbHold#descentEnd}) runs over it
+     * (PandiO/knk-workspace#956).
+     */
+    private List<double[]> given = List.of();
+    private double givenMargin = Double.NaN;
+    /** While the body goes down a ladder with Citizens' navigator paused: the index in {@link #given} of the run's last
+     * waypoint; else -1. */
+    private int descentEnd = -1;
+
+    /** The index in {@link #given} of Citizens' current waypoint, or -1. */
+    private int indexOf(Location dest) {
+        for (int i = 0; i < given.size(); i++) {
+            double[] p = given.get(i);
+            if (Math.abs(p[0] - dest.getX()) < 1e-6 && Math.abs(p[1] - dest.getY()) < 1e-6
+                && Math.abs(p[2] - dest.getZ()) < 1e-6) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * The body is down the ladder: Citizens steers again, through the rest of the list after the run's last waypoint
+     * (that waypoint alone when the list ends there, so the order completes as before).
+     */
+    private void endDescent(World world, double[] bottom) {
+        List<double[]> rest = descentEnd + 1 < given.size() ? List.copyOf(given.subList(descentEnd + 1, given.size()))
+            : List.of(bottom);
+        double margin = givenMargin;
+        descentEnd = -1;
+        npc.getNavigator().setPaused(false);
+        List<Vector> points = new ArrayList<>(rest.size());
+        for (double[] p : rest) {
+            points.add(new Vector(p[0], p[1], p[2]));
+        }
+        npc.getNavigator().setTarget(points);
+        given = rest;
+        givenMargin = margin;
+        if (!Double.isNaN(margin) && npc.getNavigator().isNavigating()) {
+            npc.getNavigator().getLocalParameters().distanceMargin(margin);
+        }
+    }
+
+    /** A new order, a stop or a teleport: no descent runs any more, and Citizens is not left paused. */
+    private void forgetGiven() {
+        given = List.of();
+        givenMargin = Double.NaN;
+        if (descentEnd >= 0) {
+            descentEnd = -1;
+            npc.getNavigator().setPaused(false);
+        }
     }
 
     /**
@@ -168,6 +242,7 @@ final class CitizensNpcMover implements NpcMover {
         if (!npc.isSpawned() || world == null) {
             return false;
         }
+        forgetGiven();
         if (npc.getNavigator().isNavigating()) {
             npc.getNavigator().cancelNavigation();
         }
@@ -186,6 +261,12 @@ final class CitizensNpcMover implements NpcMover {
         for (NavPoint p : waypoints) {
             points.add(throughDoorway(world, p));
         }
+        forgetGiven();
+        List<double[]> kept = new ArrayList<>(points.size());
+        for (Vector v : points) {
+            kept.add(new double[] {v.getX(), v.getY(), v.getZ()});
+        }
+        given = List.copyOf(kept);
         npc.getNavigator().setTarget(points);
     }
 
@@ -220,6 +301,7 @@ final class CitizensNpcMover implements NpcMover {
             return;
         }
         follow(waypoints);
+        givenMargin = margin;
         if (npc.getNavigator().isNavigating()) {
             npc.getNavigator().getLocalParameters().distanceMargin(margin);
         }
@@ -241,6 +323,7 @@ final class CitizensNpcMover implements NpcMover {
         if (!npc.isSpawned()) {
             return;
         }
+        forgetGiven();
         World world = Bukkit.getWorld(target.world());
         if (world == null) {
             return;
@@ -264,6 +347,7 @@ final class CitizensNpcMover implements NpcMover {
         if (!npc.isSpawned()) {
             return;
         }
+        forgetGiven();
         World world = Bukkit.getWorld(target.world());
         if (world == null) {
             return;
@@ -365,6 +449,9 @@ final class CitizensNpcMover implements NpcMover {
 
     @Override
     public void stop() {
+        if (npc.isSpawned()) {
+            forgetGiven();
+        }
         if (npc.isSpawned() && npc.getNavigator().isNavigating()) {
             npc.getNavigator().cancelNavigation();
         }
