@@ -336,6 +336,9 @@ public class KnKPlugin extends JavaPlugin {
     private net.knightsandkings.knk.paper.production.terminal.StorageTerminalModule storageTerminalModule;
     // Reward inbox, /inbox and kit/lootbox leftovers to the inbox (PandiO/knk-workspace#684): only with production.enabled.
     private net.knightsandkings.knk.paper.production.inbox.InboxModule inboxModule;
+    // Shop menus, the sell menu and /knk shop (PandiO/knk-workspace#687): only with production.enabled.
+    private net.knightsandkings.knk.paper.production.shop.ShopService shopService;
+    private net.knightsandkings.knk.paper.production.shop.SellModule sellModule;
     // Player harvesting in yield areas and block regeneration (PandiO/knk-workspace#134): only with production.enabled.
     private volatile net.knightsandkings.knk.paper.production.harvest.HarvestModule harvestModule;
     private net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature structuresMenuFeature;
@@ -1086,6 +1089,8 @@ public class KnKPlugin extends JavaPlugin {
             initializeStorageTerminals();
             // Reward inbox (PandiO/knk-workspace#684): only with production.enabled (A21).
             initializeRewardInbox();
+            // Shop menus and the sell menu (PandiO/knk-workspace#687): only with production.enabled (A21).
+            initializeShops();
             // Player harvesting and block regeneration (PandiO/knk-workspace#134): only with production.enabled (A21).
             initializeHarvesting();
             this.structuresMenuFeature = new net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature(
@@ -1136,7 +1141,9 @@ public class KnKPlugin extends JavaPlugin {
                 statisticsVisibilityMenuFeature,
                 statisticsMenuFeature,
                 leaderboardsMenuFeature,
-                structuresMenuFeature
+                structuresMenuFeature,
+                // Shop menus (PandiO/knk-workspace#687): always registered so the seeded menus validate; blocked below when off.
+                new net.knightsandkings.knk.paper.production.shop.ShopMenuFeature(() -> shopService, () -> sellModule)
             );
             menuFeatures.forEach(feature -> feature.registerMenuHandlers(menuRegistries));
 
@@ -1163,6 +1170,9 @@ public class KnKPlugin extends JavaPlugin {
             menuService.addObserver(structuresMenuFeature);
             if (!getConfig().getBoolean(net.knightsandkings.knk.paper.production.SurveyConfig.ENABLED_KEY, false)) {
                 net.knightsandkings.knk.paper.menu.content.StructuresMenuFeature.MENU_KEYS.forEach(
+                    key -> menuService.blockMenu(key, "production is switched off (production.enabled: false)"));
+                // PandiO/knk-workspace#687: the shop menus too.
+                net.knightsandkings.knk.core.production.shop.ShopMenuKeys.MENU_KEYS.forEach(
                     key -> menuService.blockMenu(key, "production is switched off (production.enabled: false)"));
             }
             if (menuFunnelRecorder != null) {
@@ -1527,6 +1537,11 @@ public class KnKPlugin extends JavaPlugin {
             inboxModule.stop();
             inboxModule = null;
         }
+        if (sellModule != null) { // shop sell menu (#687); picked items never leave the inventory before a sale
+            sellModule.stop();
+            sellModule = null;
+        }
+        shopService = null;
         if (surveyModule != null) {
             surveyModule.stop();
             surveyModule = null;
@@ -3505,6 +3520,12 @@ public class KnKPlugin extends JavaPlugin {
                 net.knightsandkings.knk.paper.commands.LogisticsAdminCommand.metadata(),
                 logisticsCommand::execute,
                 logisticsCommand::complete);
+            // Shop menus (PandiO/knk-workspace#687): /knk shop <id> opens a shop's menu for testing until shopkeepers (P11)
+            var shopCommand = new net.knightsandkings.knk.paper.commands.ShopAdminCommand(() -> shopService);
+            knkAdminCommand.registerSubcommand(
+                net.knightsandkings.knk.paper.commands.ShopAdminCommand.metadata(),
+                shopCommand::execute,
+                shopCommand::complete);
             // Storage terminals (PandiO/knk-workspace#74): /knk storage bind|unbind|info|reload; answers "off" without production.enabled
             var storageCommand = new net.knightsandkings.knk.paper.commands.StorageAdminCommand(() -> storageTerminalModule, this);
             knkAdminCommand.registerSubcommand(
@@ -4985,6 +5006,30 @@ public class KnKPlugin extends JavaPlugin {
                 }
             });
         }
+    }
+
+    /**
+     * Shop menus (PandiO/knk-workspace#687, shops DESIGN § 8): the state behind the seeded menus shops.shop, shops.item and
+     * shops.confirm, and the sell menu. Only with production.enabled (A21); off, the menus are blocked and /knk shop says so.
+     */
+    private void initializeShops() {
+        if (!getConfig().getBoolean(net.knightsandkings.knk.paper.production.SurveyConfig.ENABLED_KEY, false)) {
+            return;
+        }
+        var mainThread = MenuService.mainThreadExecutor(this);
+        java.util.function.Function<java.util.UUID, Integer> userIds = uuid -> cacheManager.getUserCache().getStale(uuid)
+            .map(net.knightsandkings.knk.core.domain.users.UserSummary::id).orElse(null);
+        java.util.function.Function<java.util.UUID, Long> coins = uuid -> cacheManager.getUserCache().getStale(uuid)
+            .map(user -> (long) user.coins()).orElse(null);
+        java.util.function.Predicate<java.util.UUID> inSiege = uuid -> siegeService != null && siegeService.activeLobbyOf(uuid).isPresent();
+        shopService = new net.knightsandkings.knk.paper.production.shop.ShopService(apiClient.getShopsApi(),
+            new net.knightsandkings.knk.paper.production.terminal.BlueprintItems(itemBlueprintsDataAccess,
+                minecraftMaterialRefsDataAccess),
+            userIds, coins, inSiege, mainThread, java.time.Clock.systemUTC(), () -> menuService);
+        sellModule = new net.knightsandkings.knk.paper.production.shop.SellModule(this, shopService, userIds, coins, inSiege,
+            () -> itemIdentityService == null ? null : itemIdentityService::resolve, mainThread, () -> menuService);
+        sellModule.start();
+        getLogger().info("Shop menus on (production.enabled): /knk shop <id>, the sell menu");
     }
 
     /** The kit flows' reward inbox router (#684): null while production.enabled is off (today's placement). */

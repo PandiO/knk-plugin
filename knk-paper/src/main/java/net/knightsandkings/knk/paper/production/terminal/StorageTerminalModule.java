@@ -423,7 +423,7 @@ public final class StorageTerminalModule implements Listener {
         return null;
     }
 
-    static boolean enchanted(ItemStack stack) {
+    public static boolean enchanted(ItemStack stack) {
         ItemMeta meta = stack.hasItemMeta() ? stack.getItemMeta() : null;
         if (meta == null) {
             return false;

@@ -282,7 +282,7 @@ public final class InboxModule implements Listener {
     }
 
     /** Units of {@code template} the player's inventory can still hold. */
-    static long room(Player player, BlueprintItems.Template template) {
+    public static long room(Player player, BlueprintItems.Template template) {
         long room = 0;
         int max = Math.max(1, template.maxStack());
         for (ItemStack slot : player.getInventory().getStorageContents()) {
@@ -296,7 +296,7 @@ public final class InboxModule implements Listener {
     }
 
     /** Main thread: {@code amount} of the item into the inventory in stacks; returns what didn't fit. */
-    static List<ItemStack> give(Player player, BlueprintItems.Template template, long amount) {
+    public static List<ItemStack> give(Player player, BlueprintItems.Template template, long amount) {
         long left = amount;
         int max = Math.max(1, template.maxStack());
         List<ItemStack> spill = new ArrayList<>();
