@@ -195,4 +195,68 @@ class KitGrantDeliveryTest {
 
         verify(api, never()).pendingDeliveriesAsync(anyInt());
     }
+
+    // ===== reward inbox (PandiO/knk-workspace#684) =====
+
+    /** Records what the kit flows hand the reward inbox. */
+    static final class RecordingRouter implements KitRewardRouter {
+        final List<String> calls = new ArrayList<>();
+
+        @Override
+        public KitGrantPlacer.PlacementSummary place(Player player, int userId, List<KitGrantPlacer.ResolvedItem> items,
+                                                     String key, String kitName) {
+            calls.add("place " + userId + " " + key + " " + kitName);
+            return new KitGrantPlacer.PlacementSummary(1, 0, 0, 0, 0, 2);
+        }
+
+        @Override
+        public void deliverOffline(int userId, List<KitGrantPlacer.ResolvedItem> items, String key, String kitName) {
+            calls.add("offline " + userId + " " + key + " " + kitName);
+        }
+    }
+
+    @Test
+    void withTheInboxOn_theKitPlacesThroughTheRouter_keyedByItsClaim() {
+        pendingAre(pending(501, "Knight"));
+        when(api.markDeliveredAsync(USER, 501)).thenReturn(CompletableFuture.completedFuture(true));
+        RecordingRouter router = new RecordingRouter();
+        KitGrantDelivery delivery = delivery();
+        delivery.setRewardRouter(() -> router);
+
+        assertEquals(1, delivery.deliverPending(player).join());
+
+        assertEquals(List.of("place 31 kit-claim-501 Knight"), router.calls);
+        assertEquals(0, placed.size(), "the plain placer is not used");
+        verify(player, never()).sendMessage("§7Some of it didn't fit and was dropped at your feet.");
+    }
+
+    @Test
+    void withTheInboxOn_aPlayerWhoLeftAfterTheTake_getsTheKitInTheInbox() {
+        pendingAre(pending(501, "Knight"));
+        RecordingRouter router = new RecordingRouter();
+        when(api.markDeliveredAsync(USER, 501)).thenAnswer(inv -> {
+            when(player.isOnline()).thenReturn(false);
+            return CompletableFuture.completedFuture(true);
+        });
+        KitGrantDelivery delivery = delivery();
+        delivery.setRewardRouter(() -> router);
+
+        delivery.deliverPending(player).join();
+
+        assertEquals(List.of("offline 31 kit-claim-501 Knight"), router.calls);
+    }
+
+    @Test
+    void withTheRouterAnsweringNull_theFlagOffPathIsTodays() {
+        pendingAre(pending(501, "Knight"));
+        when(api.markDeliveredAsync(USER, 501)).thenReturn(CompletableFuture.completedFuture(true));
+        summary = new KitGrantPlacer.PlacementSummary(1, 0, 0, 2, 0);
+        KitGrantDelivery delivery = delivery();
+        delivery.setRewardRouter(() -> null);
+
+        delivery.deliverPending(player).join();
+
+        assertEquals(1, placed.size());
+        verify(player).sendMessage("§7Some of it didn't fit and was dropped at your feet.");
+    }
 }

@@ -131,4 +131,49 @@ class KitGrantFlowTest {
                 0, 0, 0, true, false, null, null, null, null, 0, null, null, null, false, null));
         assertEquals(42, flow.resolveUserId(player));
     }
+
+    // ===== reward inbox (PandiO/knk-workspace#684) =====
+
+    @Test
+    void withTheInboxOn_aClaimPlacesThroughTheRouter_withItsOwnKey() {
+        when(permissible.hasPermission(player, KitGrantFlow.GET_NODE)).thenReturn(true);
+        when(api.claimAsync(1, 7)).thenReturn(CompletableFuture.completedFuture(
+                new KnkKitClaimResult(7, null, null, null, null, null, null, List.of())));
+        KitGrantDeliveryTest.RecordingRouter router = new KitGrantDeliveryTest.RecordingRouter();
+        flow.setRewardRouter(() -> router);
+
+        assertTrue(flow.claim(player, 1, 7, "Starter").join());
+
+        assertEquals(1, router.calls.size());
+        assertTrue(router.calls.get(0).startsWith("place 1 kit-7-u1-"), router.calls.get(0));
+        verify(player).sendMessage("§aKit \"Starter\" claimed to §bAlice§a.");
+    }
+
+    @Test
+    void withTheInboxOn_aGiveToAPlayerWhoLeft_goesToTheirInbox() {
+        when(permissible.hasPermission(player, KitGrantFlow.GIVE_NODE)).thenReturn(true);
+        Player recipient = mock(Player.class);
+        when(recipient.getName()).thenReturn("Bob");
+        when(recipient.isOnline()).thenReturn(false);
+        when(api.giveAsync(null, 2, 7)).thenReturn(CompletableFuture.completedFuture(
+                new KnkKitClaimResult(7, null, null, null, null, null, null, List.of())));
+        KitGrantDeliveryTest.RecordingRouter router = new KitGrantDeliveryTest.RecordingRouter();
+        flow.setRewardRouter(() -> router);
+
+        assertTrue(flow.give(player, recipient, 2, 7, "Starter").join());
+
+        assertTrue(router.calls.get(0).startsWith("offline 2 kit-7-u2-"), router.calls.toString());
+        verify(player).sendMessage("§aKit \"Starter\" given; Bob went offline, so it went to their reward inbox.");
+    }
+
+    @Test
+    void withTheInboxOff_aGiveToAPlayerWhoLeft_isAsBefore() {
+        when(permissible.hasPermission(player, KitGrantFlow.GIVE_NODE)).thenReturn(true);
+        Player recipient = mock(Player.class);
+        when(recipient.isOnline()).thenReturn(false);
+        when(api.giveAsync(null, 2, 7)).thenReturn(CompletableFuture.completedFuture(
+                new KnkKitClaimResult(7, null, null, null, null, null, null, List.of())));
+
+        assertFalse(flow.give(player, recipient, 2, 7, "Starter").join());
+    }
 }

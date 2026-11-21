@@ -80,6 +80,11 @@ public final class KitGrantPlacer {
         public ResolvedItem(SlotKind kind, Integer contentSlotIndex, ItemStack itemStack, int maxStackSize) {
             this(kind, contentSlotIndex, itemStack, maxStackSize, null);
         }
+
+        /** A contents item for {@code slotIndex} (tests and scenarios build kit items without the API, #684). */
+        public static ResolvedItem content(int slotIndex, ItemStack itemStack, int maxStackSize, Integer itemBlueprintId) {
+            return new ResolvedItem(SlotKind.CONTENT, slotIndex, itemStack, maxStackSize, itemBlueprintId);
+        }
     }
 
     /**
