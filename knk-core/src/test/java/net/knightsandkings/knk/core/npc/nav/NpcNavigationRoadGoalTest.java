@@ -244,8 +244,13 @@ class NpcNavigationRoadGoalTest {
         }
     }
 
+    /**
+     * PandiO/knk-workspace#848, developer decision 2026-11-21: no road point reaches the goal on foot (a roof behind a
+     * closed hatch for an NPC that may not open it). The NPC walks to the road point nearest the goal, with no walk
+     * search or hops after it, and its order ends there as failed; a replan routes there again.
+     */
     @Test
-    void noCandidateReachedFallsBackToTodaysGoalWithC1sJoin() {
+    void noCandidateReachedWalksToTheRoadPointNearestTheGoalAndFails() {
         start(on(), true);
         order();
         roadAsks.get(0).answer().complete(RoadPlan.found(TODAY));
@@ -253,12 +258,70 @@ class NpcNavigationRoadGoalTest {
         roadAsks.get(1).answer().complete(RoadPlan.found(VIA_OTHER));
         walkAsks.get(1).answer().complete(noPath());
 
-        assertEquals(3, walkAsks.size(), "C1's walk to the goal from today's end again");
-        assertEquals(new NavPoint(WORLD, 100.5, 65, 20.5), walkAsks.get(2).feet());
-        assertTrue(log.stream().anyMatch(l -> l.contains("none reached on foot")), log.toString());
-        walkAsks.get(2).answer().complete(noPath());
-        assertEquals(4, walkAsks.size(), "and from further back along the road, as C1 does");
+        assertEquals(2, walkAsks.size(), "no further walk search: neither C1's join nor hops");
+        assertEquals(NpcNavState.MOVING, service.state(mover.id()));
+        List<NavPoint> line = line();
+        assertEquals(OTHER, line.get(line.size() - 1), "the road point nearest the goal (5 blocks, today's is 20)");
+        assertTrue(line.contains(ROUND), "by its road: " + line);
+        assertEquals(1, service.roadGoalsMoved());
+        assertEquals(1, service.roadGoalsUnreachable());
+        assertTrue(log.stream().anyMatch(l -> l.contains("road goal for") && l.contains("none reached on foot")
+            && l.contains("the road point nearest the goal, #2 (95 65 0)") && l.contains("the order ends there as failed")),
+            log.toString());
+
+        int guard = 0;
+        while (results.isEmpty() && guard++ < 60) {
+            mover.arrive();
+            service.tick();
+        }
+        assertEquals(2, walkAsks.size(), "no walk search at the road's end either");
+        NavigationResult.Failed failed = assertInstanceOf(NavigationResult.Failed.class, results.get(0));
+        assertTrue(failed.reason().contains("is not reachable on foot from any of the 2 road points tried")
+            && failed.reason().contains("stopped at the road point nearest it, 95 65 0"), failed.reason());
+    }
+
+    @Test
+    void aReplanOfAnUnreachableGoalRoutesToTheNearestRoadPointAgainWithoutAWalk() {
+        start(on(), true);
+        order();
+        roadAsks.get(0).answer().complete(RoadPlan.found(TODAY));
+        walkAsks.get(0).answer().complete(noPath());
+        roadAsks.get(1).answer().complete(RoadPlan.found(VIA_OTHER,
+            List.of(new RoadPlanner.GateCrossing(7, floor(60.5, 64, 10.5)))));
+        walkAsks.get(1).answer().complete(noPath());
+
+        closedGates.add(7);
+        service.onGateChanged(7);
+        for (int i = 0; i < 3; i++) {
+            service.tick();
+        }
+        assertEquals(3, roadAsks.size(), "one replan, " + roadAsks);
+        assertEquals(OTHER, roadAsks.get(2).to(), "to the nearest road point, not the destination");
+        roadAsks.get(2).answer().complete(RoadPlan.found(VIA_OTHER));
+        assertEquals(2, walkAsks.size(), "no walk to the goal after the replan");
+        assertEquals(1, candidateAsks.size(), "no second choice");
+        List<NavPoint> line = line();
+        assertEquals(OTHER, line.get(line.size() - 1));
+    }
+
+    @Test
+    void theNearestRoadPointCanBeTodaysGoal() {
+        // today's road ends 20 blocks from the goal; the other road point is put 40 blocks off
+        NavPoint far = floor(60.5, 64, -39.5);
+        candidates = List.of(candidate(1, floor(100.5, 64, 20.5)), candidate(2, far));
+        start(on(), true);
+        order();
+        roadAsks.get(0).answer().complete(RoadPlan.found(TODAY));
+        walkAsks.get(0).answer().complete(noPath());
+        roadAsks.get(1).answer().complete(RoadPlan.found(List.of(floor(0.5, 64, 20.5), floor(60.5, 64, 20.5), far)));
+        walkAsks.get(1).answer().complete(noPath());
+
+        List<NavPoint> line = line();
+        assertEquals(floor(100.5, 64, 20.5), line.get(line.size() - 1), "today's road end is the nearest");
         assertEquals(0, service.roadGoalsMoved());
+        assertEquals(1, service.roadGoalsUnreachable());
+        assertTrue(log.stream().anyMatch(l -> l.contains("the road point nearest the goal, #1 (100 65 20)")),
+            log.toString());
     }
 
     @Test
