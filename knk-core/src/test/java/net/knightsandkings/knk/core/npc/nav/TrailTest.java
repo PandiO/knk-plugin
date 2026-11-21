@@ -41,6 +41,18 @@ class TrailTest {
         assertEquals(FLIGHT.subList(2, FLIGHT.size()), trail.remaining());
     }
 
+    /** PandiO/knk-workspace#953: push resistance asks which waypoint the NPC walks to without moving the index. */
+    @Test
+    void theWaypointAheadOfTheFeetLeavesTheIndexWhereItIs() {
+        Trail trail = new Trail(FLIGHT);
+        assertEquals(FLIGHT.get(1), trail.aheadOf(feet(0.5, 65, 4.6)), "within reach of the first: the second");
+        assertEquals(FLIGHT.get(2), trail.aheadOf(feet(0.5, 66.4, 3.0)), "past the second: the third");
+        assertEquals(0, trail.index(), "only update moves the index");
+        trail.update(feet(0.5, 68, 1.6));
+        assertEquals(FLIGHT.get(4), trail.aheadOf(feet(0.5, 65, 4.5)), "never behind the index");
+        assertEquals(null, trail.aheadOf(feet(0.5, 69, 0.5)), "all walked");
+    }
+
     @Test
     void neverMovesBackAndAllWalkedLeavesNothing() {
         Trail trail = new Trail(FLIGHT);

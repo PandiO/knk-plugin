@@ -1,5 +1,7 @@
 package net.knightsandkings.knk.core.npc.nav.push;
 
+import java.util.function.UnaryOperator;
+
 import net.knightsandkings.knk.core.navigation.shape.NavPoint;
 import net.knightsandkings.knk.core.npc.nav.NpcMover;
 
@@ -8,18 +10,22 @@ import net.knightsandkings.knk.core.npc.nav.NpcMover;
  * two looks that the NPC's own movement does not explain.
  * <ol>
  *     <li>A walking NPC explains a move up to {@link #MAX_SPEED} blocks per tick (plus {@link #SLACK}) that does not go
- *     back more than {@link #BACKWARD} against its walking direction. Height is never judged, so a stair step or a hop
- *     is its own walk. Sideways moves are its own too (a turn at a waypoint) unless something touched it within
- *     {@link #CONTACT_TICKS} ({@link #contact}): then more than {@link #SIDEWAYS} blocks sideways is a push.</li>
+ *     back more than {@link #BACKWARD} against its walking direction: along its line, or towards a waypoint the engine
+ *     walks it to (PandiO/knk-workspace#953: where the line doubles back at a junction, its next point lies behind the
+ *     NPC while its waypoints lead it on). Height is never judged, so a stair step or a hop is its own walk. Sideways
+ *     moves are its own too (a turn at a waypoint) unless something touched it within {@link #CONTACT_TICKS}
+ *     ({@link #contact}): then more than {@link #SIDEWAYS} blocks sideways is a push.</li>
  *     <li>A standing NPC (no order, waiting, held) explains nothing: {@link #STANDING_PUSH} blocks from where it came to
- *     stand is a push.</li>
+ *     stand is a push. Where it came to stand is where it is at the first look after it stopped walking: the move
+ *     since its last walking look is its last steps and the body's slide to a stop (PandiO/knk-workspace#953), unless
+ *     it was faster than a walk or right after an attack.</li>
  * </ol>
  * One push is one episode: the looks within {@link #EPISODE_TICKS} of the last unexplained one belong to it, so a
  * player leaning on an NPC for three seconds gives about three pushes, not thirty; those later looks come back as
- * {@link Push#continued()}, so the edge guard sees where the push goes. Each push says where the NPC was
- * before it ({@link Push#from()}: its last explained position walking, or where it stood), which is where it returns
- * to; after it the watch measures from where the push left the body. The watch knows nothing of routes or the world;
- * main thread; one per NPC.
+ * {@link Push#continued()}, so the edge guard sees where the push goes; a finished walk back ends the episode
+ * ({@link #endEpisode}). Each push says where the NPC was before it ({@link Push#from()}: its last explained position
+ * walking, or where it stood), which is where it returns to; after it the watch measures from where the push left the
+ * body. The watch knows nothing of routes or the world; main thread; one per NPC.
  */
 public final class PushWatch {
 
@@ -118,6 +124,21 @@ public final class PushWatch {
      * @param dirX    its walking direction (any length; 0, 0 when unknown)
      */
     public Push look(NavPoint feet, long tick, boolean walking, double dirX, double dirZ) {
+        return look(feet, tick, walking, dirX, dirZ, null);
+    }
+
+    /**
+     * One look at the NPC's feet at {@code tick}, with where the engine walks it (PandiO/knk-workspace#953): a
+     * walking NPC's move is also its own when it goes towards the waypoint the engine walked it to from where the move
+     * began, or the one it walks to from where it is now (it may have reached one and turned to the next between two
+     * looks).
+     *
+     * @param walking whether it walks under an order now (else it stands: idle, waiting, held)
+     * @param dirX    its walking direction along its line (any length; 0, 0 when unknown: only its speed is judged)
+     * @param towards the waypoint the engine walks the NPC to from a spot, or null; null: not known
+     */
+    public Push look(NavPoint feet, long tick, boolean walking, double dirX, double dirZ,
+                     UnaryOperator<NavPoint> towards) {
         if (last == null || !last.world().equals(feet.world())) {
             reset(feet, walking);
             lastTick = tick;
@@ -128,22 +149,24 @@ public final class PushWatch {
         double sz = feet.z() - last.z();
         boolean touched = recent(playerTick, tick) || recent(attackTick, tick) || recent(npcTick, tick)
             || recent(otherTick, tick);
+        boolean attacked = recent(attackTick, tick);
         boolean explained;
         if (walking) {
             rest = null;
             if (anchor == null) {
                 anchor = last;
             }
-            double len = Math.hypot(dirX, dirZ);
             double step = Math.hypot(sx, sz);
-            double along = len < 1e-9 ? step : (sx * dirX + sz * dirZ) / len;
-            double sideways = len < 1e-9 ? 0 : Math.abs(sx * dirZ - sz * dirX) / len;
-            explained = step <= MAX_SPEED * dt + SLACK && along >= -BACKWARD && !(touched && sideways > SIDEWAYS)
-                && !(recent(attackTick, tick) && step > SLACK && along < step * 0.5);
+            explained = step <= MAX_SPEED * dt + SLACK && (ownWalk(sx, sz, dirX, dirZ, touched, attacked)
+                || towardsWaypoint(towards, last, feet, touched, attacked));
         } else {
+            // it walked at the last look: the move since is the end of its walk, its last steps and the body sliding to
+            // a stop when the engine ends a waypoint list (PandiO/knk-workspace#953: 0.4 blocks at a trip's end); where
+            // it comes to stand is its spot, unless the move was faster than a walk or an attack's
+            boolean stopping = anchor != null && rest == null;
             anchor = null;
             if (rest == null) {
-                rest = last;
+                rest = stopping && !attacked && Math.hypot(sx, sz) <= MAX_SPEED * dt + SLACK ? feet : last;
             }
             explained = rest.horizontalDistance(feet) < STANDING_PUSH;
         }
@@ -188,9 +211,53 @@ public final class PushWatch {
         return new Push(open ? episodeFrom : before, feet, kind, by, walking, playerAttack, open);
     }
 
+    /**
+     * Whether the move from {@code from} to {@code feet} goes towards the waypoint the engine walked the NPC to from
+     * either end of it, as {@link #ownWalk} judges it from {@code from}; a waypoint less than {@link #SLACK} away
+     * across says nothing of a direction.
+     */
+    private static boolean towardsWaypoint(UnaryOperator<NavPoint> towards, NavPoint from, NavPoint feet,
+                                           boolean touched, boolean attacked) {
+        if (towards == null) {
+            return false;
+        }
+        for (NavPoint spot : new NavPoint[] {from, feet}) {
+            NavPoint w = towards.apply(spot);
+            if (w != null && w.world().equals(from.world()) && Math.hypot(w.x() - from.x(), w.z() - from.z()) >= SLACK
+                && ownWalk(feet.x() - from.x(), feet.z() - from.z(), w.x() - from.x(), w.z() - from.z(), touched,
+                    attacked)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a walking NPC's move of {@code sx, sz} is its own walk in the direction {@code dirX, dirZ} (0, 0: any
+     * way): not more than {@link #BACKWARD} back against it, not more than {@link #SIDEWAYS} sideways right after a
+     * contact, and not mostly sideways or back right after an attack (its knockback).
+     */
+    private static boolean ownWalk(double sx, double sz, double dirX, double dirZ, boolean touched, boolean attacked) {
+        double len = Math.hypot(dirX, dirZ);
+        double step = Math.hypot(sx, sz);
+        double along = len < 1e-9 ? step : (sx * dirX + sz * dirZ) / len;
+        double sideways = len < 1e-9 ? 0 : Math.abs(sx * dirZ - sz * dirX) / len;
+        return along >= -BACKWARD && !(touched && sideways > SIDEWAYS)
+            && !(attacked && step > SLACK && along < step * 0.5);
+    }
+
     /** Where the open push episode began (where the NPC returns to), or null when none is open. */
     public NavPoint episodeFrom(long tick) {
         return tick - episodeTick <= EPISODE_TICKS ? episodeFrom : null;
+    }
+
+    /**
+     * The push is over (PandiO/knk-workspace#953): the NPC walked back from it. The next move its walk does not explain
+     * is a new push, counted and logged, not this one carrying it on. Where it stands or walks from stays as it is.
+     */
+    public void endEpisode() {
+        episodeFrom = null;
+        episodeTick = Long.MIN_VALUE / 2;
     }
 
     /**

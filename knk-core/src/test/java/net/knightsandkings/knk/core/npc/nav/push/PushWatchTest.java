@@ -141,6 +141,110 @@ class PushWatchTest {
         assertNull(later.look(at(5.0, 65, 0.5), 22, true, 1, 0).kind(), "a contact 20 ticks ago is not the pusher");
     }
 
+    /**
+     * PandiO/knk-workspace#953: where the road line doubles back at a junction, the line's next point (the walking
+     * direction, +x here) lies behind the NPC while the engine walks it on to its waypoint at 0.5, 0.5 (-x). Its walk
+     * there is its own; without the waypoint the same move is a push, as on {@code next} at {@code 6f6c915f}.
+     */
+    @Test
+    void aWalkTowardsTheWaypointItWalksToIsNoPushWhereTheLineDoublesBack() {
+        PushWatch watch = walkingFor(4); // at x 2.5
+        NavPoint waypoint = at(0.5, 65, 0.5);
+        assertNull(watch.look(at(2.0, 65, 0.5), 10, true, 1, 0, feet -> waypoint), "towards its waypoint");
+        assertNull(watch.look(at(1.5, 65, 0.5), 12, true, 1, 0, feet -> waypoint));
+        assertNotNull(walkingFor(4).look(at(2.0, 65, 0.5), 10, true, 1, 0), "the line alone: a push");
+    }
+
+    @Test
+    void theWaypointItTurnedToBetweenTwoLooksExplainsItToo() {
+        // at x 2.5, walking to 3.0, 0.5; from there the engine turns it back to 2.0, -1.5 (a hairpin)
+        NavPoint first = at(3.0, 65, 0.5);
+        NavPoint next = at(2.0, 65, -1.5);
+        java.util.function.UnaryOperator<NavPoint> towards = feet -> feet.z() > 0.4 ? first : next;
+        // the first one reached and turned towards the next within one look: back against the line and the first
+        assertNull(walkingFor(4).look(at(1.9, 65, -0.1), 10, true, 1, 0, towards),
+            "towards the waypoint it walks to now");
+        assertNotNull(walkingFor(4).look(at(1.9, 65, -0.1), 10, true, 1, 0, feet -> first),
+            "the first waypoint alone does not explain it");
+    }
+
+    @Test
+    void aPushBackWhileItsWaypointLiesAheadIsStillAPush() {
+        PushWatch watch = walkingFor(4); // at x 2.5, its waypoint ahead at 6.5
+        NavPoint waypoint = at(6.5, 65, 0.5);
+        PushWatch.Push p = watch.look(at(1.9, 65, 0.5), 10, true, 1, 0, feet -> waypoint);
+        assertNotNull(p, "against the line and against its waypoint");
+        assertEquals(at(2.5, 65, 0.5), p.from());
+        assertNull(p.kind(), "nothing reported it");
+    }
+
+    @Test
+    void aWaypointUnderItsFeetSaysNothingOfADirection() {
+        PushWatch watch = walkingFor(4);
+        assertNotNull(watch.look(at(1.9, 65, 0.5), 10, true, 1, 0, feet -> at(2.55, 66, 0.5)),
+            "a waypoint right above where the move began explains no move back");
+    }
+
+    /**
+     * PandiO/knk-workspace#953: once the NPC walked back from a push, the push is over. A move its walk does not
+     * explain within {@link PushWatch#EPISODE_TICKS} after that is a new push, not the old one carrying it on.
+     */
+    @Test
+    void afterTheEndOfAnEpisodeTheNextUnexplainedMoveIsANewPush() {
+        PushWatch watch = walkingFor(4);
+        PushWatch.Push first = watch.look(at(1.9, 65, 0.5), 10, true, 1, 0);
+        assertNotNull(first);
+        assertFalse(first.continued());
+        assertNotNull(watch.episodeFrom(12));
+        watch.endEpisode();
+        assertNull(watch.episodeFrom(12), "no push open");
+        assertNull(watch.look(at(2.4, 65, 0.5), 12, true, 1, 0), "its walk on");
+        PushWatch.Push second = watch.look(at(1.8, 65, 0.5), 14, true, 1, 0);
+        assertNotNull(second);
+        assertFalse(second.continued(), "a new push, 4 ticks after the first");
+        assertEquals(at(2.4, 65, 0.5), second.from(), "from where it walked to, not where the first push began");
+        assertEquals(2, watch.pushes());
+    }
+
+    @Test
+    void withoutTheEndOfTheEpisodeTheSameMoveIsThePushCarryingOn() {
+        PushWatch watch = walkingFor(4);
+        watch.look(at(1.9, 65, 0.5), 10, true, 1, 0);
+        watch.look(at(2.4, 65, 0.5), 12, true, 1, 0);
+        PushWatch.Push same = watch.look(at(1.8, 65, 0.5), 14, true, 1, 0);
+        assertTrue(same != null && same.continued(), "the episode is open for " + PushWatch.EPISODE_TICKS + " ticks");
+        assertEquals(1, watch.pushes());
+    }
+
+    /**
+     * PandiO/knk-workspace#953: when the engine ends a waypoint list, the NPC's last steps and its body's slide to a
+     * stop fall between its last walking look and its first standing one (0.4 blocks at a trip's end on Paper). That
+     * move is its own; where it comes to stand is its spot from then on.
+     */
+    @Test
+    void theLastStepsOfAWalkThatStopsAreNoPush() {
+        PushWatch watch = walkingFor(4); // at x 2.5
+        assertNull(watch.look(at(2.95, 65, 0.5), 10, false, 0, 0), "its last steps and the slide");
+        assertEquals(at(2.95, 65, 0.5), watch.rest(), "where it came to stand");
+        assertNull(watch.look(at(3.0, 65, 0.5), 12, false, 0, 0), "the rest of the slide");
+        PushWatch.Push p = watch.look(at(3.4, 65, 0.5), 14, false, 0, 0);
+        assertNotNull(p, "then 0.45 from where it stands is a push");
+        assertEquals(at(2.95, 65, 0.5), p.from());
+    }
+
+    @Test
+    void aStopFasterThanAWalkOrRightAfterAnAttackIsStillAPush() {
+        PushWatch fast = walkingFor(4);
+        PushWatch.Push p = fast.look(at(4.0, 65, 0.5), 10, false, 0, 0);
+        assertNotNull(p, "1.5 blocks in one look is no walk");
+        assertEquals(at(2.5, 65, 0.5), p.from());
+        PushWatch hit = walkingFor(4);
+        hit.contact(new Contact(ContactKind.ATTACK, "steve", true), 9);
+        PushWatch.Push q = hit.look(at(2.0, 65, 1.0), 10, false, 0, 0);
+        assertNotNull(q, "knocked as it stopped");
+        assertEquals(ContactKind.ATTACK, q.kind());
+    }
+
     @Test
     void aResetForgetsWhereItWas() {
         PushWatch watch = new PushWatch();
