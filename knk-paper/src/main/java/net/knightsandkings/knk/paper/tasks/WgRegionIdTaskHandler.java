@@ -37,7 +37,8 @@ import java.util.Map;
 import java.util.logging.Logger;
 
 /**
- * Handler for WgRegionId field tasks.
+ * Handler for region world tasks: a WgRegionId field, or since PandiO/knk-workspace#944 any field whose task type is one
+ * of {@link #TASK_TYPES}.
  * Allows players to define a WorldGuard region by either:
  * 1. Creating a new region using WorldEdit selection
  * 2. Selecting an existing WorldGuard region
@@ -46,6 +47,15 @@ import java.util.logging.Logger;
 public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     private static final Logger LOGGER = Logger.getLogger(WgRegionIdTaskHandler.class.getName());
     private static final String FIELD_NAME = "WgRegionId";
+
+    /**
+     * PandiO/knk-workspace#944: the task types this handler is registered for besides the field name {@code WgRegionId},
+     * so the region task runs on a field of any name (the Landmark form's {@code RegionId}). {@code ReagionCreate} is the
+     * seeded spelling; the web app maps {@code ReagionCreate}/{@code RegionCreate} results to {@code regionId}. The
+     * result keeps {@code fieldName: WgRegionId}: nothing reads it (the API and the web app read {@code regionId} and
+     * {@code worldName}).
+     */
+    public static final java.util.List<String> TASK_TYPES = java.util.List.of("ReagionCreate", "RegionCreate", "RegionClaim");
     private static final String TEMP_REGION_PREFIX = "tempregion_worldtask_";
     
 
@@ -137,6 +147,15 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     public WgRegionIdTaskHandler(WorldTasksApi worldTasksApi, Plugin plugin) {
         this.worldTasksApi = worldTasksApi;
         this.plugin = plugin;
+    }
+
+    /**
+     * Registers this handler in {@code registry} by the field name {@code WgRegionId} (older form configurations) and,
+     * since PandiO/knk-workspace#944, by each of {@link #TASK_TYPES}, so a region task on any field finds it.
+     */
+    public void registerWith(WorldTaskHandlerRegistry registry) {
+        registry.registerHandler(this);
+        TASK_TYPES.forEach(type -> registry.registerHandler(type, this));
     }
 
     @Override

@@ -14,7 +14,10 @@ import net.knightsandkings.knk.paper.scenario.scenarios.GateOpenCloseScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateOpeningLeavesNeighboursScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GateSideBySideScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.GlobalRegionExplosionScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.LandmarkRegionRenameScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.LandmarkRegionReplaceScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxAreaRenameScenario;
+import net.knightsandkings.knk.paper.scenario.scenarios.ProductionAreaRegionRenameScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxAreaReplaceScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnOnGroundScenario;
 import net.knightsandkings.knk.paper.scenario.scenarios.LootboxSpawnUnderRoofScenario;
@@ -166,6 +169,12 @@ public final class PaperScenarios {
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerInboxClaimScenario())
             // P8 (PandiO/knk-workspace#134): harvest and regenerate in a production area; a felled tree restored by snapshot
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestRegenerateScenario())
-            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestTreeScenario());
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestTreeScenario())
+            // Landmark and production area regions drawn through the form's region task (PandiO/knk-workspace#945,
+            // #946). Last on purpose: a scene sits at origin.x + index x 64, and npc-replay-quarry-to-keep fails when
+            // its scene moves (PandiO/knk-workspace#958), so new scenarios go after the NPC replays.
+            .register(new LandmarkRegionRenameScenario())
+            .register(new LandmarkRegionReplaceScenario())
+            .register(new ProductionAreaRegionRenameScenario());
     }
 }
