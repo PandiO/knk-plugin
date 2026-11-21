@@ -83,6 +83,8 @@ public final class ShopService {
     private final Set<String> fetching = ConcurrentHashMap.newKeySet();
     private final Map<Integer, CompletableFuture<ShopOffer>> reading = new ConcurrentHashMap<>();
     private final Set<UUID> buying = ConcurrentHashMap.newKeySet();
+    /** Told the shop id after a trade or a refusal dropped its offer (the display stalls choose again, #250). */
+    private volatile java.util.function.IntConsumer offerChanged = id -> { };
 
     public ShopService(ShopsApi api, BlueprintItems items, Function<UUID, Integer> userIds, Function<UUID, Long> coins,
                        Predicate<UUID> inSiege, Executor mainThread, Clock clock, Supplier<MenuService> menuService) {
@@ -134,6 +136,74 @@ public final class ShopService {
             done.complete(true);
         }));
         return done;
+    }
+
+    /**
+     * Display stalls (PandiO/knk-workspace#250, shops DESIGN § 7), main thread: opens the item information menu
+     * ({@code shops.item}) for a right-click, or the purchase confirmation ({@code shops.confirm}, the quick buy) for a
+     * shift-right-click, with the amount the player last picked for this item (1 at first). Every purchase goes through the
+     * confirmation. A quick buy of an item that can't be bought (sold out, unique, gone) is told and opens nothing.
+     * Completes with the menu key that opened, or null.
+     */
+    public CompletableFuture<String> openItem(Player player, int shopId, ShopItemRef ref, boolean quickBuy) {
+        CompletableFuture<String> done = new CompletableFuture<>();
+        if (player == null || ref == null) {
+            done.complete(null);
+            return done;
+        }
+        if (inSiege.test(player.getUniqueId())) {
+            player.sendMessage(ChatColor.RED + "Shops are closed to you during a siege.");
+            done.complete(null);
+            return done;
+        }
+        fetchOffer(shopId).whenComplete((offer, error) -> mainThread.execute(() -> {
+            if (error != null) {
+                player.sendMessage(ChatColor.RED + "Could not open the shop (" + why(error) + ").");
+                done.complete(null);
+                return;
+            }
+            ShopOfferItem item = offer == null ? null : offer.find(ref);
+            if (item == null) {
+                player.sendMessage(ChatColor.RED + "This item is no longer for sale here.");
+                done.complete(null);
+                return;
+            }
+            Map<String, String> values = new java.util.HashMap<>();
+            values.put(ShopMenuKeys.CTX_SHOP_ID, String.valueOf(shopId));
+            values.put(ShopMenuKeys.CTX_ITEM, ref.toString());
+            String menu = ShopMenuKeys.ITEM_MENU;
+            if (quickBuy) {
+                String reason = notBuyable(MenuContextParams.of(values));
+                if (reason != null) {
+                    player.sendMessage(ChatColor.RED + reason);
+                    done.complete(null);
+                    return;
+                }
+                long amount = amountFor(player.getUniqueId(), shopId, ref, item, null);
+                values.put(ShopMenuKeys.CTX_AMOUNT, String.valueOf(amount));
+                quote(player, shopId, ref, amount); // the confirmation shows the price as soon as it lands
+                menu = ShopMenuKeys.CONFIRM_MENU;
+            }
+            MenuService service = menuService.get();
+            if (service == null || !player.isOnline()) {
+                done.complete(null);
+                return;
+            }
+            service.openMenu(player, menu, MenuContextParams.of(values));
+            done.complete(menu);
+        }));
+        return done;
+    }
+
+    /** The display stalls listen here for trades that change a shop's offer (#250). */
+    public void onOfferChanged(java.util.function.IntConsumer listener) {
+        this.offerChanged = listener != null ? listener : id -> { };
+    }
+
+    /** The shop's offer as last read, without starting a read; null when none was read yet or it is old. */
+    ShopOffer offerIfFresh(int shopId) {
+        Cached<ShopOffer> cached = offers.get(shopId);
+        return cached == null || clock.millis() - cached.at() >= OFFER_TTL_MILLIS ? null : cached.value();
     }
 
     // ===== reads for the menus (main thread, no I/O) =====
@@ -450,6 +520,11 @@ public final class ShopService {
         offers.remove(shopId);
         String marker = "|" + shopId + "|";
         quotes.keySet().removeIf(k -> k.contains(marker));
+        try {
+            offerChanged.accept(shopId);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "shops: a listener of shop " + shopId + "'s offer failed", e);
+        }
     }
 
     /** Forgets a player's picks and price notes (on quit). */
