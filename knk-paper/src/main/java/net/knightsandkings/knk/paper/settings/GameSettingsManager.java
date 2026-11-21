@@ -107,6 +107,7 @@ public class GameSettingsManager {
     private final Set<String> warnedOnce = ConcurrentHashMap.newKeySet();
 
     private BukkitTask refreshTask;
+    private volatile java.util.function.Consumer<net.knightsandkings.knk.core.domain.settings.KnkMenuItemSettings> menuItemListener;
     private BukkitTask reportTask;
 
     /**
@@ -207,6 +208,14 @@ public class GameSettingsManager {
     void accept(KnkGameSettings settings) {
         boolean changed = !settings.equals(current);
         current = settings;
+        java.util.function.Consumer<net.knightsandkings.knk.core.domain.settings.KnkMenuItemSettings> menuItem = menuItemListener;
+        if (menuItem != null && settings.menuItem() != null) {
+            try {
+                menuItem.accept(settings.menuItem()); // #871: only API answers, never the cache file (P26)
+            } catch (RuntimeException ex) {
+                LOGGER.log(Level.WARNING, PREFIX + "The menu item settings could not be applied", ex);
+            }
+        }
         long now = System.currentTimeMillis();
         SpawnDestinationResolver resolver = spawns.get();
         if (changed) {
@@ -685,6 +694,15 @@ public class GameSettingsManager {
     }
 
     /** Realtime S3 (#182): slows the periodic re-read while the hub pushes GameSettingsChanged. Call before {@link #start()}. */
+    /**
+     * Siege shop L6 (PandiO/knk-workspace#871, P26): gets the {@code menuItem} section of every API answer (a read,
+     * a {@code GameSettingsChanged} re-read or a runtime report), any thread. The cached settings of a start with
+     * the API down are not passed on, so the menu item keeps {@code menus.menu-item} from {@code config.yml} then.
+     */
+    public void setMenuItemListener(java.util.function.Consumer<net.knightsandkings.knk.core.domain.settings.KnkMenuItemSettings> listener) {
+        this.menuItemListener = listener;
+    }
+
     public void setFallbackPolling(net.knightsandkings.knk.core.realtime.FallbackPolling polling) {
         this.fallbackPolling = polling == null ? net.knightsandkings.knk.core.realtime.FallbackPolling.never() : polling;
     }

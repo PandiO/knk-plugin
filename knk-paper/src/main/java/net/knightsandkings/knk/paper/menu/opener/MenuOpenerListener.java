@@ -34,6 +34,7 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+import net.knightsandkings.knk.core.menu.opener.MenuItemAction;
 import net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings;
 import net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings.Click;
 
@@ -42,8 +43,10 @@ import net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings.Click;
  * <ul>
  *   <li><b>Given</b> a tick after every join ({@code give-on-join}) and respawn ({@code keep-on-death}); the join pass
  *       also removes copies and the item of a player who should not have it.</li>
- *   <li><b>Opens the menu</b> on a right-click (in the air, or on a block that does nothing on its own, or any block
- *       while sneaking), a left-click, or a click on it in the player's own inventory - as {@code open-on} says.</li>
+ *   <li><b>Runs the click's action</b> on a right-click (in the air, or on a block that does nothing on its own, or
+ *       any block while sneaking), a left-click, either while sneaking (the shift-clicks), or a click on it in the
+ *       player's own inventory: the action of the player's situation, else the default table (#871, DESIGN § 5.7).
+ *       With the {@code config.yml} settings every click in {@code open-on} opens the hub menu, as before.</li>
  *   <li><b>Stays a pointer</b>: never on the ground (death drops, item entities), never in another inventory
  *       (containers, the crafting grid, item frames, armour stands), never placed as a block; not dropped or moved
  *       unless {@code droppable} / {@code movable}. Creative-mode inventory clicks are left alone (the client owns
@@ -104,22 +107,23 @@ public final class MenuOpenerListener implements Listener {
             return;
         }
         Action action = event.getAction();
-        MenuOpenerSettings s = service.settings();
         Player player = event.getPlayer();
         boolean right = action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK;
         boolean left = action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK;
+        boolean sneaking = player.isSneaking();
         if (right) {
             // never "use" the item itself (a configured ender pearl or bow must not fire)
             event.setUseItemInHand(Event.Result.DENY);
-            if (action == Action.RIGHT_CLICK_BLOCK && !player.isSneaking() && interactsOnItsOwn.test(event.getClickedBlock())) {
+            if (action == Action.RIGHT_CLICK_BLOCK && !sneaking && interactsOnItsOwn.test(event.getClickedBlock())) {
                 return; // a door, chest or button keeps working with the item in hand
             }
-            if (s.opensOn(Click.RIGHT_CLICK)) {
-                service.open(player, false);
+            service.click(player, sneaking ? Click.SHIFT_RIGHT_CLICK : Click.RIGHT_CLICK, false);
+        } else if (left) {
+            MenuItemAction resolved = service.actionFor(player, sneaking ? Click.SHIFT_LEFT_CLICK : Click.LEFT_CLICK);
+            if (!resolved.isNone()) {
+                event.setUseItemInHand(Event.Result.DENY);
+                service.run(player, resolved, false);
             }
-        } else if (left && s.opensOn(Click.LEFT_CLICK)) {
-            event.setUseItemInHand(Event.Result.DENY);
-            service.open(player, false);
         }
     }
 
@@ -150,8 +154,8 @@ public final class MenuOpenerListener implements Listener {
             return; // moving it about in the player's own inventory
         }
         event.setCancelled(true);
-        if (!s.movable() && ownView && !inTop && onItem && s.opensOn(Click.INVENTORY_CLICK)) {
-            service.open(player, true);
+        if (!s.movable() && ownView && !inTop && onItem) {
+            service.click(player, Click.INVENTORY_CLICK, true);
         }
     }
 

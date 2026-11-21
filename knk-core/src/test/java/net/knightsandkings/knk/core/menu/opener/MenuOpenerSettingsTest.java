@@ -24,7 +24,8 @@ class MenuOpenerSettingsTest {
         assertTrue(d.wantedFor(true));
         assertEquals("NETHER_STAR", d.material());
         assertEquals(8, d.slot());
-        assertEquals(EnumSet.allOf(Click.class), d.openOn());
+        assertEquals(EnumSet.of(Click.RIGHT_CLICK, Click.LEFT_CLICK, Click.INVENTORY_CLICK), d.openOn());
+        assertEquals(EnumSet.allOf(Click.class), d.clicks().keySet(), "the shift-clicks follow the plain clicks");
         assertFalse(d.droppable());
         assertFalse(d.movable());
     }
@@ -56,6 +57,22 @@ class MenuOpenerSettingsTest {
         assertEquals(Click.INVENTORY_CLICK, Click.parse("inventory-click"));
         assertEquals(Click.RIGHT_CLICK, Click.parse("right_click"));
         assertNull(Click.parse("middle"));
+    }
+
+    @Test
+    void theFileShapeOpensTheMainMenuOnItsClicks_AndAShiftClickIsThePlainClick_A31() {
+        MenuOpenerSettings s = new MenuOpenerSettings(true, Audience.ALL, true, true, null, null, null, 8,
+            Set.of(Click.LEFT_CLICK, Click.INVENTORY_CLICK), false, false);
+        MenuItemAction main = MenuItemAction.openMenu(MenuItemAction.MAIN_MENU);
+        assertEquals(main, s.clicks().get(Click.LEFT_CLICK));
+        assertEquals(main, s.clicks().get(Click.SHIFT_LEFT_CLICK));
+        assertEquals(main, s.clicks().get(Click.INVENTORY_CLICK));
+        assertFalse(s.clicks().containsKey(Click.RIGHT_CLICK));
+        assertFalse(s.clicks().containsKey(Click.SHIFT_RIGHT_CLICK));
+        assertTrue(s.overrides().isEmpty());
+        assertTrue(s.opensOn(Click.SHIFT_LEFT_CLICK));
+        assertEquals(Click.SHIFT_RIGHT_CLICK, Click.RIGHT_CLICK.sneaking());
+        assertEquals(Click.INVENTORY_CLICK, Click.INVENTORY_CLICK.sneaking());
     }
 
     @Test

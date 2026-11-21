@@ -209,4 +209,43 @@ class MenuOpenerServiceTest {
         scheduled.get(0).run();
         assertTrue(opened.isEmpty());
     }
+
+    // ==================== #871: settings that change while players are online ====================
+
+    @Test
+    void liveAnOutdatedItemIsReplacedWhereItIs_AndNothingIsGivenOrMoved() {
+        ItemStack old = items.outdatedOpener();
+        contents[3] = old; // a movable item the player put elsewhere, or the old slot
+        ItemStack sword = mock(ItemStack.class);
+        contents[8] = sword;
+        service.applyLive(player);
+        assertTrue(items.openers.contains(contents[3]), "the new look, in the same slot");
+        assertEquals(sword, contents[8], "nothing of the player's moves mid-fight");
+        assertEquals(1, openers());
+    }
+
+    @Test
+    void liveAMissingItemIsNotGiven_AndAnUnchangedOneStays() {
+        service.applyLive(player);
+        assertEquals(0, openers());
+        ItemStack current = items.create(settings);
+        contents[8] = current;
+        service.applyLive(player);
+        assertEquals(current, contents[8]);
+    }
+
+    @Test
+    void liveSwitchedOffTakesItAway() {
+        contents[8] = items.create(settings);
+        contents[20] = items.outdatedOpener();
+        settings = MenuOpenerSettings.disabled();
+        service.applyLive(player);
+        assertEquals(0, openers());
+    }
+
+    @Test
+    void aNoneActionDoesNothingAndDoesNotStartTheCooldown() {
+        assertFalse(service.run(player, net.knightsandkings.knk.core.menu.opener.MenuItemAction.none(), false));
+        assertTrue(service.open(player, false));
+    }
 }

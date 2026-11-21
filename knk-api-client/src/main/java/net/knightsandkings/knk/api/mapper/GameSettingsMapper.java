@@ -8,6 +8,7 @@ import java.util.Set;
 import net.knightsandkings.knk.api.dto.GameSettingsDto;
 import net.knightsandkings.knk.core.domain.location.KnkLocation;
 import net.knightsandkings.knk.core.domain.settings.KnkGameSettings;
+import net.knightsandkings.knk.core.domain.settings.KnkMenuItemSettings;
 import net.knightsandkings.knk.core.domain.settings.KnkGroupOverride;
 import net.knightsandkings.knk.core.domain.settings.KnkChatTokenSettings;
 import net.knightsandkings.knk.core.domain.settings.KnkHubRules;
@@ -51,7 +52,47 @@ public final class GameSettingsMapper {
         return new KnkGameSettings(dto.joinSpawnMode(), toCore(dto.joinSpawnReference()), dto.joinAnnouncement(),
             dto.leaveAnnouncement(), toCore(dto.defaultRespawnPolicy()), worlds, dto.updatedAt(),
             dto.motd() == null || dto.motd().isBlank() ? null : dto.motd(), groups, toCore(dto.hub()),
-            toCore(dto.chatTokens()));
+            toCore(dto.chatTokens()), toCore(dto.menuItem()));
+    }
+
+    /**
+     * The menu item section (PandiO/knk-workspace#870/#871); null when the API sent none. A missing field takes the
+     * plugin's {@code config.yml} default ({@code MenuOpenerSettings.defaults()}).
+     */
+    static KnkMenuItemSettings toCore(GameSettingsDto.MenuItem m) {
+        if (m == null) {
+            return null;
+        }
+        java.util.Map<String, KnkMenuItemSettings.Action> clicks = new java.util.LinkedHashMap<>();
+        if (m.clicks() != null) {
+            m.clicks().forEach((click, action) -> {
+                if (click != null && action != null) {
+                    clicks.put(click, toCore(action));
+                }
+            });
+        }
+        java.util.Map<String, java.util.Map<String, KnkMenuItemSettings.Action>> overrides = new java.util.LinkedHashMap<>();
+        if (m.overrides() != null) {
+            m.overrides().forEach((situation, table) -> {
+                if (situation == null || table == null) {
+                    return;
+                }
+                java.util.Map<String, KnkMenuItemSettings.Action> t = new java.util.LinkedHashMap<>();
+                table.forEach((click, action) -> {
+                    if (click != null && action != null) {
+                        t.put(click, toCore(action));
+                    }
+                });
+                overrides.put(situation, t);
+            });
+        }
+        return new KnkMenuItemSettings(or(m.enabled(), true), m.giveTo() != null ? m.giveTo() : "all",
+            or(m.giveOnJoin(), true), or(m.keepOnDeath(), true), m.material(), m.name(), m.lore(),
+            m.slot() != null ? m.slot() : 8, or(m.droppable(), false), or(m.movable(), false), clicks, overrides);
+    }
+
+    private static KnkMenuItemSettings.Action toCore(GameSettingsDto.MenuItemAction a) {
+        return new KnkMenuItemSettings.Action(a.type(), a.menuKey(), a.command());
     }
 
     /** The chat-token limits; off when the API sent none (PandiO/knk-workspace#233). */

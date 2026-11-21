@@ -184,7 +184,7 @@ class ShopPurchaseServiceTest {
         shop.unlocks((p, e) -> false);
         ShopPurchaseResult locked = shop.purchase(A1, 21);
         assertEquals(ShopRefusal.Reason.LOCKED, refused(locked));
-        assertTrue(((ShopPurchaseResult.Refused) locked).refusal().message().contains("/menu → Minigames → Siege unlocks"));
+        assertTrue(((ShopPurchaseResult.Refused) locked).refusal().message().contains("/menu → Siege Minigame → Siege unlocks"));
         assertEquals(ShopRefusal.Reason.LOCKED, shop.blocked(A1, ShopFixtures.trebuchet()).orElseThrow().reason());
 
         shop.unlocks(ShopPurchaseService.Unlocks.ALL);

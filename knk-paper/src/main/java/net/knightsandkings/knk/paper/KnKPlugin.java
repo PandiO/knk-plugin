@@ -255,6 +255,11 @@ public class KnKPlugin extends JavaPlugin {
     private MenuSessionRegistry menuSessionRegistry;
     private OpenMenuContextRegistry openMenuContextRegistry;
     private MenuService menuService;
+    /** Siege shop L6 (#871): the menu item's situations; Siege Survival provides siege.survival.match at its merge. */
+    private final net.knightsandkings.knk.core.menu.opener.MenuItemSituations menuItemSituations =
+        new net.knightsandkings.knk.core.menu.opener.MenuItemSituations();
+    /** Siege shop L6 (#871): config.yml, then the game settings' menuItem; null when the menu engine is off. */
+    private net.knightsandkings.knk.paper.menu.opener.MenuItemSettingsSync menuItemSettings;
     private ActionRegistry<MenuActionContext> menuActionRegistry;
     private ConditionRegistry<MenuActionContext> menuConditionRegistry;
     private MenuContentSourceRegistry<MenuContentSourceContext> menuContentSourceRegistry;
@@ -1952,19 +1957,33 @@ public class KnKPlugin extends JavaPlugin {
 
     /**
      * The menu item (alpha test run 1, PandiO/knk-workspace#160): an inventory item that opens {@code /menu}, for
-     * console and Bedrock players. Settings in {@code menus.menu-item}; read once at enable. The click runs
-     * {@code /menu} itself, so its permission ({@code knk.menu}) and every command rule apply.
+     * console and Bedrock players. Settings in {@code menus.menu-item} until the API's game settings answer; then
+     * the game settings page's Menu item card, applied without a restart (siege shop L6, #871, P26). A click runs
+     * its action for the player's situation; the hub menu still opens through {@code /menu} itself, so its
+     * permission ({@code knk.menu}) and every command rule apply.
      */
     private void initializeMenuOpenerItem(java.util.function.Predicate<java.util.UUID> bedrockPlayers, int bedrockDelayTicks) {
         net.knightsandkings.knk.core.menu.opener.MenuOpenerSettings settings =
             net.knightsandkings.knk.paper.menu.opener.MenuOpenerConfig.read(
                 getConfig().getConfigurationSection("menus.menu-item"), getLogger());
+        this.menuItemSettings = new net.knightsandkings.knk.paper.menu.opener.MenuItemSettingsSync(settings,
+            menuItemSituations, MenuService.mainThreadExecutor(this)::execute, getServer()::getOnlinePlayers);
+        net.knightsandkings.knk.paper.menu.opener.MenuItemActionRunner actions =
+            new net.knightsandkings.knk.paper.menu.opener.MenuItemActionRunner((player, key) -> {
+                if (menuService == null || !menuService.isMenuAvailable(key)) {
+                    if (menuService != null) menuService.requestValidation(key);
+                    return false;
+                }
+                menuService.openMenu(player, key);
+                return true;
+            });
         net.knightsandkings.knk.paper.menu.opener.MenuOpenerService service =
             new net.knightsandkings.knk.paper.menu.opener.MenuOpenerService(
-                () -> settings, bedrockPlayers, new net.knightsandkings.knk.paper.menu.opener.BukkitMenuOpenerItems(),
-                player -> player.performCommand("menu"),
+                menuItemSettings, bedrockPlayers, new net.knightsandkings.knk.paper.menu.opener.BukkitMenuOpenerItems(),
+                new net.knightsandkings.knk.core.menu.opener.MenuItemActionResolver(menuItemSituations), actions,
                 (task, ticks) -> getServer().getScheduler().runTaskLater(this, task, ticks),
                 System::currentTimeMillis, bedrockDelayTicks);
+        menuItemSettings.attach(service);
         getServer().getPluginManager().registerEvents(
             new net.knightsandkings.knk.paper.menu.opener.MenuOpenerListener(service), this);
         // a reload (or a config change) reaches players already online, not only the next joins
@@ -1973,7 +1992,7 @@ public class KnKPlugin extends JavaPlugin {
         }
         getLogger().info("Menu item " + (settings.enabled()
             ? "on (" + settings.material() + " in slot " + settings.slot() + ", for " + settings.audience() + " players)"
-            : "off"));
+            : "off") + " from config.yml until the game settings answer");
     }
 
     /**
@@ -3854,6 +3873,9 @@ public class KnKPlugin extends JavaPlugin {
             new net.knightsandkings.knk.paper.settings.GameSettingsStore(getDataFolder().toPath(), settingsConfig.backupHistoryLimit(),
                 offlineSecurity));
         gameSettingsManager.setFallbackPolling(fallbackPolling); // S3 (#182): GameSettingsChanged is pushed
+        if (menuItemSettings != null) {
+            gameSettingsManager.setMenuItemListener(menuItemSettings::accept); // siege shop L6 (#871): the menu item card
+        }
         gameSettingsManager.start();
         if (cacheManager != null) {
             cacheManager.registerRefreshHook("game settings", gameSettingsManager::refreshNow);
@@ -5088,6 +5110,8 @@ public class KnKPlugin extends JavaPlugin {
         // borders the way the hub's portal does - a member waiting in the server hub (AllowExit off) was never
         // moved otherwise. Same scoped exemption and WorldGuard resync as hubTransfer.
         net.knightsandkings.knk.paper.siege.SiegeBukkit.setTeleporter(this::hubTransfer);
+        // Siege shop L6 (#871): the menu item's siege.match and siege.hub overrides (from memory, on every click).
+        net.knightsandkings.knk.paper.siege.SiegeMenuItemSituations.register(menuItemSituations, siegeService);
         // KNG-34 leaver fix: members who left early are reported with their stats (no reward).
         // Alpha run 1 (PandiO/knk-workspace#166): AFK time from the statistics tracker (none without statistics).
         if (statisticsService != null) siegeService.setAfkSource(statisticsService::afkSince);

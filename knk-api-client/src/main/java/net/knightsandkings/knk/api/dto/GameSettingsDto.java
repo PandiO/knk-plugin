@@ -24,15 +24,53 @@ public record GameSettingsDto(
         @JsonProperty("motd") String motd,
         @JsonProperty("groupOverrides") List<GroupOverride> groupOverrides,
         @JsonProperty("hub") Hub hub,
-        @JsonProperty("chatTokens") ChatTokens chatTokens
+        @JsonProperty("chatTokens") ChatTokens chatTokens,
+        @JsonProperty("menuItem") MenuItem menuItem
 ) {
+    /** Without the menu item (chat-token shape). */
+    public GameSettingsDto(String joinSpawnMode, LocationReference joinSpawnReference, String joinAnnouncement,
+                           String leaveAnnouncement, RespawnPolicy defaultRespawnPolicy, List<WorldSettings> worldSettings,
+                           List<RuntimeWorld> runtimeWorlds, String updatedAt, String motd, List<GroupOverride> groupOverrides,
+                           Hub hub, ChatTokens chatTokens) {
+        this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
+            runtimeWorlds, updatedAt, motd, groupOverrides, hub, chatTokens, null);
+    }
+
+    /**
+     * knk-web-api {@code MenuItemSettingsDto} (PandiO/knk-workspace#870): the menu item's look, click table (click
+     * type → action) and situation overrides (situation → partial click table). Boxed, so a missing field is null.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record MenuItem(
+            @JsonProperty("enabled") Boolean enabled,
+            @JsonProperty("giveTo") String giveTo,
+            @JsonProperty("giveOnJoin") Boolean giveOnJoin,
+            @JsonProperty("keepOnDeath") Boolean keepOnDeath,
+            @JsonProperty("material") String material,
+            @JsonProperty("name") String name,
+            @JsonProperty("lore") List<String> lore,
+            @JsonProperty("slot") Integer slot,
+            @JsonProperty("droppable") Boolean droppable,
+            @JsonProperty("movable") Boolean movable,
+            @JsonProperty("clicks") java.util.Map<String, MenuItemAction> clicks,
+            @JsonProperty("overrides") java.util.Map<String, java.util.Map<String, MenuItemAction>> overrides
+    ) {}
+
+    /** knk-web-api {@code MenuItemActionDto}: {@code OpenMenu} + {@code menuKey}, {@code RunCommand} + {@code command}, {@code None}. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record MenuItemAction(
+            @JsonProperty("type") String type,
+            @JsonProperty("menuKey") String menuKey,
+            @JsonProperty("command") String command
+    ) {}
+
     /** Without the chat-token limits (hub shape). */
     public GameSettingsDto(String joinSpawnMode, LocationReference joinSpawnReference, String joinAnnouncement,
                            String leaveAnnouncement, RespawnPolicy defaultRespawnPolicy, List<WorldSettings> worldSettings,
                            List<RuntimeWorld> runtimeWorlds, String updatedAt, String motd, List<GroupOverride> groupOverrides,
                            Hub hub) {
         this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
-            runtimeWorlds, updatedAt, motd, groupOverrides, hub, null);
+            runtimeWorlds, updatedAt, motd, groupOverrides, hub, null, null);
     }
 
     /** knk-web-api {@code ChatTokenSettingsDto} (PandiO/knk-workspace#233); a missing field is 0 = off. */
@@ -48,7 +86,7 @@ public record GameSettingsDto(
                            String leaveAnnouncement, RespawnPolicy defaultRespawnPolicy, List<WorldSettings> worldSettings,
                            List<RuntimeWorld> runtimeWorlds, String updatedAt, String motd, List<GroupOverride> groupOverrides) {
         this(joinSpawnMode, joinSpawnReference, joinAnnouncement, leaveAnnouncement, defaultRespawnPolicy, worldSettings,
-            runtimeWorlds, updatedAt, motd, groupOverrides, null, null);
+            runtimeWorlds, updatedAt, motd, groupOverrides, null, null, null);
     }
 
     /** knk-web-api {@code HubSettingsDto} (hub DESIGN §16 Phase 4). */
