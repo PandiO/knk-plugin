@@ -2,23 +2,21 @@ package net.knightsandkings.knk.core.domain.landmarks;
 
 import java.util.Objects;
 
-import net.knightsandkings.knk.core.navigation.model.Landmark;
-
 /**
- * The body of {@code POST api/landmarks} and {@code PUT api/landmarks/{id}} (PandiO/knk-workspace#708). The pin is
- * a {@link Pin}: without {@code locationId} the API creates a Location, with one it moves that Location. On a
- * {@code PUT} the API keeps a stored value for each null field except {@code domainId}, which it takes as sent (null
- * unlinks), so an update always carries the domain it should keep ({@link #from}).
+ * The body of {@code POST api/landmarks} and {@code PUT api/landmarks/{id}} (since PandiO/knk-workspace#985 with the
+ * landmark-domain field names: {@code parentDomainId}, {@code areaKind}, {@code wgRegionId}). The pin is a {@link Pin}:
+ * without {@code locationId} the API creates a Location, with one it moves that Location. On a {@code PUT} the API
+ * keeps a stored value for each null field except {@code parentDomainId}, which it takes as sent (null unlinks), so an
+ * update always carries the parent it should keep ({@link #from}). There is no radius area any more (LD08).
  *
  * @param name              required
  * @param pin               the pin to create or move; null keeps the stored one (update only)
- * @param domainId          the domain link (null: none)
- * @param extent            null keeps the stored extent (update only); NONE clears it
- * @param regionId          for a Region extent
- * @param radius            for a Radius extent
+ * @param parentDomainId    the parent (linked) domain (null: none)
+ * @param areaKind          null keeps the stored area (update only); NONE clears it
+ * @param wgRegionId        the own region for {@code OWN_REGION}
  * @param navigationEnabled null keeps the stored value
  */
-public record LandmarkWrite(String name, Pin pin, Integer domainId, Landmark.Extent extent, String regionId, Double radius,
+public record LandmarkWrite(String name, Pin pin, Integer parentDomainId, LandmarkAreaKind areaKind, String wgRegionId,
                             Boolean navigationEnabled) {
 
     public LandmarkWrite {
@@ -36,20 +34,20 @@ public record LandmarkWrite(String name, Pin pin, Integer domainId, Landmark.Ext
         }
     }
 
-    /** An update of {@code landmark} that keeps everything not given: its name, its domain, its extent. */
+    /** An update of {@code landmark} that keeps everything not given: its name, its parent, its area. */
     public static LandmarkWrite from(KnkLandmark landmark) {
-        return new LandmarkWrite(landmark.name(), null, landmark.domainId(), null, null, null, null);
+        return new LandmarkWrite(landmark.name(), null, landmark.parentDomainId(), null, null, null);
     }
 
     public LandmarkWrite withPin(Pin newPin) {
-        return new LandmarkWrite(name, newPin, domainId, extent, regionId, radius, navigationEnabled);
+        return new LandmarkWrite(name, newPin, parentDomainId, areaKind, wgRegionId, navigationEnabled);
     }
 
-    public LandmarkWrite withDomain(Integer newDomainId) {
-        return new LandmarkWrite(name, pin, newDomainId, extent, regionId, radius, navigationEnabled);
+    public LandmarkWrite withParent(Integer newParentDomainId) {
+        return new LandmarkWrite(name, pin, newParentDomainId, areaKind, wgRegionId, navigationEnabled);
     }
 
-    public LandmarkWrite withExtent(Landmark.Extent newExtent, String newRegionId, Double newRadius) {
-        return new LandmarkWrite(name, pin, domainId, newExtent, newRegionId, newRadius, navigationEnabled);
+    public LandmarkWrite withArea(LandmarkAreaKind newAreaKind, String newRegionId) {
+        return new LandmarkWrite(name, pin, parentDomainId, newAreaKind, newRegionId, navigationEnabled);
     }
 }

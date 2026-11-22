@@ -2,10 +2,12 @@ package net.knightsandkings.knk.paper.commands;
 
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
@@ -32,12 +34,12 @@ import net.knightsandkings.knk.core.ports.api.LandmarksApi;
  * {@code knk.admin.*} and {@code *} match it). With {@code navigation.landmarks} off every action says so.
  *
  * <pre>
- * create &lt;name&gt; [region &lt;id&gt; | radius &lt;n&gt;]   at the sender's position
+ * create &lt;name&gt; [region &lt;id&gt;]                at the sender's position (no radius form since #985, LD08)
  * list                                       the sender's world (all worlds from the console)
  * show &lt;landmark&gt;
  * move &lt;landmark&gt;                            the pin to the sender's position
  * delete &lt;landmark&gt;
- * link &lt;landmark&gt; &lt;domain&gt;                    a domain by name or #id
+ * link &lt;landmark&gt; &lt;domain&gt;                    the parent: a domain by name or #id, never the landmark itself
  * unlink &lt;landmark&gt;
  * </pre>
  *
@@ -77,9 +79,9 @@ public class LandmarkAdminCommand {
         return new CommandMetadata(
             "landmark",
             "Create, move, link and delete landmarks: named places players can /navigate to (off-road navigation)",
-            "/knk landmark <create <name> [region <id>|radius <n>]|list|show|move|delete|link|unlink> ...",
+            "/knk landmark <create <name> [region <id>]|list|show|move|delete|link|unlink> ...",
             PERMISSION,
-            List.of("/knk landmark create Throne room region keep_throne", "/knk landmark create Old well radius 5",
+            List.of("/knk landmark create Throne room region keep_throne", "/knk landmark create Old well",
                 "/knk landmark list", "/knk landmark link Throne room Keep", "/knk landmark move #12",
                 "/knk landmark delete Old well"));
     }
@@ -96,7 +98,7 @@ public class LandmarkAdminCommand {
         }
         String action = args[0].toLowerCase(Locale.ROOT);
         if (action.equals("create")) {
-            return args.length >= 3 ? List.of("region", "radius").stream().filter(k -> k.startsWith(last)).toList() : List.of();
+            return args.length >= 3 ? List.of("region").stream().filter(k -> k.startsWith(last)).toList() : List.of();
         }
         if (args.length == 2 && List.of("show", "move", "delete", "link", "unlink").contains(action)) {
             return landmarkNames(worldOf(sender)).stream()
@@ -108,11 +110,28 @@ public class LandmarkAdminCommand {
             if (current == null) {
                 return List.of();
             }
-            return current.domains().stream().map(DomainPlace::name)
+            // the parent may be any domain, another landmark too, but never the landmark itself (#985)
+            Set<Integer> self = landmarkIdsNamed(current, worldOf(sender),
+                String.join(" ", Arrays.asList(args).subList(1, args.length - 1)));
+            return current.domains().stream().filter(d -> !self.contains(d.id())).map(DomainPlace::name)
                 .map(name -> name.contains(" ") ? name.substring(0, name.indexOf(' ')) : name)
                 .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(last)).distinct().sorted().limit(50).toList();
         }
         return List.of();
+    }
+
+    /** The ids of the landmarks of {@code world} (null: any) whose name, or {@code #id}, is {@code text}. */
+    private static Set<Integer> landmarkIdsNamed(NavigationModel current, String world, String text) {
+        String wanted = text == null ? "" : text.trim();
+        Optional<Integer> byId = LandmarkCommandArgs.idRef(wanted);
+        Set<Integer> ids = new HashSet<>();
+        for (Landmark l : current.landmarks()) {
+            if (byId.isPresent() ? byId.get() == l.id()
+                : (world == null || world.equalsIgnoreCase(l.world())) && l.name().equalsIgnoreCase(wanted)) {
+                ids.add(l.id());
+            }
+        }
+        return ids;
     }
 
     private List<String> landmarkNames(String world) {
@@ -146,7 +165,7 @@ public class LandmarkAdminCommand {
                 case "delete" -> withLandmark(sender, rest, 0, (landmark, words) -> delete(sender, landmark));
                 case "link" -> withLandmark(sender, rest, 1, (landmark, words) -> link(sender, landmark, words));
                 case "unlink" -> withLandmark(sender, rest, 0, (landmark, words) -> update(sender, landmark,
-                    LandmarkWrite.from(landmark).withDomain(null), "Unlinked " + landmark.name() + " from its domain."));
+                    LandmarkWrite.from(landmark).withParent(null), "Unlinked " + landmark.name() + " from its parent."));
                 default -> usage(sender);
             }
         } catch (IllegalArgumentException e) {
@@ -156,7 +175,7 @@ public class LandmarkAdminCommand {
     }
 
     private void usage(CommandSender sender) {
-        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk landmark create <name> [region <id> | radius <n>] | list | "
+        sender.sendMessage(ChatColor.YELLOW + "Usage: /knk landmark create <name> [region <id>] | list | "
             + "show <landmark> | move <landmark> | delete <landmark> | link <landmark> <domain> | unlink <landmark>");
         sender.sendMessage(ChatColor.GRAY + "A landmark is its name or #id.");
     }
@@ -166,13 +185,20 @@ public class LandmarkAdminCommand {
         if (player == null) {
             return;
         }
-        LandmarkCommandArgs.Create parsed = LandmarkCommandArgs.parseCreate(words);
-        LandmarkWrite write = new LandmarkWrite(parsed.name(), pinAt(player.getLocation(), null), null, parsed.extent(),
-            parsed.regionId(), parsed.radius(), null);
+        LandmarkCommandArgs.Create parsed;
+        try {
+            parsed = LandmarkCommandArgs.parseCreate(words);
+        } catch (LandmarkCommandArgs.RadiusGone gone) {
+            sender.sendMessage(ChatColor.RED + gone.getMessage());
+            usage(sender);
+            return;
+        }
+        LandmarkWrite write = new LandmarkWrite(parsed.name(), pinAt(player.getLocation(), null), null, parsed.areaKind(),
+            parsed.regionId(), null);
         reply(sender, api.create(write), created -> {
             refreshModel.run();
             sender.sendMessage(ChatColor.GREEN + "Created landmark " + ChatColor.WHITE + created.name() + ChatColor.GREEN
-                + " (#" + created.id() + ") " + describeExtent(created) + ".");
+                + " (#" + created.id() + ") " + describeArea(created) + ".");
         });
     }
 
@@ -187,8 +213,8 @@ public class LandmarkAdminCommand {
                 + landmarks.size() + "):");
             landmarks.stream().sorted(Comparator.comparing(KnkLandmark::name, String.CASE_INSENSITIVE_ORDER)).limit(LISTED)
                 .forEach(l -> sender.sendMessage(ChatColor.GRAY + "#" + l.id() + " " + ChatColor.WHITE + l.name()
-                    + ChatColor.GRAY + " " + describeExtent(l)
-                    + (l.domainName() == null ? "" : ", in " + l.domainName())
+                    + ChatColor.GRAY + " " + describeArea(l)
+                    + (l.parentDomainName() == null ? "" : ", in " + l.parentDomainName())
                     + (l.navigationEnabled() ? "" : ", not in /navigate")));
             if (landmarks.size() > LISTED) {
                 sender.sendMessage(ChatColor.GRAY + "... and " + (landmarks.size() - LISTED) + " more (the web app lists all).");
@@ -199,10 +225,12 @@ public class LandmarkAdminCommand {
     private void show(CommandSender sender, KnkLandmark l) {
         sender.sendMessage(ChatColor.GRAY + "Landmark #" + l.id() + ": " + ChatColor.WHITE + l.name());
         sender.sendMessage(ChatColor.GRAY + "At " + Math.round(l.x()) + " " + Math.round(l.y()) + " " + Math.round(l.z())
-            + " in " + l.world() + ", " + describeExtent(l));
-        sender.sendMessage(ChatColor.GRAY + "Domain: " + ChatColor.WHITE
-            + (l.domainName() == null ? "none" : l.domainName() + (l.domainType() == null ? "" : " (" + l.domainType() + ")")
-                + " #" + l.domainId()));
+            + " in " + l.world() + ", " + describeArea(l));
+        sender.sendMessage(ChatColor.GRAY + "Parent: " + ChatColor.WHITE
+            + (l.parentDomainName() == null ? "none" : l.parentDomainName()
+                + (l.parentDomainType() == null ? "" : " (" + l.parentDomainType() + ")") + " #" + l.parentDomainId()));
+        sender.sendMessage(ChatColor.GRAY + "Enter and leave messages: " + ChatColor.WHITE
+            + (l.showEnterLeaveMessages() ? "on" : "off"));
         sender.sendMessage(ChatColor.GRAY + "In /navigate: " + ChatColor.WHITE + (l.navigationEnabled() ? "yes" : "no")
             + ChatColor.GRAY + ", route preference " + ChatColor.WHITE + l.preference());
     }
@@ -252,7 +280,11 @@ public class LandmarkAdminCommand {
             return;
         }
         DomainPlace domain = matches.get(0);
-        update(sender, landmark, LandmarkWrite.from(landmark).withDomain(domain.id()),
+        if (domain.id() == landmark.id()) {
+            sender.sendMessage(ChatColor.RED + "A landmark can't be its own parent.");
+            return;
+        }
+        update(sender, landmark, LandmarkWrite.from(landmark).withParent(domain.id()),
             "Linked " + landmark.name() + " to " + domain.name() + " (" + domain.domainType() + ").");
     }
 
@@ -352,16 +384,15 @@ public class LandmarkAdminCommand {
         return "The web API could not be reached; nothing was changed. (" + cause.getClass().getSimpleName() + ")";
     }
 
-    static String describeExtent(KnkLandmark l) {
-        return switch (l.extent()) {
-            case REGION -> "region " + l.regionId();
-            case RADIUS -> "radius " + (l.radius() == null ? "?" : trim(l.radius())) + " blocks";
+    /** The area in a few words (landmark-domain § 5 rule 3): a point, its own region, or the parent's area. */
+    static String describeArea(KnkLandmark l) {
+        return switch (l.areaKind()) {
+            case OWN_REGION -> "region " + (l.wgRegionId() == null ? "?" : l.wgRegionId())
+                + (l.subRegionIds().isEmpty() ? "" : " and " + l.subRegionIds().size()
+                    + (l.subRegionIds().size() == 1 ? " sub-region" : " sub-regions"));
+            case LINKED_DOMAIN -> "the area of " + (l.parentDomainName() == null ? "its parent" : l.parentDomainName());
             case NONE -> "point only";
         };
-    }
-
-    private static String trim(double value) {
-        return value == Math.rint(value) ? String.valueOf((long) value) : String.valueOf(value);
     }
 
     private static Player playerOrRefuse(CommandSender sender, String action) {

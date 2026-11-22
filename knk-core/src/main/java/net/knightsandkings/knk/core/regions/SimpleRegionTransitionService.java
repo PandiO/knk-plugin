@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.IntPredicate;
 import java.util.logging.Logger;
 
 import net.knightsandkings.knk.core.ports.gates.GateControlPort;
@@ -31,6 +32,8 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
     private final Consumer<Set<DomainSnapshot>> onDomainsEntered;
     private final DomainAccessEvaluator accessEvaluator = new DomainAccessEvaluator();
     private final boolean accessChecks;
+    /** LD15 (#985): which landmarks show enter and leave messages (by domain id); none until set. */
+    private volatile IntPredicate landmarkMessages = id -> false;
 
     /**
      * Construct with resolver, optional gate control, and an optional callback invoked with the
@@ -62,6 +65,14 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
         this.gateControlPort = gateControlPort;  // May be null if gates not implemented
         this.onDomainsEntered = onDomainsEntered;  // May be null if no listener is needed
         this.accessChecks = accessChecks;
+    }
+
+    /**
+     * Landmark-domain DESIGN § 5 rule 6, LD15 (PandiO/knk-workspace#985): the landmarks whose enter and leave messages
+     * are on, by domain id. Without it (or null) every landmark is silent; its entry and exit rules apply either way.
+     */
+    public void setLandmarkMessages(IntPredicate landmarkMessages) {
+        this.landmarkMessages = landmarkMessages == null ? id -> false : landmarkMessages;
     }
 
     /**
@@ -253,7 +264,39 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
 
         // Check if structure changed (same town, same district)
         RegionTransitionDecision structureMessage = buildStructureMessage(transition);
-        return structureMessage;
+        if (structureMessage.getMessage().isPresent()) {
+            return structureMessage;
+        }
+
+        // #985 (LD15): a landmark with its messages on, innermost
+        return buildLandmarkMessage(transition);
+    }
+
+    /**
+     * Landmark-domain DESIGN § 5 rule 6, LD05, LD15 (PandiO/knk-workspace#985): an enter or leave message for a
+     * landmark only when its {@code showEnterLeaveMessages} is on. A landmark is one domain with its sub-regions (equal
+     * by id), so moving between them is neither entering nor leaving it. A landmark of the {@code LinkedDomain} kind
+     * owns no region, so it is never entered: its parent's messages apply.
+     */
+    private RegionTransitionDecision buildLandmarkMessage(EnteredLeftSnapshot transition) {
+        Optional<DomainSnapshot> entered = transition.enteredDomains().stream()
+            .filter(this::landmarkWithMessages)
+            .findFirst();
+        if (entered.isPresent()) {
+            return RegionTransitionDecision.allow(RegionTransitionType.ENTER, "You are now entering " + entered.get().name() + ".");
+        }
+        Optional<DomainSnapshot> left = transition.leftDomains().stream()
+            .filter(this::landmarkWithMessages)
+            .findFirst();
+        if (left.isPresent()) {
+            return RegionTransitionDecision.allow(RegionTransitionType.EXIT, "You are now leaving " + left.get().name() + ".");
+        }
+        return RegionTransitionDecision.allow(RegionTransitionType.EXIT, null);
+    }
+
+    private boolean landmarkWithMessages(DomainSnapshot domain) {
+        return "landmark".equalsIgnoreCase(domain.domainType()) && domain.id() != null
+            && landmarkMessages.test(domain.id());
     }
     
 
@@ -345,8 +388,9 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
      */
     private void triggerGateControl(UUID playerId, EnteredLeftSnapshot transition) {
         // Open gates when player enters
+        // #985 (DESIGN § 7.2 item 4): null-safe, a domain without a type (or a landmark) is no gate
         for (DomainSnapshot structure : transition.enteredDomains()) {
-            if (structure.domainType().equals("gate")) {
+            if ("gate".equals(structure.domainType())) {
                 // Convert Integer ID to long for now; TODO: Use UUID from domain model when available
                 gateControlPort.openGate(UUID.nameUUIDFromBytes(structure.id().toString().getBytes()), playerId);
             }
@@ -354,7 +398,7 @@ public class SimpleRegionTransitionService implements RegionTransitionService {
 
         // Close gates when player leaves
         for (DomainSnapshot structure : transition.leftDomains()) {
-            if (structure.domainType().equals("gate")) {
+            if ("gate".equals(structure.domainType())) {
                 gateControlPort.closeGate(UUID.nameUUIDFromBytes(structure.id().toString().getBytes()), playerId);
             }
         }

@@ -47,7 +47,7 @@ public final class DiscoveriesView {
             return lines;
         }
         for (DiscoveryTypeCount count : summary.byType()) {
-            if (staff && !count.enabled()) {
+            if (staff && !count.enabled() && !perLandmark(count)) {
                 lines.add("&7" + plural(count.domainType()) + ": &8Disabled"
                         + (count.total() > 0 ? " &7(&f" + count.discovered() + "&7/&f" + count.total() + "&7)" : ""));
             } else if (count.total() > 0) {
@@ -91,6 +91,15 @@ public final class DiscoveriesView {
         return "&7Discovered &f" + discovered + " &7of &f" + total + " &7places";
     }
 
+    /**
+     * Landmark-domain LD15 (PandiO/knk-workspace#985): the {@code Landmark} type rule stays off while landmarks are
+     * made discoverable one by one (their discovery override), so with landmarks to discover ({@code total} above 0)
+     * the row counts them like an enabled type, also for staff, instead of "Disabled".
+     */
+    static boolean perLandmark(DiscoveryTypeCount count) {
+        return count.total() > 0 && count.domainType() != null && count.domainType().trim().equalsIgnoreCase("Landmark");
+    }
+
     private static String plural(String domainType) {
         String type = domainType == null ? "" : domainType.trim().toLowerCase(Locale.ROOT);
         return switch (type) {
@@ -98,6 +107,7 @@ public final class DiscoveriesView {
             case "district" -> "Districts";
             case "structure" -> "Structures";
             case "gatestructure" -> "Gates";
+            case "landmark" -> "Landmarks";
             default -> domainType;
         };
     }

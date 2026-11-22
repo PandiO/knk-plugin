@@ -61,9 +61,10 @@ public record Candidate(String key, String label, String typeWord, List<String> 
         String world();
 
         /**
-         * A Location, a siege objective / spawnpoint or a landmark: feet coordinates, and optionally the radius within
-         * which the player has arrived (a landmark's {@code Radius} extent, § 3.2, E16). Without one the player
-         * arrives within the usual {@code arrive-distance}.
+         * A Location, a siege objective / spawnpoint or a point-only landmark: feet coordinates, and optionally the
+         * radius within which the player has arrived (a landmark's {@code Radius} extent of #708; since
+         * PandiO/knk-workspace#985, LD08, no provider sets one). Without one the player arrives within the usual
+         * {@code arrive-distance}.
          *
          * @param arrivalRadius blocks, positive; null for none
          */
@@ -90,10 +91,26 @@ public record Candidate(String key, String label, String typeWord, List<String> 
             }
         }
 
-        /** A WorldGuard region (its closest point); {@code world} null when unknown. */
-        record Region(String world, String regionId) implements Place {
+        /**
+         * A WorldGuard region (its closest point); {@code world} null when unknown. A landmark's area (landmark-domain
+         * DESIGN § 7.1 item 4, LD22, PandiO/knk-workspace#985) is its main region with {@code areaRegionIds} non-null:
+         * the area's other regions (its sub-regions), where the player has arrived too, and the game server also counts
+         * the other regions of the main region's domain (its {@code knk-domain-id}). Null for a plain region.
+         */
+        record Region(String world, String regionId, List<String> areaRegionIds) implements Place {
             public Region {
                 Objects.requireNonNull(regionId, "regionId");
+                areaRegionIds = areaRegionIds == null ? null : List.copyOf(areaRegionIds);
+            }
+
+            /** A plain region: arrival inside it only. */
+            public Region(String world, String regionId) {
+                this(world, regionId, null);
+            }
+
+            /** Whether this is a landmark's area (several regions count as one). */
+            public boolean isArea() {
+                return areaRegionIds != null;
             }
         }
 

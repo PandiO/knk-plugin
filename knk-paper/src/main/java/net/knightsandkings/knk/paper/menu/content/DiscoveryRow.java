@@ -71,7 +71,7 @@ public final class DiscoveryRow implements MenuRowKey {
         return new DiscoveryRow(row.domainId(), "&8???", UNDISCOVERED_MATERIAL, lore, "DISABLED");
     }
 
-    /** "Town", "District", "Structure", "Gate"; "Place" for anything else. */
+    /** "Town", "District", "Structure", "Gate", "Landmark" (#985); "Place" for anything else. */
     static String typeName(String domainType) {
         String type = domainType == null ? "" : domainType.trim().toLowerCase(Locale.ROOT);
         return switch (type) {
@@ -79,17 +79,22 @@ public final class DiscoveryRow implements MenuRowKey {
             case "district" -> "District";
             case "structure" -> "Structure";
             case "gatestructure" -> "Gate";
+            case "landmark" -> "Landmark";
             default -> "Place";
         };
     }
 
-    /** Town {@code FILLED_MAP}, District {@code OAK_SIGN}, Structure {@code BRICKS}, Gate {@code IRON_BARS}. */
+    /**
+     * Town {@code FILLED_MAP}, District {@code OAK_SIGN}, Structure {@code BRICKS}, Gate {@code IRON_BARS}, Landmark
+     * {@code LODESTONE} (#985).
+     */
     static String materialFor(String domainType) {
         String type = domainType == null ? "" : domainType.trim().toLowerCase(Locale.ROOT);
         return switch (type) {
             case "town" -> "FILLED_MAP";
             case "district" -> "OAK_SIGN";
             case "gatestructure" -> "IRON_BARS";
+            case "landmark" -> "LODESTONE";
             default -> "BRICKS";
         };
     }

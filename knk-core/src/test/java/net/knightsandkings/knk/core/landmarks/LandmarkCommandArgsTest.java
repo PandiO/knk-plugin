@@ -10,7 +10,7 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
-import net.knightsandkings.knk.core.navigation.model.Landmark;
+import net.knightsandkings.knk.core.domain.landmarks.LandmarkAreaKind;
 
 /** The arguments of {@code /knk landmark} (off-road phase 5.1, PandiO/knk-workspace#708, DESIGN § 4.5). */
 class LandmarkCommandArgsTest {
@@ -20,28 +20,35 @@ class LandmarkCommandArgsTest {
     }
 
     @Test
-    void createTakesANameWithSpacesAndAnOptionalExtent() {
+    void createTakesANameWithSpacesAndAnOptionalRegion() {
         LandmarkCommandArgs.Create plain = LandmarkCommandArgs.parseCreate(words("Throne room"));
-        assertEquals(new LandmarkCommandArgs.Create("Throne room", Landmark.Extent.NONE, null, null), plain);
+        assertEquals(new LandmarkCommandArgs.Create("Throne room", LandmarkAreaKind.NONE, null), plain);
 
         LandmarkCommandArgs.Create region = LandmarkCommandArgs.parseCreate(words("Throne room region keep_throne"));
-        assertEquals(new LandmarkCommandArgs.Create("Throne room", Landmark.Extent.REGION, "keep_throne", null), region);
+        assertEquals(new LandmarkCommandArgs.Create("Throne room", LandmarkAreaKind.OWN_REGION, "keep_throne"), region);
 
-        LandmarkCommandArgs.Create radius = LandmarkCommandArgs.parseCreate(words("Old well RADIUS 5,5"));
-        assertEquals(new LandmarkCommandArgs.Create("Old well", Landmark.Extent.RADIUS, null, 5.5), radius);
+        assertEquals("Radius tower", LandmarkCommandArgs.parseCreate(words("Radius tower")).name(),
+            "radius is only refused where the old keyword stood");
+    }
+
+    /** A15 (landmark-domain LD08, #985): the radius form is gone. */
+    @Test
+    void theRadiusFormIsRefused_WithTheWayToARoundRegion() {
+        for (String text : List.of("Old well radius 5", "Old well RADIUS 5,5", "Well radius", "Well radius five")) {
+            LandmarkCommandArgs.RadiusGone gone = assertThrows(LandmarkCommandArgs.RadiusGone.class,
+                () -> LandmarkCommandArgs.parseCreate(words(text)), text);
+            assertEquals(LandmarkCommandArgs.RADIUS_GONE, gone.getMessage());
+        }
+        assertTrue(LandmarkCommandArgs.RADIUS_GONE.contains("//sel cyl"));
     }
 
     @Test
     void createRefusesWhatTheApiWouldRefuse() {
         assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(List.of()));
         assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(words("region keep")));
-        assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(words("Well radius 0")));
-        assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(words("Well radius 513")));
-        assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(words("Well radius five")));
-        assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(words("Well radius")));
+        assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(words("Well region")));
         assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(words("#12")));
         assertThrows(IllegalArgumentException.class, () -> LandmarkCommandArgs.parseCreate(List.of("a".repeat(101))));
-        assertEquals(512, LandmarkCommandArgs.parseRadius("512"));
     }
 
     @Test

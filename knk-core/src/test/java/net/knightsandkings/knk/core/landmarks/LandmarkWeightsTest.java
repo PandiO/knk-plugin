@@ -20,14 +20,8 @@ class LandmarkWeightsTest {
 
     private static final int[] EVERYWHERE = {-1000, -64, -1000, 1000, 320, 1000};
 
-    private static Landmark landmark(int id, String world, Landmark.Extent extent, String regionId, Double radius,
-                                     double preference) {
-        return new Landmark(id, "L" + id, world, 10.5, 64, 10.5, extent, regionId, radius, null, null, true, preference);
-    }
-
-    private static LandmarkWeights.Area cylinder(int id, double x, double y, double z, double r, double preference) {
-        return new LandmarkWeights.Area(id, new LandmarkWeights.CylinderArea(new LandmarkExtent.Cylinder(x, y, z, r)),
-            preference);
+    private static Landmark landmark(int id, String world, List<String> regions, double preference) {
+        return new Landmark(id, "L" + id, world, 10.5, 64, 10.5, regions, null, null, true, preference);
     }
 
     private static LandmarkWeights.Area cuboid(int id, int x0, int z0, int x1, int z1, double preference) {
@@ -36,23 +30,23 @@ class LandmarkWeightsTest {
     }
 
     @Test
-    void onlyLandmarksWithAnExtentAndAWeightInTheWorldBecomeAreas() {
+    void onlyLandmarksWithAnAreaAndAWeightInTheWorldBecomeAreas() {
         RegionShape hall = RegionShape.cuboid(0, 60, 0, 20, 80, 20);
-        Map<String, RegionShape> regions = Map.of("hall", hall);
+        RegionShape well = RegionShape.cuboid(30, 60, 0, 34, 80, 4);
+        Map<String, RegionShape> regions = Map.of("hall", hall, "well", well);
         List<Landmark> landmarks = List.of(
-            landmark(1, "world", Landmark.Extent.RADIUS, null, 5.0, 2.0),
-            landmark(2, "WORLD", Landmark.Extent.REGION, "hall", null, 0.5),
-            landmark(3, "world", Landmark.Extent.REGION, "unknown", null, 2.0),
-            landmark(4, "world", Landmark.Extent.NONE, null, null, 2.0),
-            landmark(5, "world", Landmark.Extent.RADIUS, null, 5.0, 1.0),
-            landmark(6, "nether", Landmark.Extent.RADIUS, null, 5.0, 2.0));
+            landmark(1, "world", List.of("well"), 2.0),
+            landmark(2, "WORLD", List.of("hall"), 0.5),
+            landmark(3, "world", List.of("unknown"), 2.0),
+            landmark(4, "world", List.of(), 2.0),
+            landmark(5, "world", List.of("well"), 1.0),
+            landmark(6, "nether", List.of("well"), 2.0));
 
         List<LandmarkWeights.Area> areas = LandmarkWeights.areas(landmarks, "world",
             id -> Optional.ofNullable(regions.get(id)));
 
         assertEquals(List.of(1, 2), areas.stream().map(LandmarkWeights.Area::landmarkId).toList(),
-            "a radius and a known region, any case of the world; an unknown region, no extent, weight 1.0 and another "
-                + "world are left out");
+            "known regions, any case of the world; an unknown region, a point, weight 1.0 and another world are left out");
         assertEquals(2.0, areas.get(0).preference());
         assertSame(hall, ((LandmarkWeights.RegionArea) areas.get(1).shape()).region());
         assertTrue(LandmarkWeights.areas(null, "world", id -> Optional.empty()).isEmpty());
@@ -60,12 +54,11 @@ class LandmarkWeightsTest {
 
     @Test
     void aCellInsideAnAreaCostsItsPreferenceOutsideOne() {
-        WalkCellWeights cells = LandmarkWeights.of(List.of(cylinder(1, 10.5, 65, 10.5, 3, 2.0)), 4.0).within(EVERYWHERE);
+        WalkCellWeights cells = LandmarkWeights.of(List.of(cuboid(1, 8, 8, 13, 13, 2.0)), 4.0).within(EVERYWHERE);
 
-        assertEquals(2.0, cells.multiplier(10, 65, 10), "the pin's own column");
-        assertEquals(2.0, cells.multiplier(12, 65, 10), "within 3 across");
-        assertEquals(1.0, cells.multiplier(14, 65, 10), "beyond the radius");
-        assertEquals(1.0, cells.multiplier(10, 69, 10), "above the cylinder's height");
+        assertEquals(2.0, cells.multiplier(10, 65, 10), "inside");
+        assertEquals(2.0, cells.multiplier(13, 65, 10), "on the edge");
+        assertEquals(1.0, cells.multiplier(14, 65, 10), "beyond it");
         assertEquals(1.0, cells.minMultiplier(), "every weight above 1: the heuristic is not raised");
     }
 
@@ -135,12 +128,47 @@ class LandmarkWeightsTest {
 
     @Test
     void theModelReadsAMissingOrBrokenPreferenceAsNoWeight() {
-        assertEquals(1.0, landmark(1, "world", Landmark.Extent.RADIUS, null, 5.0, 0).preference());
-        assertEquals(1.0, landmark(1, "world", Landmark.Extent.RADIUS, null, 5.0, Double.NaN).preference());
-        assertEquals(1.0, new Landmark(1, "A", "world", 0, 0, 0, Landmark.Extent.RADIUS, null, 5.0, null, null, true)
-            .preference(), "the phase 5.1 constructor");
+        assertEquals(1.0, landmark(1, "world", List.of("hall"), 0).preference());
+        assertEquals(1.0, landmark(1, "world", List.of("hall"), Double.NaN).preference());
+        assertEquals(1.0, new Landmark(1, "A", "world", 0, 0, 0, List.of("hall"), null, null, true)
+            .preference(), "the constructor without a preference");
         assertEquals(1.0, Landmark.preference(null));
-        assertTrue(landmark(1, "world", Landmark.Extent.RADIUS, null, 5.0, 2.0).weighted());
-        assertTrue(!landmark(1, "world", Landmark.Extent.NONE, null, null, 2.0).weighted());
+        assertTrue(landmark(1, "world", List.of("hall"), 2.0).weighted());
+        assertTrue(!landmark(1, "world", List.of(), 2.0).weighted());
+    }
+
+    // ==================== landmark-domain (PandiO/knk-workspace#985, LD22): the area's union ====================
+
+    @Test
+    void anAreaOfSeveralRegions_IsOneUnion_WeightedOnceWhereTheyOverlap() {
+        RegionShape main = RegionShape.cuboid(0, 60, 0, 10, 80, 10);
+        RegionShape sub = RegionShape.cuboid(8, 60, 0, 20, 80, 10);
+        Map<String, RegionShape> regions = Map.of("domain_7", main, "domain_7_sub_1", sub);
+        List<LandmarkWeights.Area> areas = LandmarkWeights.areas(
+            List.of(landmark(7, "world", List.of("domain_7", "domain_7_sub_1", "domain_7_sub_9"), 3.0)), "world",
+            id -> Optional.ofNullable(regions.get(id)));
+
+        assertEquals(1, areas.size(), "one area per landmark, not one per region");
+        LandmarkWeights.UnionArea union = (LandmarkWeights.UnionArea) areas.get(0).shape();
+        assertEquals(List.of(main, sub), union.regions(), "the unknown sub-region is left out");
+        assertEquals(List.of(0, 60, 0, 20, 80, 10), java.util.Arrays.stream(union.box()).boxed().toList(),
+            "the box holds both regions");
+
+        WalkCellWeights cells = LandmarkWeights.of(areas, 4.0).within(EVERYWHERE);
+        assertEquals(3.0, cells.multiplier(2, 65, 2), "in the main region");
+        assertEquals(3.0, cells.multiplier(15, 65, 2), "in the sub-region");
+        assertEquals(3.0, cells.multiplier(9, 65, 2), "in both: once, not 3 x 3");
+        assertEquals(1.0, cells.multiplier(25, 65, 2), "outside the area");
+    }
+
+    @Test
+    void anAreaWhoseRegionsAreAllUnknown_IsLeftOut_AndOneKnownRegionIsAPlainRegionArea() {
+        RegionShape main = RegionShape.cuboid(0, 60, 0, 10, 80, 10);
+        assertTrue(LandmarkWeights.areas(List.of(landmark(7, "world", List.of("a", "b"), 2.0)), "world",
+            id -> Optional.empty()).isEmpty());
+        List<LandmarkWeights.Area> one = LandmarkWeights.areas(List.of(landmark(7, "world", List.of("a", "b"), 2.0)),
+            "world", id -> id.equals("b") ? Optional.of(main) : Optional.empty());
+        assertSame(main, ((LandmarkWeights.RegionArea) one.get(0).shape()).region());
+        assertThrows(IllegalArgumentException.class, () -> new LandmarkWeights.UnionArea(List.of()));
     }
 }

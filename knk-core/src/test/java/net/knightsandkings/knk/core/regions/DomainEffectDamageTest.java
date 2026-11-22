@@ -41,4 +41,16 @@ class DomainEffectDamageTest {
     void aCombatZoneKeepsEffectDamageWhenTheFlagIsUnset() {
         assertFalse(DomainEffectDamage.isBlocked(List.of(domain("District")), null, Boolean.TRUE));
     }
+
+    /** A11 (landmark-domain § 5 rule 5, LD03, LD12, #985): a landmark never changes effect damage. */
+    @Test
+    void aLandmarkNeverMakesASafeZone_InTheWildernessItHurts_InATownTheTownDecides() {
+        assertFalse(DomainEffectDamage.isBlocked(List.of(domain("Landmark")), null, null), "a wilderness landmark");
+        assertFalse(DomainEffectDamage.isBlocked(List.of(domain("landmark")), Boolean.FALSE, null),
+            "not even with a deny flag it inherited");
+        assertTrue(DomainEffectDamage.isBlocked(List.of(domain("Town"), domain("Landmark")), null, null),
+            "a landmark in a town: as anywhere in the town");
+        assertFalse(DomainEffectDamage.isBlocked(List.of(domain("Town"), domain("Landmark")), Boolean.TRUE, null),
+            "the town's allow flag still lets it through");
+    }
 }

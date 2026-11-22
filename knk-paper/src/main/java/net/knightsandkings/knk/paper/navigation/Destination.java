@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.navigation;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -19,10 +20,14 @@ import java.util.Objects;
  * @param nodeId   the road node id (NODE), else -1
  * @param arrivalRadius for a POINT, the radius of a landmark's {@code Radius} extent (off-road phase 5.1,
  *                 PandiO/knk-workspace#708): inside that cylinder around the point the player has arrived; null for
- *                 the usual {@code arrive-distance}
+ *                 the usual {@code arrive-distance} (since PandiO/knk-workspace#985, LD08, nothing sets one)
+ * @param areaRegionIds for a REGION that is a landmark's area (landmark-domain DESIGN LD22, PandiO/knk-workspace#985):
+ *                 the area's regions besides {@code regionId} (its sub-regions, and the other regions of the main
+ *                 region's domain the server found by {@code knk-domain-id}); inside any of them the player has
+ *                 arrived, while the route still goes to {@code regionId}. Null for every other destination.
  */
 public record Destination(String name, Kind kind, String world, double[] point, String regionId, int streetId, int nodeId,
-                          Double arrivalRadius) {
+                          Double arrivalRadius, List<String> areaRegionIds) {
 
     public enum Kind {
         POINT,
@@ -39,16 +44,35 @@ public record Destination(String name, Kind kind, String world, double[] point, 
         if (arrivalRadius != null && !(arrivalRadius > 0 && Double.isFinite(arrivalRadius))) {
             arrivalRadius = null;
         }
+        areaRegionIds = kind != Kind.REGION || areaRegionIds == null ? null : List.copyOf(areaRegionIds);
+    }
+
+    /** The record without an area (every destination but a landmark's area). */
+    public Destination(String name, Kind kind, String world, double[] point, String regionId, int streetId, int nodeId,
+                       Double arrivalRadius) {
+        this(name, kind, world, point, regionId, streetId, nodeId, arrivalRadius, null);
     }
 
     /** The record without an arrival radius (every destination before #708). */
     public Destination(String name, Kind kind, String world, double[] point, String regionId, int streetId, int nodeId) {
-        this(name, kind, world, point, regionId, streetId, nodeId, null);
+        this(name, kind, world, point, regionId, streetId, nodeId, null, null);
     }
 
     /** The same destination arrived at within {@code radius} blocks of its point (a POINT only; null: the usual distance). */
     public Destination withArrivalRadius(Double radius) {
-        return new Destination(name, kind, world, point, regionId, streetId, nodeId, kind == Kind.POINT ? radius : null);
+        return new Destination(name, kind, world, point, regionId, streetId, nodeId, kind == Kind.POINT ? radius : null,
+            areaRegionIds);
+    }
+
+    /** The same REGION destination as a landmark's area with the other regions {@code ids} (#985, LD22). */
+    public Destination withAreaRegions(List<String> ids) {
+        return new Destination(name, kind, world, point, regionId, streetId, nodeId, arrivalRadius,
+            ids == null ? List.of() : ids);
+    }
+
+    /** Whether this is a landmark's area: several regions count as arrived (#985). */
+    public boolean isArea() {
+        return areaRegionIds != null;
     }
 
     /**
@@ -56,9 +80,12 @@ public record Destination(String name, Kind kind, String world, double[] point, 
      * across and as many blocks up or down; false without a radius.
      */
     public boolean withinArrivalRadius(double x, double y, double z) {
-        return arrivalRadius != null && point != null
-            && net.knightsandkings.knk.core.landmarks.LandmarkExtent.Cylinder.contains(point[0], point[1], point[2],
-                arrivalRadius, x, y, z);
+        if (arrivalRadius == null || point == null) {
+            return false;
+        }
+        double dx = x - point[0];
+        double dz = z - point[2];
+        return dx * dx + dz * dz <= arrivalRadius * arrivalRadius && Math.abs(y - point[1]) <= arrivalRadius;
     }
 
     public static Destination point(String name, String world, double x, double y, double z) {
@@ -93,7 +120,8 @@ public record Destination(String name, Kind kind, String world, double[] point, 
     public boolean sameAs(Destination other) {
         return other != null && kind == other.kind && name.equals(other.name) && world.equalsIgnoreCase(other.world)
             && java.util.Arrays.equals(point, other.point) && streetId == other.streetId && nodeId == other.nodeId
-            && Objects.equals(regionId, other.regionId) && Objects.equals(arrivalRadius, other.arrivalRadius);
+            && Objects.equals(regionId, other.regionId) && Objects.equals(arrivalRadius, other.arrivalRadius)
+            && Objects.equals(areaRegionIds, other.areaRegionIds);
     }
 
     @Override

@@ -37,9 +37,8 @@ class NavigationModelLandmarksTest {
     private boolean landmarksFail;
     private boolean landmarksOff;
 
-    private final Landmark throne = new Landmark(41, "Throne room", "world", 12, 70, 30, Landmark.Extent.REGION, "keep_throne",
-        null, 9, "Keep", true);
-    private final Landmark well = new Landmark(42, "Old well", "world", 5, 64, 5, Landmark.Extent.RADIUS, null, 4.0, null,
+    private final Landmark throne = new Landmark(41, "Throne room", "world", 12, 70, 30, List.of("keep_throne"), 9, "Keep", true);
+    private final Landmark well = new Landmark(42, "Old well", "world", 5, 64, 5, List.of(), null,
         null, false);
 
     /** The fake API plus a landmark read. */
@@ -131,6 +130,7 @@ class NavigationModelLandmarksTest {
         assertEquals(NavigationModelSnapshot.Loaded.Status.LOADED, refresher(restarted).loadSnapshot().status());
         assertEquals(List.of(throne, well), restarted.current().landmarks());
         Optional<Landmark> loaded = restarted.current().landmarks().stream().filter(l -> l.id() == 42).findFirst();
-        assertEquals(4.0, loaded.orElseThrow().radius());
+        assertEquals(List.of(), loaded.orElseThrow().regionIds(), "a point");
+        assertEquals(List.of("keep_throne"), restarted.current().landmarks().get(0).regionIds());
     }
 }

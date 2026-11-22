@@ -87,4 +87,16 @@ class WarpTargetsTest {
         assertEquals(List.of(marketDistrict), WarpTargets.suggestions(all, "district:mar"));
         assertEquals(List.of(), WarpTargets.suggestions(all, "zz"));
     }
+
+    /** A09 (landmark-domain LD21, #985): a landmark with its warp on is a {@code /warp landmark:<name>} target. */
+    @Test
+    void aLandmarkIsAWarpTarget_ByNameOrWithTheTypeWordLandmark() {
+        KnkTeleportDestination tower = open(41, "Market", "Landmark");
+        List<KnkTeleportDestination> withLandmark = List.of(kardenna, marketTown, tower);
+
+        assertSame(tower, WarpTargets.resolve(withLandmark, "landmark:Market").destination());
+        assertSame(tower, WarpTargets.resolve(withLandmark, "LANDMARK:market").destination());
+        assertTrue(WarpTargets.resolve(withLandmark, "Market").ambiguous(), "a town of the same name: pick the type");
+        assertTrue(WarpTargets.complete(withLandmark, "land").contains("landmark:Market"));
+    }
 }

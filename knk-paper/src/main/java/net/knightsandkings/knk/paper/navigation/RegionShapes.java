@@ -1,5 +1,6 @@
 package net.knightsandkings.knk.paper.navigation;
 
+import java.util.List;
 import java.util.Optional;
 
 import net.knightsandkings.knk.core.roads.route.RegionShape;
@@ -21,5 +22,16 @@ public interface RegionShapes {
      */
     default boolean containsFeet(String world, String regionId, RegionShape shape, double x, double y, double z) {
         return shape.containsFeet(x, y, z);
+    }
+
+    /**
+     * The other regions of the domain {@code regionId} belongs to (landmark-domain DESIGN LD22,
+     * PandiO/knk-workspace#985): its main region and sub-regions, found by the {@code knk-domain-id} flag the access sync
+     * puts on every region of a domain ({@code DomainRegionUnion}), without {@code regionId} itself. A landmark's area
+     * uses it for the sub-regions of a {@code LinkedDomain} parent, which {@code api/landmarks} does not list. Main
+     * thread. This default knows none.
+     */
+    default List<String> domainRegionIds(String world, String regionId) {
+        return List.of();
     }
 }

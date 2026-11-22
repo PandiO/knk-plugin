@@ -26,7 +26,7 @@ public final class DiscoveryMessages {
 
     private DiscoveryMessages() {}
 
-    /** "the town", "the district", "the structure", "the gate"; "the place" for anything else. */
+    /** "the town", "the district", "the structure", "the gate", "the landmark" (#985); "the place" for anything else. */
     public static String typePhrase(String domainType) {
         String type = domainType == null ? "" : domainType.trim().toLowerCase(Locale.ROOT);
         return switch (type) {
@@ -34,6 +34,7 @@ public final class DiscoveryMessages {
             case "district" -> "the district";
             case "structure" -> "the structure";
             case "gatestructure" -> "the gate";
+            case "landmark" -> "the landmark";
             default -> "the place";
         };
     }

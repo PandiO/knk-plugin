@@ -13,15 +13,15 @@ import net.knightsandkings.knk.core.roads.walk.WalkCellWeights;
 
 /**
  * Landmark preference weights on walk cells (off-road navigation phase 5.2, PandiO/knk-workspace#709, DESIGN § 5.4.3,
- * § 5.4.4 and § 6.2.3; decision O02: preference indoors without an indoor road graph). A landmark with an extent (a
- * WorldGuard region or a cylinder around its pin) and a {@code preference} other than 1.0 is a weighted
- * {@link Area}: the cost of every walk cell whose feet block is inside it is multiplied by the preference. Overlapping
+ * § 5.4.4 and § 6.2.3; decision O02: preference indoors without an indoor road graph). A landmark with an area (since
+ * PandiO/knk-workspace#985 the union of its regions: its own main region and sub-regions, or the parent's, LD22) and a
+ * {@code preference} other than 1.0 is a weighted {@link Area}: the cost of every walk cell whose feet block is inside it is multiplied by the preference. Overlapping
  * areas multiply; the product is capped at {@code preference-max} (default {@value #DEFAULT_MAX}) and, the other way,
  * at its inverse, so one bad overlap can neither block a hall nor make it nearly free.
  *
  * <p>Two steps, both Bukkit-free:
  * <ol>
- *   <li>{@link #areas} on the main thread, where the game server resolves a Region extent to a {@link RegionShape}
+ *   <li>{@link #areas} on the main thread, where the game server resolves the area's regions to {@link RegionShape}s
  *       (WorldGuard is not read off the main thread);</li>
  *   <li>{@link #within} per walk request on the walk thread: only the areas whose box meets the request's
  *       {@link net.knightsandkings.knk.core.roads.walk.WalkRequest#reachBox() reach box} are kept, so the lookup per
@@ -59,8 +59,8 @@ public final class LandmarkWeights {
         }
     }
 
-    /** A Bukkit-free extent: a WorldGuard region's shape or a landmark's cylinder. */
-    public sealed interface Shape permits RegionArea, CylinderArea {
+    /** A Bukkit-free area: one WorldGuard region's shape, or the union of a landmark's regions. */
+    public sealed interface Shape permits RegionArea, UnionArea {
 
         /** Whether the cell whose feet block is {@code (x, feetY, z)} is inside. */
         boolean contains(int x, int feetY, int z);
@@ -98,23 +98,44 @@ public final class LandmarkWeights {
         }
     }
 
-    /** A Radius extent: the cylinder of {@link LandmarkExtent.Cylinder}, tested at the centre of the feet block. */
-    public record CylinderArea(LandmarkExtent.Cylinder cylinder) implements Shape {
-        public CylinderArea {
-            Objects.requireNonNull(cylinder, "cylinder");
+    /**
+     * A landmark's area with several regions (landmark-domain DESIGN LD22, PandiO/knk-workspace#985): its main region
+     * and sub-regions, or the parent's. A cell is inside when it is inside any of them, and it is weighted once however
+     * many of them hold it (the regions are one area, not overlapping landmarks).
+     */
+    public record UnionArea(List<RegionShape> regions) implements Shape {
+        public UnionArea {
+            regions = List.copyOf(regions);
+            if (regions.isEmpty()) {
+                throw new IllegalArgumentException("a union needs a region");
+            }
         }
 
         @Override
         public boolean contains(int x, int feetY, int z) {
-            return cylinder.contains(x + 0.5, feetY, z + 0.5);
+            for (RegionShape region : regions) {
+                if (region.contains(x, feetY, z)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         @Override
         public int[] box() {
-            double r = cylinder.radius();
-            return new int[] {(int) Math.floor(cylinder.x() - r), (int) Math.floor(cylinder.y() - r),
-                (int) Math.floor(cylinder.z() - r), (int) Math.ceil(cylinder.x() + r),
-                (int) Math.ceil(cylinder.y() + r), (int) Math.ceil(cylinder.z() + r)};
+            int[] box = null;
+            for (RegionShape region : regions) {
+                int[] b = new RegionArea(region).box();
+                if (box == null) {
+                    box = b;
+                } else {
+                    for (int i = 0; i < 3; i++) {
+                        box[i] = Math.min(box[i], b[i]);
+                        box[i + 3] = Math.max(box[i + 3], b[i + 3]);
+                    }
+                }
+            }
+            return box;
         }
     }
 
@@ -141,9 +162,10 @@ public final class LandmarkWeights {
     }
 
     /**
-     * Main thread: the weighted areas of {@code landmarks} in {@code world} (case-insensitive): those with an extent and a
-     * preference other than 1.0 ({@link Landmark#weighted()}). A Region extent is looked up with {@code regions}
-     * (the game server's WorldGuard regions); a region it does not know is left out. A landmark that is not offered as
+     * Main thread: the weighted areas of {@code landmarks} in {@code world} (case-insensitive): those with an area and a
+     * preference other than 1.0 ({@link Landmark#weighted()}). Each region of the area is looked up with
+     * {@code regions} (the game server's WorldGuard regions); a region it does not know is left out, a landmark none of
+     * whose regions it knows too. A landmark that is not offered as
      * a destination ({@code navigationEnabled} false) still weights its area: the weight is about the place, not the
      * destination list.
      */
@@ -159,17 +181,30 @@ public final class LandmarkWeights {
             if (landmark == null || !landmark.weighted() || !landmark.world().toLowerCase(Locale.ROOT).equals(w)) {
                 continue;
             }
-            LandmarkExtent extent = LandmarkExtent.of(landmark);
-            Shape shape = switch (extent) {
-                case LandmarkExtent.Cylinder cylinder -> new CylinderArea(cylinder);
-                case LandmarkExtent.Region region -> regions.apply(region.regionId()).map(RegionArea::new).orElse(null);
-                case LandmarkExtent.Point point -> null;
-            };
+            Shape shape = shapeOf(LandmarkExtent.of(landmark), regions);
             if (shape != null) {
                 out.add(new Area(landmark.id(), shape, landmark.preference()));
             }
         }
         return out;
+    }
+
+    /**
+     * The shape of an extent: null for a point; for an area the regions {@code regions} knows (a region it does not
+     * know is left out; none known: null), one region as a {@link RegionArea}, several as a {@link UnionArea}.
+     */
+    static Shape shapeOf(LandmarkExtent extent, Function<String, Optional<RegionShape>> regions) {
+        if (!(extent instanceof LandmarkExtent.Area area)) {
+            return null;
+        }
+        List<RegionShape> known = new ArrayList<>();
+        for (String regionId : area.regionIds()) {
+            regions.apply(regionId).ifPresent(known::add);
+        }
+        if (known.isEmpty()) {
+            return null;
+        }
+        return known.size() == 1 ? new RegionArea(known.get(0)) : new UnionArea(known);
     }
 
     public List<Area> areas() {

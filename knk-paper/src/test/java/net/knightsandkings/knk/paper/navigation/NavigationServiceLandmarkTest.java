@@ -34,6 +34,7 @@ import net.knightsandkings.knk.core.navigation.destinations.InitialScopes;
 import net.knightsandkings.knk.core.navigation.destinations.Provider;
 import net.knightsandkings.knk.core.navigation.engine.LandmarkProvider;
 import net.knightsandkings.knk.core.navigation.model.Landmark;
+import net.knightsandkings.knk.core.roads.route.RegionShape;
 import net.knightsandkings.knk.core.navigation.model.NavigationModel;
 import net.knightsandkings.knk.core.navigation.model.NavigationModelHolder;
 import net.knightsandkings.knk.core.roads.route.CompositeAccessPolicy;
@@ -66,9 +67,29 @@ class NavigationServiceLandmarkTest {
     private NavigationService service;
     private PlayerNavigationEngine engine;
 
-    private static Landmark atB(String name, Landmark.Extent extent, Double radius, boolean enabled) {
-        return new Landmark(41, name, WORLD, 100.5, 65, 0.5, extent, null, radius, 9, "Kardenna", enabled);
+    private static Landmark atB(String name, boolean enabled) {
+        return new Landmark(41, name, WORLD, 100.5, 65, 0.5, List.of(), 9, "Kardenna", enabled);
     }
+
+    /** #985 (LD22): a landmark at B with an area of regions, main region first. */
+    private static Landmark areaAtB(String name, String... regions) {
+        return new Landmark(41, name, WORLD, 100.5, 65, 0.5, List.of(regions), 9, "Kardenna", true);
+    }
+
+    /** The regions the server knows, and the other regions of a domain (knk-domain-id). */
+    private final java.util.Map<String, RegionShape> regions = new java.util.HashMap<>();
+    private final java.util.Map<String, List<String>> domainRegions = new java.util.HashMap<>();
+    private final RegionShapes shapes = new RegionShapes() {
+        @Override
+        public Optional<RegionShape> shape(String w, String regionId) {
+            return Optional.ofNullable(regions.get(regionId));
+        }
+
+        @Override
+        public List<String> domainRegionIds(String w, String regionId) {
+            return domainRegions.getOrDefault(regionId, List.of());
+        }
+    };
 
     private static NavigationModel model(Landmark... landmarks) {
         return new NavigationModel(Instant.now(), List.of(), List.of(), null, List.of(landmarks));
@@ -80,7 +101,7 @@ class NavigationServiceLandmarkTest {
         world = server.addSimpleWorld(WORLD);
         player = server.addPlayer();
         player.teleport(new Location(world, 0.5, 65, 0.5));
-        holder.replace(model(atB("Throne room", Landmark.Extent.NONE, null, true)));
+        holder.replace(model(atB("Throne room", true)));
         CompassSettings compass = new CompassSettings(CompassItemRule.defaults(), true, true, List.of());
         SiegeService siege = mock(SiegeService.class);
         when(siege.runningMatchOf(player.getUniqueId())).thenReturn(Optional.empty());
@@ -96,7 +117,7 @@ class NavigationServiceLandmarkTest {
         TrailRenderer trail = mock(TrailRenderer.class);
         when(trail.periodTicks()).thenReturn(10);
         service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults(),
-            w -> network.snapshot, policies, (w, regionId) -> Optional.empty(), eligibility, mock(NavigationHud.class),
+            w -> network.snapshot, policies, shapes, eligibility, mock(NavigationHud.class),
             trail, Runnable::run, Runnable::run, tick::get, events::add, Logger.getLogger("test")));
         // as KnKPlugin.startDestinationEngine wires it
         service.setHandleOnly(true);
@@ -151,7 +172,7 @@ class NavigationServiceLandmarkTest {
         pastTheRecheck();
         assertTrue(navigating());
 
-        holder.replace(model(atB("King's hall", Landmark.Extent.NONE, null, true)));
+        holder.replace(model(atB("King's hall", true)));
         nextTick();
         pastTheRecheck();
         assertTrue(navigating(), "the key is the id: a rename keeps the session");
@@ -169,23 +190,54 @@ class NavigationServiceLandmarkTest {
     @Test
     void disablingTheLandmarkEndsTheSessionWithDestinationNotAllowed() {
         navigateTo("Throne room");
-        holder.replace(model(atB("Throne room", Landmark.Extent.NONE, null, false)));
+        holder.replace(model(atB("Throne room", false)));
         nextTick();
         assertFalse(navigating());
         assertEquals(EndReason.DESTINATION_NOT_ALLOWED, endReason());
     }
 
+    /** A14 (#985, LD22): arrival counts inside a sub-region of the landmark's area, not only its main region. */
     @Test
-    void aRadiusExtentIsReachedInsideItsCylinder() {
-        holder.replace(model(atB("Market square", Landmark.Extent.RADIUS, 10.0, true)));
-        navigateTo("Market square");
+    void anAreaIsReachedInsideASubRegion() {
+        regions.put("domain_41", RegionShape.cuboid(97, 60, -3, 104, 80, 4));
+        regions.put("domain_41_sub_1", RegionShape.cuboid(48, 60, -3, 56, 80, 4));
+        holder.replace(model(areaAtB("Tower", "domain_41", "domain_41_sub_1")));
+        navigateTo("Tower");
         assertTrue(navigating());
 
-        player.teleport(new Location(world, 92.5, 65, 0.5)); // 8 blocks from the pin, inside the radius
+        player.teleport(new Location(world, 30.5, 65, 0.5)); // on the way, in neither region
         nextTick();
+        assertTrue(navigating(), "not there yet");
 
+        player.teleport(new Location(world, 52.5, 65, 0.5)); // inside the sub-region, far from the main region
+        nextTick();
         assertFalse(navigating());
-        assertTrue(arrived(), "arrived inside the radius");
+        assertTrue(arrived(), "arrived inside the sub-region");
+    }
+
+    /** A14 (#985, LD22): a LinkedDomain landmark arrives in the parent's sub-region, found through knk-domain-id. */
+    @Test
+    void aLinkedDomainAreaIsReachedInTheParentsSubRegion() {
+        regions.put("town_9", RegionShape.cuboid(97, 60, -3, 104, 80, 4));
+        regions.put("domain_9_sub_1", RegionShape.cuboid(48, 60, -3, 56, 80, 4));
+        domainRegions.put("town_9", List.of("domain_9_sub_1"));
+        holder.replace(model(areaAtB("Market cross", "town_9")));
+        navigateTo("Market cross");
+        assertTrue(navigating());
+
+        player.teleport(new Location(world, 52.5, 65, 0.5));
+        nextTick();
+        assertFalse(navigating());
+        assertTrue(arrived(), "the parent's sub-region is part of the area");
+    }
+
+    @Test
+    void standingInASubRegionIsAlreadyThere() {
+        regions.put("domain_41", RegionShape.cuboid(97, 60, -3, 104, 80, 4));
+        regions.put("domain_41_sub_1", RegionShape.cuboid(-3, 60, -3, 4, 80, 4));
+        holder.replace(model(areaAtB("Tower", "domain_41", "domain_41_sub_1")));
+        navigateTo("Tower");
+        assertFalse(navigating(), "no session: already there");
     }
 
     @Test
@@ -195,13 +247,5 @@ class NavigationServiceLandmarkTest {
         nextTick();
         assertTrue(navigating(), "arrive-distance is 4");
         assertFalse(arrived());
-    }
-
-    @Test
-    void standingInsideTheRadiusIsAlreadyThere() {
-        holder.replace(model(atB("Market square", Landmark.Extent.RADIUS, 10.0, true)));
-        player.teleport(new Location(world, 95.5, 65, 0.5));
-        navigateTo("Market square");
-        assertFalse(navigating(), "no session: already there");
     }
 }

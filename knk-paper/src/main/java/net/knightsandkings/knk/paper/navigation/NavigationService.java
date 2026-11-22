@@ -988,6 +988,7 @@ public final class NavigationService implements SiegeMatchObserver {
             player.sendMessage(NavigationMessages.noLocation(handle.candidate().label()));
             return;
         }
+        destination = withDomainRegions(destination);
         begin(player, destination, mode);
         Active started = active.get(player.getUniqueId());
         if (started != null && started.destination == destination) {
@@ -1273,10 +1274,44 @@ public final class NavigationService implements SiegeMatchObserver {
         return new Goals(goals, lastLeg, region, false, null, false); // computeRoute: "too far from a road"
     }
 
-    /** Whether the player's feet are inside the destination region (WorldGuard's answer on the server). */
+    /**
+     * Whether the player's feet are inside the destination region (WorldGuard's answer on the server); for a landmark's
+     * area (#985, LD22) inside any of its regions.
+     */
     private boolean insideRegion(Destination destination, RegionShape region, Location feet) {
-        return deps.regionShapes().containsFeet(destination.world(), destination.regionId(), region,
-            feet.getX(), feet.getY(), feet.getZ());
+        if (deps.regionShapes().containsFeet(destination.world(), destination.regionId(), region,
+            feet.getX(), feet.getY(), feet.getZ())) {
+            return true;
+        }
+        if (!destination.isArea()) {
+            return false;
+        }
+        for (String other : destination.areaRegionIds()) {
+            Optional<RegionShape> shape = deps.regionShapes().shape(destination.world(), other);
+            if (shape.isPresent() && deps.regionShapes().containsFeet(destination.world(), other, shape.get(),
+                feet.getX(), feet.getY(), feet.getZ())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A landmark's area (#985, LD22) with the other regions of its main region's domain added once, at the start
+     * (the sub-regions of a {@code LinkedDomain} parent are not in {@code api/landmarks}); any other destination as
+     * it is. Main thread.
+     */
+    Destination withDomainRegions(Destination destination) {
+        if (!destination.isArea()) {
+            return destination;
+        }
+        List<String> ids = new ArrayList<>(destination.areaRegionIds());
+        for (String id : deps.regionShapes().domainRegionIds(destination.world(), destination.regionId())) {
+            if (ids.stream().noneMatch(id::equalsIgnoreCase) && !id.equalsIgnoreCase(destination.regionId())) {
+                ids.add(id);
+            }
+        }
+        return destination.withAreaRegions(ids);
     }
 
     private boolean insideRegion(Active a, Location feet) {

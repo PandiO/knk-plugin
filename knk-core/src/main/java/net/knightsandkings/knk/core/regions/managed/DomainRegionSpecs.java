@@ -123,6 +123,32 @@ public final class DomainRegionSpecs {
         return new Result(specs, skipped, List.of());
     }
 
+    /**
+     * PandiO/knk-workspace#985 (landmark-domain DESIGN LD13): the own regions of the landmarks (area {@code OwnRegion}
+     * with a region), as {@link ManagedRegionKind#LANDMARK}: WorldGuard parent = the parent domain's main region
+     * ({@code parentDomain.wgRegionId}; top level without one), in the landmark's world. A point or a
+     * {@code LinkedDomain} landmark owns no region and is left out; an {@code OwnRegion} landmark whose region is not
+     * drawn yet is skipped with why.
+     */
+    public static Result landmarks(List<net.knightsandkings.knk.core.domain.landmarks.KnkLandmark> landmarks) {
+        List<ManagedRegionSpec> specs = new ArrayList<>();
+        List<Skipped> skipped = new ArrayList<>();
+        for (var landmark : nullSafe(landmarks)) {
+            if (landmark == null
+                    || landmark.areaKind() != net.knightsandkings.knk.core.domain.landmarks.LandmarkAreaKind.OWN_REGION) {
+                continue;
+            }
+            String label = "Landmark#" + landmark.id() + " '" + landmark.name() + "'";
+            if (isBlank(landmark.wgRegionId())) {
+                skipped.add(new Skipped(label, "no wgRegionId"));
+                continue;
+            }
+            specs.add(new ManagedRegionSpec(landmark.wgRegionId(), ManagedRegionKind.LANDMARK, landmark.parentRegionId(),
+                    label, isBlank(landmark.world()) ? null : landmark.world()));
+        }
+        return new Result(specs, skipped, List.of());
+    }
+
     private static <T> List<T> nullSafe(List<T> list) {
         return list != null ? list : List.of();
     }

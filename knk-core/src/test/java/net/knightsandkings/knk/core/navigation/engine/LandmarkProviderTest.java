@@ -36,16 +36,15 @@ class LandmarkProviderTest {
 
     private static final String WORLD = "world";
 
-    private final Landmark throne = new Landmark(41, "Throne Room", WORLD, 12, 70, 30, Landmark.Extent.RADIUS, null, 4.0, 9,
+    private final Landmark throne = new Landmark(41, "Throne Room", WORLD, 12, 70, 30, List.of(), 9,
         "Kardenna Keep", true);
-    private final Landmark well = new Landmark(42, "Old Well", WORLD, 5, 64, 5, Landmark.Extent.NONE, null, null, null, null,
+    private final Landmark well = new Landmark(42, "Old Well", WORLD, 5, 64, 5, List.of(), null, null,
         true);
-    private final Landmark hall = new Landmark(43, "Great Hall", WORLD, 0, 64, 0, Landmark.Extent.REGION, "hall_43", null, 9,
+    private final Landmark hall = new Landmark(43, "Great Hall", WORLD, 0, 64, 0, List.of("hall_43"), 9,
         "Kardenna Keep", true);
-    private final Landmark secret = new Landmark(44, "Secret Door", WORLD, 1, 64, 1, Landmark.Extent.NONE, null, null, null,
+    private final Landmark secret = new Landmark(44, "Secret Door", WORLD, 1, 64, 1, List.of(), null,
         null, false);
-    private final Landmark nether = new Landmark(45, "Nether Gate", "world_nether", 0, 64, 0, Landmark.Extent.NONE, null,
-        null, null, null, true);
+    private final Landmark nether = new Landmark(45, "Nether Gate", "world_nether", 0, 64, 0, List.of(), null, null, true);
 
     private final AtomicReference<NavigationModel> model = new AtomicReference<>(model(throne, well, hall, secret, nether));
     private final LandmarkProvider provider = new LandmarkProvider(model::get);
@@ -81,16 +80,40 @@ class LandmarkProviderTest {
     }
 
     @Test
-    void thePlaceFollowsTheExtent() {
-        Place.Point radius = assertInstanceOf(Place.Point.class, LandmarkProvider.place(throne));
-        assertEquals(4.0, radius.arrivalRadius());
-        assertEquals(12, radius.x());
+    void thePlaceFollowsTheArea() {
+        Place.Point point = assertInstanceOf(Place.Point.class, LandmarkProvider.place(throne));
+        assertFalse(point.hasArrivalRadius(), "no radius extent any more (LD08): within arrive-distance");
+        assertEquals(12, point.x());
         Place.Point none = assertInstanceOf(Place.Point.class, LandmarkProvider.place(well));
         assertFalse(none.hasArrivalRadius(), "within arrive-distance (A13)");
         Place.Region region = assertInstanceOf(Place.Region.class, LandmarkProvider.place(hall));
         assertEquals(("hall_43" + WORLD), region.regionId() + region.world());
-        Landmark brokenRegion = new Landmark(46, "x", WORLD, 0, 0, 0, Landmark.Extent.REGION, " ", null, null, null, true);
+        assertTrue(region.isArea(), "a landmark's region is an area");
+        assertEquals(List.of(), region.areaRegionIds());
+        Landmark brokenRegion = new Landmark(46, "x", WORLD, 0, 0, 0, List.of(" "), null, null, true);
         assertInstanceOf(Place.Point.class, LandmarkProvider.place(brokenRegion), "a Region without a region id: the pin");
+    }
+
+    /** A14 (landmark-domain LD22, #985): the area's sub-regions travel with the place; routing goes to the main region. */
+    @Test
+    void anAreaWithSubRegions_IsItsMainRegion_WithTheOthersAsArrival() {
+        Landmark tower = new Landmark(47, "Tower", WORLD, 0, 64, 0, List.of("domain_47", "domain_47_sub_1", "domain_47_sub_2"),
+            null, null, true);
+        Place.Region region = assertInstanceOf(Place.Region.class, LandmarkProvider.place(tower));
+        assertEquals("domain_47", region.regionId());
+        assertEquals(List.of("domain_47_sub_1", "domain_47_sub_2"), region.areaRegionIds());
+        Landmark linked = new Landmark(48, "Market cross", WORLD, 0, 64, 0, List.of("town_1"), 1, "Rivia", true);
+        Place.Region parent = assertInstanceOf(Place.Region.class, LandmarkProvider.place(linked));
+        assertEquals("town_1", parent.regionId(), "LinkedDomain: the parent's main region");
+    }
+
+    /** A14: one destination per landmark; the catalogue leaves Landmark domains out (LD22). */
+    @Test
+    void theCatalogueSkipsLandmarkDomains_SoEachLandmarkIsListedOnce() {
+        assertNull(CatalogueProvider.typeWordOf("Landmark"));
+        assertNull(CatalogueProvider.domain(new net.knightsandkings.knk.core.navigation.model.DomainPlace(43, "Great Hall",
+            "Landmark", null, null, "hall_43", WORLD, null, false)));
+        assertEquals(1, LandmarkProvider.fromModel(model(hall)).size());
     }
 
     @Test
@@ -115,13 +138,13 @@ class LandmarkProviderTest {
     @Test
     void aSessionSurvivesARenameAndEndsWhenTheLandmarkIsDeletedOrDisabled() {
         var handle = engine.resolve(player, "Throne Room", Mode.DEFAULT).destination();
-        model.set(model(new Landmark(41, "King's Hall", WORLD, 12, 70, 30, Landmark.Extent.RADIUS, null, 4.0, 9, "Kardenna Keep",
+        model.set(model(new Landmark(41, "King's Hall", WORLD, 12, 70, 30, List.of(), 9, "Kardenna Keep",
             true), well));
         DestinationEngine.Revalidation renamed = engine.revalidate(player, handle);
         assertTrue(renamed.allowed());
         assertEquals("King's Hall", renamed.candidate().label());
 
-        model.set(model(new Landmark(41, "King's Hall", WORLD, 12, 70, 30, Landmark.Extent.RADIUS, null, 4.0, 9, null, false)));
+        model.set(model(new Landmark(41, "King's Hall", WORLD, 12, 70, 30, List.of(), 9, null, false)));
         assertEquals(Reason.NO_LONGER_LISTED, engine.revalidate(player, handle).reason().code());
         model.set(model(well));
         assertFalse(engine.revalidate(player, handle).allowed(), "deleted");

@@ -46,6 +46,17 @@ public class ManagedRegionsBootstrap {
     public ManagedRegionsBootstrap(JavaPlugin plugin, ManagedRegionsConfig config, TownsQueryApi towns,
                                    DistrictsQueryApi districts, StructuresQueryApi structures,
                                    DomainCatalogQueryApi domainCatalog) {
+        this(plugin, config, towns, districts, structures, domainCatalog, null);
+    }
+
+    /**
+     * @param landmarks PandiO/knk-workspace#985 (landmark-domain LD13): the landmarks, whose own regions the repair
+     *                  manages as LANDMARK regions; null leaves them out
+     */
+    public ManagedRegionsBootstrap(JavaPlugin plugin, ManagedRegionsConfig config, TownsQueryApi towns,
+                                   DistrictsQueryApi districts, StructuresQueryApi structures,
+                                   DomainCatalogQueryApi domainCatalog,
+                                   net.knightsandkings.knk.core.ports.api.LandmarksApi landmarks) {
         this.plugin = plugin;
         this.config = config;
         this.store = new WorldGuardManagedRegionStore(ManagedRegionsBootstrap::loadedManagers);
@@ -54,7 +65,7 @@ public class ManagedRegionsBootstrap {
         // are the production structure kinds and rural structures without a parent
         this.production = plugin.getConfig().getBoolean("production.enabled", false);
         ManagedRegionSpecSource source = new ManagedRegionSpecSource(towns, districts, structures, domainCatalog, config.pageSize(),
-                production);
+                production, landmarks);
         this.repairService = new ManagedRegionRepairService(source, reconciler, store, config.extraRegions(),
                 runnable -> Bukkit.getScheduler().runTask(plugin, runnable), LOGGER);
     }
