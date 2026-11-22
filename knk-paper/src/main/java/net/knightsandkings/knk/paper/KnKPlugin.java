@@ -722,12 +722,6 @@ public class KnKPlugin extends JavaPlugin {
             worldTaskHandlerRegistry.registerHandler(kitScanHandler);
             worldTaskHandlerRegistry.registerHandler("KitScan", kitScanHandler);
 
-            // Siege weapons phase 2 (PandiO/knk-workspace#783, #799): the SiegeWeaponSpot world task of the weapon spot
-            // form, only with siege.weapons.enabled (default off); off registers nothing.
-            net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsModule.register(this,
-                net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsSettings.from(getConfig()),
-                worldTaskHandlerRegistry, worldTasksApi);
-
             // Start lightweight HTTP server for the API's region callbacks (region-http.bind-address/port,
             // default 127.0.0.1:8081). With api.auth.api-key set, callers must send it as X-API-Key.
             regionHttpServer = new RegionHttpServer(this, wgRegionIdHandler,
@@ -2862,6 +2856,7 @@ public class KnKPlugin extends JavaPlugin {
             registerErasureSync(hooks);
             registerModerationSync();
             registerGateCommandSync(); // overview map L7 (#741): web gate commands (API flag Map:GateCommands:Enabled)
+            registerRegionQuerySync(); // #988: region geometry (always) and weapon spot site check (siege.weapons.enabled)
             registerTerritorySync(hooks); // territory (#689): TerritoryChanged, only with production.enabled
             if (metricsService != null) {
                 metricsService.register(realtimeStats);
@@ -2960,6 +2955,35 @@ public class KnKPlugin extends JavaPlugin {
         new net.knightsandkings.knk.paper.realtime.GateCommandRealtimeSync(main, handler, service::send,
             new net.knightsandkings.knk.core.realtime.RecentActionIds(), getLogger())
             .register(service.dispatcher());
+    }
+
+    /**
+     * PandiO/knk-workspace#988: the API's region queries over the game hub. {@code RegionGeometryQuery} (world, kind, min
+     * and max corner, points of a WorldGuard region) is answered always; {@code SpotSiteCheckQuery} (a siege weapon spot's
+     * floor and space) only with {@code siege.weapons.enabled}. The API's {@code RegionQueries:Enabled} decides whether it
+     * asks at all. Both only read the world.
+     */
+    private void registerRegionQuerySync() {
+        java.util.concurrent.Executor main = runnable -> {
+            if (!isEnabled()) {
+                return;
+            }
+            if (org.bukkit.Bukkit.isPrimaryThread()) {
+                runnable.run();
+            } else {
+                org.bukkit.Bukkit.getScheduler().runTask(this, runnable);
+            }
+        };
+        var service = realtimeService;
+        var lookup = new net.knightsandkings.knk.paper.regions.WorldGuardShapeLookup();
+        net.knightsandkings.knk.paper.realtime.RegionQueryRealtimeSync.geometry(main, lookup, service::send, getLogger())
+            .register(service.dispatcher());
+        net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsModule.registerSiteCheck(
+            net.knightsandkings.knk.paper.siege.weapons.SiegeWeaponsSettings.from(getConfig()), service.dispatcher(), main,
+            lookup, world -> {
+                org.bukkit.World w = org.bukkit.Bukkit.getWorld(world);
+                return w == null ? null : new net.knightsandkings.knk.paper.siege.weapons.BukkitBlockProbe(w);
+            }, service::send, getLogger());
     }
 
     /**

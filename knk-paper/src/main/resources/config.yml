@@ -437,9 +437,10 @@ siege:
   # Siege weapons (knk-workspace docs/specs/siege-minigame/SIEGE_WEAPONS.md, PandiO/knk-workspace#354). Off by
   # default: with false nothing of the feature is registered and Siege matches and world tasks behave as before.
   weapons:
-    # true: the weapon spot form's world task (type SiegeWeaponSpot, claimed with /knk task <code>) reads a
-    # WorldEdit selection or a WorldGuard region and fills the form (phase 2, #783/#799). Later phases add placement
-    # and firing behind the same switch.
+    # true: this server answers the API's weapon spot site check over the game hub (floor solid, space clear, on the
+    # spot's WorldGuard region; #988), which the spot form shows as a warning. A spot is drawn with the normal region
+    # world task and its size class comes from the generic region query, both without this switch. Later phases add
+    # placement and firing behind the same switch.
     enabled: false
   # Siege points (knk-workspace docs/specs/siege-shop/DESIGN.md § 5.1-5.2, PandiO/knk-workspace#866): a per-match
   # balance earned in PvP Siege from kills (with a capped streak multiplier), assists, deaths, gate damage, capture
