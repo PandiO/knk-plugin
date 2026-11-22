@@ -97,6 +97,16 @@ public enum ManagedRegionKind {
         return fromDomainType(domainType);
     }
 
+    /**
+     * PandiO/knk-workspace#991: the kind a region renamed for a new domain of {@code domainType} is set up as, the same as
+     * the startup repair gives it: {@link #fromDomainType(String, boolean)}, except that {@link #CROWN_LAND} is managed
+     * only with {@code productionKinds} (the plugin's {@code production.enabled}), because the repair lists crown land
+     * only then (#689, A21). Empty: leave the region to the repair.
+     */
+    public static Optional<ManagedRegionKind> forNewRegion(String domainType, boolean productionKinds) {
+        return fromDomainType(domainType, productionKinds).filter(kind -> productionKinds || kind != CROWN_LAND);
+    }
+
     /** Parses a kind name from config ({@code resource_production}, {@code Resource-Production}, ...). */
     public static Optional<ManagedRegionKind> parse(String name) {
         if (name == null || name.isBlank()) {

@@ -95,9 +95,11 @@ public class ManagedRegionsBootstrap {
 
     /** KNG-112: as above, for the region in {@code worldName} (null: whichever loaded world has it). */
     public void finalizeNewRegion(String regionId, String domainType, String parentRegionId, String worldName) {
-        ManagedRegionKind kind = ManagedRegionKind.fromDomainType(domainType, production).orElse(null);
+        // PandiO/knk-workspace#991: the same kind as the repair, so crown land is left alone without production.enabled
+        ManagedRegionKind kind = ManagedRegionKind.forNewRegion(domainType, production).orElse(null);
         if (kind == null) {
-            LOGGER.fine("[KnK Regions] " + regionId + " renamed without a domain type; the next repair will set it up");
+            LOGGER.fine("[KnK Regions] " + regionId + " renamed without a managed domain type (" + domainType
+                    + "); the next repair will set it up");
             return;
         }
         RepairReport report = reconciler.reconcileOne(
