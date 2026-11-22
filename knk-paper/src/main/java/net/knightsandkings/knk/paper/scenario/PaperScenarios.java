@@ -179,6 +179,8 @@ public final class PaperScenarios {
             // its scene moves (PandiO/knk-workspace#958), so new scenarios go after the NPC replays.
             .register(new LandmarkRegionRenameScenario())
             .register(new LandmarkRegionReplaceScenario())
-            .register(new ProductionAreaRegionRenameScenario());
+            .register(new ProductionAreaRegionRenameScenario())
+            // Landmarks as a Domain subtype (PandiO/knk-workspace#985, A13): last, after the NPC replays (#958)
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.LandmarkManagedRegionScenario());
     }
 }
