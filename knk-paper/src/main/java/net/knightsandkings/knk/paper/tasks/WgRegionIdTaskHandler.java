@@ -392,7 +392,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                     player.sendMessage("§7Completing task...");
                     
                     // Complete task via API
-                    completeTask(player, context, tempRegionId, world.getName());
+                    completeTask(player, context, tempRegionId, world.getName(), bounds(region));
                 } else {
                     player.sendMessage("§c[WorldTask] Failed to access WorldGuard region manager.");
                 }
@@ -470,7 +470,7 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 WorldEdit.getInstance().getSessionManager().remove(BukkitAdapter.adapt(player));
                 
                 // Complete task via API
-                completeTask(player, context, regionName, world.getName());
+                completeTask(player, context, regionName, world.getName(), bounds(region));
                 
             } catch (Exception e) {
                 player.sendMessage("§c[WorldTask] Error selecting region: " + e.getMessage());
@@ -508,19 +508,8 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
     /**
      * Complete the task via API
      */
-    private void completeTask(Player player, TaskContext context, String regionId, String worldName) {
-        // Build output JSON
-        JsonObject output = new JsonObject();
-        output.addProperty("fieldName", FIELD_NAME);
-        output.addProperty("regionId", regionId);
-        output.addProperty("createdAt", System.currentTimeMillis());
-        output.addProperty("worldName", worldName);
-        
-        if (context.parentRegionId != null) {
-            output.addProperty("parentRegionId", context.parentRegionId);
-        }
-        
-        String outputJson = output.toString();
+    private void completeTask(Player player, TaskContext context, String regionId, String worldName, int[] bounds) {
+        String outputJson = outputJson(regionId, worldName, context.parentRegionId, System.currentTimeMillis(), bounds);
 
         // Complete the task via API
         worldTasksApi.complete(context.taskId, outputJson)
@@ -549,6 +538,42 @@ public class WgRegionIdTaskHandler implements IWorldTaskHandler {
                 return null;
             });
     }
+    /**
+     * The task's output: the region id, its world, the parent region asked for, and (PandiO/knk-workspace#951, option 2)
+     * the region's block bounding box as {@code bounds} {@code {minX, minY, minZ, maxX, maxY, maxZ}} (inclusive), so a
+     * form can fill empty bounds from the result of a freshly drawn region (a production area's Region shape) without
+     * a stored outline. {@code bounds} is left out when not known.
+     */
+    static String outputJson(String regionId, String worldName, String parentRegionId, long createdAt, int[] bounds) {
+        JsonObject output = new JsonObject();
+        output.addProperty("fieldName", FIELD_NAME);
+        output.addProperty("regionId", regionId);
+        output.addProperty("createdAt", createdAt);
+        output.addProperty("worldName", worldName);
+        if (parentRegionId != null) {
+            output.addProperty("parentRegionId", parentRegionId);
+        }
+        if (bounds != null && bounds.length == 6) {
+            JsonObject box = new JsonObject();
+            String[] names = {"minX", "minY", "minZ", "maxX", "maxY", "maxZ"};
+            for (int i = 0; i < 6; i++) {
+                box.addProperty(names[i], bounds[i]);
+            }
+            output.add("bounds", box);
+        }
+        return output.toString();
+    }
+
+    /** {@code region}'s block bounding box {@code {minX, minY, minZ, maxX, maxY, maxZ}}; null without a region. */
+    static int[] bounds(ProtectedRegion region) {
+        if (region == null) {
+            return null;
+        }
+        com.sk89q.worldedit.math.BlockVector3 min = region.getMinimumPoint();
+        com.sk89q.worldedit.math.BlockVector3 max = region.getMaximumPoint();
+        return new int[] {min.x(), min.y(), min.z(), max.x(), max.y(), max.z()};
+    }
+
     /**
      * Check if a WorldGuard region is completely inside another WorldGuard region.
      * Supports cuboid, polygon2d and polygon3d (polyhedral) regions.
