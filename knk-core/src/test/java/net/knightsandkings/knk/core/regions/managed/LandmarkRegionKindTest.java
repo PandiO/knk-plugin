@@ -45,6 +45,8 @@ class LandmarkRegionKindTest {
         assertEquals(ManagedRegionKind.LANDMARK, ManagedRegionKind.fromDomainType("Landmark").orElseThrow());
         assertEquals(ManagedRegionKind.LANDMARK, ManagedRegionKind.fromDomainType("landmark", true).orElseThrow());
         assertEquals(ManagedRegionKind.LANDMARK, ManagedRegionKind.parse("LANDMARK").orElseThrow());
+        assertEquals(ManagedRegionKind.LANDMARK, ManagedRegionKind.forNewRegion("Landmark", false).orElseThrow(),
+                "a freshly drawn landmark region is set up as LANDMARK, not as a structure (#123's creation path)");
         assertEquals(30, ManagedRegionKind.LANDMARK.floorPriority());
         assertFalse(ManagedRegionKind.LANDMARK.isStructureTier(), "its parent need not be a district");
         ManagedRegionPolicy policy = new ManagedRegionPolicy();
