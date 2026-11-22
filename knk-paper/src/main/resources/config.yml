@@ -799,9 +799,10 @@ navigation:
   # (a target within max-snap-distance, and the last leg after a road's end) follows a path a player
   # can walk instead of a straight line through terrain. No path found -> the straight line.
   # Trail-quality pass (off-road navigation phase 6, #710): walk paths keep wall-clearance (walk.clearance-cost),
-  # are shaped off the main thread and drawn with checked curves (walk.curve). false = walk paths, the search and the
-  # trail exactly as before. Keep false until the live test signs it off
-  guidance-v2: false
+  # are shaped off the main thread and drawn with checked curves (walk.curve); trail particles on fixed anchors and a
+  # route cursor that follows the player back (phase 6.2, #711). On by default since #990 (2026-11-22, after the live
+  # tests). false = walk paths, the search and the trail exactly as before
+  guidance-v2: true
   # Blocks between a walk trail's particles (0.5..16; 2.0 since F3, the developer's choice of 2026-11-19; 3.0 before). With guidance-v2 (phase 6.2, #711) the
   # fixed anchors of the trail; since F2 (#771 item 3) also the spacing of the walk trail with guidance-v2 off. With
   # guidance-v2 only: how far along the route the cursor may move in one tick before only a player who left

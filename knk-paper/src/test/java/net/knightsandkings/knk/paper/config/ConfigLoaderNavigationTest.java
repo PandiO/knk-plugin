@@ -91,16 +91,34 @@ class ConfigLoaderNavigationTest {
     }
 
     @Test
-    void guidanceV2IsOffInConfigYmlAndItsWalkKeysHaveTheDesignDefaults() throws Exception {
-        // off-road navigation phase 6.1 (#710, DESIGN § 7.6): the flag, off; the walk keys it uses
+    void guidanceV2IsOnInConfigYmlAndItsWalkKeysHaveTheDesignDefaults() throws Exception {
+        // off-road navigation phase 6.1 (#710, DESIGN § 7.6): the flag, on since PandiO/knk-workspace#990; the walk
+        // keys it uses
         YamlConfiguration yaml = bundledConfig();
         assertTrue(yaml.contains("navigation.guidance-v2"), "config.yml names the flag");
         NavigationConfig navigation = ConfigLoader.load(yaml).navigation();
-        assertFalse(navigation.guidanceV2());
-        assertFalse(NavigationConfig.defaults().guidanceV2());
+        assertTrue(navigation.guidanceV2());
+        assertTrue(NavigationConfig.defaults().guidanceV2());
+        assertTrue(NavigationConfig.DEFAULT_GUIDANCE_V2);
         assertEquals(5.0, navigation.walk().clearanceCost());
         assertEquals(0.8, navigation.walk().wallClearance());
         assertTrue(navigation.walk().curve());
+    }
+
+    @Test
+    void aServerConfigWithoutTheFlagGetsItOnAndAWrittenFalseKeepsItOff() {
+        // #990: saveDefaultConfig() never adds new keys to an existing config.yml, so a server without the line
+        // reads the code default (on); a server that wrote guidance-v2: false keeps today's trail
+        YamlConfiguration withoutTheKey = new YamlConfiguration();
+        withoutTheKey.set("navigation.enabled", true);
+        assertTrue(ConfigLoader.loadNavigation(withoutTheKey.getConfigurationSection("navigation")).guidanceV2());
+        assertTrue(ConfigLoader.loadNavigation(null).guidanceV2(), "no navigation section: the defaults");
+
+        YamlConfiguration writtenOff = new YamlConfiguration();
+        writtenOff.set("navigation.guidance-v2", false);
+        NavigationConfig off = ConfigLoader.loadNavigation(writtenOff.getConfigurationSection("navigation"));
+        assertFalse(off.guidanceV2());
+        assertEquals(null, off.cursorParameters(), "guidance-v2 off: the session keeps no cursor");
     }
 
     @Test
@@ -251,7 +269,8 @@ class ConfigLoaderNavigationTest {
         assertEquals(12.0, loaded.cursorJump());
         assertEquals(2.0, NavigationConfig.defaults().trail().legSpacing());
         assertEquals(12.0, NavigationConfig.defaults().cursorJump());
-        assertEquals(null, loaded.cursorParameters(), "guidance-v2 off: the session keeps no cursor");
+        assertEquals(12.0, loaded.cursorParameters().cursorJump(),
+            "guidance-v2 on by default (#990): the session keeps a cursor");
 
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("navigation.guidance-v2", true);

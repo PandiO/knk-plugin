@@ -53,7 +53,8 @@ import net.knightsandkings.knk.core.roads.walk.WalkPathShaper;
  * @param walk               last-mile walkable paths (KNG-51, {@code navigation.walk.*})
  * @param guidanceV2         {@code navigation.guidance-v2} (off-road navigation phase 6, PandiO/knk-workspace#710): the
  *                           trail-quality pass - walk paths with the clearance cost, shaped and drawn as checked curves.
- *                           Default false: walk paths, trails and the search exactly as before (DESIGN § 7.6, A16)
+ *                           Default {@link #DEFAULT_GUIDANCE_V2} (true since PandiO/knk-workspace#990); false: walk paths,
+ *                           trails and the search exactly as before (DESIGN § 7.6, A16)
  * @param cursorJump         {@code navigation.cursor-jump} (phase 6.2, PandiO/knk-workspace#711; with {@code guidance-v2}
  *                           only): how far along the route the cursor may move in one tick before only a player who left
  *                           the previous stretch makes it jump (loops and switchbacks, DESIGN § 7.5.6). Default 12
@@ -665,9 +666,17 @@ public record NavigationConfig(
             maxSessionMinutes, sprintSpeed, survey, builder, null);
     }
 
+    /**
+     * The shipped default of {@code navigation.guidance-v2}: on since PandiO/knk-workspace#990 (developer decision
+     * 2026-11-22, after the live tests of phases 6.1 and 6.2). The constructors without the flag (callers from before
+     * #710) still mean off.
+     */
+    public static final boolean DEFAULT_GUIDANCE_V2 = true;
+
     public static NavigationConfig defaults() {
         return new NavigationConfig(true, RouterParameters.defaultClassCost(), DEFAULT_OVERLAY_MATERIALS, true,
-            48, 4, TrailConfig.defaults(), 8, 40, 4, 30, 5.6, SurveyConfig.defaults(), BuilderConfig.defaults());
+            48, 4, TrailConfig.defaults(), 8, 40, 4, 30, 5.6, SurveyConfig.defaults(), BuilderConfig.defaults())
+            .withGuidanceV2(DEFAULT_GUIDANCE_V2);
     }
 
     /** This config with another {@code walk:} block. */
