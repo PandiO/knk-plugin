@@ -272,6 +272,9 @@ public class KnKPlugin extends JavaPlugin {
     // Road navigation (KNG-27, Phase 3). regionDomainResolver / regionTracker were locals of onEnable
     // before; the road builder (domain tagging) and navigation read them, so they are fields now (R7, R8).
     private RegionDomainResolver regionDomainResolver;
+    /** PandiO/knk-workspace#985 (LD15): which landmarks show enter and leave messages. */
+    private final net.knightsandkings.knk.core.landmarks.LandmarkMessageSettings landmarkMessageSettings =
+        new net.knightsandkings.knk.core.landmarks.LandmarkMessageSettings();
     private WorldGuardRegionTracker regionTracker;
     private net.knightsandkings.knk.core.dataaccess.LocationsDataAccess locationsDataAccess;
     private net.knightsandkings.knk.core.dataaccess.StreetsDataAccess streetsDataAccess;
@@ -660,8 +663,9 @@ public class KnKPlugin extends JavaPlugin {
             // Managed WorldGuard regions: parent + priority + category flags for Town/District/Structure/Gate regions,
             // applied when a world task's region gets its final name and repaired at every startup
             // (docs/architecture/managed-worldguard-regions.md).
+            // PandiO/knk-workspace#985: and the landmarks' own regions (LANDMARK kind, LD13)
             this.managedRegions = new ManagedRegionsBootstrap(this, ManagedRegionsBootstrap.readConfig(this),
-                townsQueryApi, districtsQueryApi, structuresQueryApi, domainCatalogQueryApi);
+                townsQueryApi, districtsQueryApi, structuresQueryApi, domainCatalogQueryApi, apiClient.getLandmarksApi());
             // KNG-56: every domain's AllowEntry/AllowExit onto its region as flags WorldGuard saves, so the rules hold
             // while the API is down. Startup + periodic sync; a newly finalized region is synced right away.
             this.domainAccessSync = new net.knightsandkings.knk.paper.regions.access.DomainAccessFlagSync(this,
@@ -1273,7 +1277,7 @@ public class KnKPlugin extends JavaPlugin {
             // into it, so a gate created/edited after server start doesn't need a manual
             // /knk gate admin reload - see DistrictGateLoader.
             // Describe-only (accessChecks=false): WorldGuard enforces AllowEntry/AllowExit since KNG-56.
-            RegionTransitionService regionTransitionService = new SimpleRegionTransitionService(
+            SimpleRegionTransitionService regionTransitionService = new SimpleRegionTransitionService(
                 regionDomainResolver, gateControlPort,
                 enteredDomains -> enteredDomains.stream()
                     .filter(domain -> "District".equalsIgnoreCase(domain.domainType()))
@@ -1288,6 +1292,9 @@ public class KnKPlugin extends JavaPlugin {
                     }),
                 false
             );
+            // PandiO/knk-workspace#985 (LD15): a landmark's enter and leave messages only when it has them on
+            regionTransitionService.setLandmarkMessages(landmarkMessageSettings);
+            landmarkMessageSettings.refresh(apiClient.getLandmarksApi());
             
             // Wire tracker and listener
             this.regionTracker = new WorldGuardRegionTracker(
@@ -3254,6 +3261,22 @@ public class KnKPlugin extends JavaPlugin {
                 router.on(domainType, (id, key, op) -> regionDomainResolver.clearRegionCache());
             }
         }
+        // PandiO/knk-workspace#985 (A16, LD22): a Landmark change like the other domains' changes, plus the navigation
+        // model and the landmark message settings
+        net.knightsandkings.knk.paper.realtime.LandmarkRealtime.register(router, coalescer,
+            domainCatalogDataAccess == null ? null : domainCatalogDataAccess::invalidate,
+            domainCatalogDataAccess == null ? null : domainCatalogDataAccess::invalidateAll,
+            regionDomainResolver == null ? null : regionDomainResolver::clearRegionCache,
+            () -> {
+                if (navigationModel != null) {
+                    navigationModel.refreshNow();
+                }
+            },
+            () -> {
+                if (apiClient != null) {
+                    landmarkMessageSettings.refresh(apiClient.getLandmarksApi());
+                }
+            });
         byId(router, "ItemBlueprint", itemBlueprintsDataAccess == null ? null : itemBlueprintsDataAccess::invalidate,
             itemBlueprintsDataAccess == null ? null : itemBlueprintsDataAccess::invalidateAll);
         byId(router, "EnchantmentDefinition", enchantmentDefinitionsDataAccess == null ? null : enchantmentDefinitionsDataAccess::invalidate,

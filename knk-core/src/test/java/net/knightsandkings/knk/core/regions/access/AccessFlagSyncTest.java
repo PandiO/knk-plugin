@@ -184,6 +184,25 @@ class AccessFlagSyncTest {
         assertEquals(0, sync.run(List.of(garrison), store).updated());
     }
 
+    /**
+     * A10 (landmark-domain § 5 rule 7, #985): a landmark's own region and sub-regions get the access flags and
+     * {@code knk-domain-id} like any domain's; a point landmark (no region) is skipped.
+     */
+    @Test
+    void aLandmarksOwnRegionGetsTheAccessFlagsAndDomainId_APointIsSkipped() {
+        FakeStore store = new FakeStore().region("domain_41", AccessFlags.NONE).region("domain_41_sub_1", AccessFlags.NONE);
+        DomainAccessRule tower = new DomainAccessRule(41, "Tower", "domain_41", false, true, "Landmark", "world",
+            List.of("domain_41_sub_1"));
+        DomainAccessRule well = new DomainAccessRule(42, "Well", null, true, true, "Landmark", "world", List.of());
+
+        Report report = sync.run(List.of(tower, well), store);
+
+        AccessFlags expected = new AccessFlags(AccessState.DENY, AccessState.ALLOW, "Tower", "41");
+        assertEquals(expected, store.regions.get("domain_41"));
+        assertEquals(expected, store.regions.get("domain_41_sub_1"));
+        assertTrue(report.missingRegions().isEmpty());
+    }
+
     @Test
     void aStoreWithoutTheDomainIdFlagStaysIdempotent() {
         FakeStore store = new FakeStore() {

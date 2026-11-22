@@ -15,7 +15,10 @@ import net.knightsandkings.knk.core.regions.RegionDomainResolver.DomainSnapshot;
  *       for PvP; see {@link CombatSafezone}) keeps effect damage, so the fire and poison of a fight still hurt there;
  *       everywhere else in a domain it is stopped.</li>
  * </ol>
- * Any domain type counts (Town, District, Structure, Gate, ...). Siege matches are exempted by the caller. Bukkit-free.
+ * Any domain type counts (Town, District, Structure, Gate, ...) except a {@code Landmark} (landmark-domain DESIGN
+ * § 5 rule 5, LD03, LD12, PandiO/knk-workspace#985): a landmark never makes a spot free of effect damage and never
+ * turns it back on, so a landmark in the wilderness hurts as outside it and one in a town keeps the town's rule. Siege
+ * matches are exempted by the caller. Bukkit-free.
  */
 public final class DomainEffectDamage {
 
@@ -29,12 +32,17 @@ public final class DomainEffectDamage {
      * @return true when effect damage is stopped there
      */
     public static boolean isBlocked(Collection<DomainSnapshot> domains, Boolean effectFlag, Boolean pvpFlag) {
-        if (domains == null || domains.isEmpty()) {
+        if (domains == null || domains.stream().allMatch(DomainEffectDamage::isLandmark)) {
             return false;
         }
         if (effectFlag != null) {
             return !effectFlag;
         }
         return !Boolean.TRUE.equals(pvpFlag);
+    }
+
+    /** Whether {@code domain} is a landmark (its type {@code Landmark}, any case). */
+    static boolean isLandmark(DomainSnapshot domain) {
+        return domain != null && domain.domainType() != null && domain.domainType().trim().equalsIgnoreCase("Landmark");
     }
 }

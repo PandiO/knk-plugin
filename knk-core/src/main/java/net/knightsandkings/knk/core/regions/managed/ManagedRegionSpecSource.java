@@ -16,7 +16,10 @@ import net.knightsandkings.knk.core.ports.api.DomainCatalogQueryApi;
 import net.knightsandkings.knk.core.ports.api.StructuresQueryApi;
 import net.knightsandkings.knk.core.ports.api.TownsQueryApi;
 
-/** Loads every Town, District and Structure from the API (paged) and turns them into {@link DomainRegionSpecs}. */
+/**
+ * Loads every Town, District and Structure from the API (paged), and since PandiO/knk-workspace#985 the landmarks, and
+ * turns them into {@link DomainRegionSpecs}.
+ */
 public class ManagedRegionSpecSource {
 
     private static final int MAX_PAGES = 500;
@@ -32,6 +35,8 @@ public class ManagedRegionSpecSource {
      * ({@link DomainRegionSpecs#build(List, List, List, Map, boolean)}).
      */
     private final boolean includeCrownLand;
+    /** PandiO/knk-workspace#985 (LD13): the landmarks, whose own regions are LANDMARK regions; null: none. */
+    private final net.knightsandkings.knk.core.ports.api.LandmarksApi landmarks;
 
     /** @param domainCatalog optional: without it every Structure is a plain STRUCTURE (Gates not told apart). */
     public ManagedRegionSpecSource(TownsQueryApi towns, DistrictsQueryApi districts, StructuresQueryApi structures,
@@ -47,6 +52,18 @@ public class ManagedRegionSpecSource {
      */
     public ManagedRegionSpecSource(TownsQueryApi towns, DistrictsQueryApi districts, StructuresQueryApi structures,
                                    DomainCatalogQueryApi domainCatalog, int pageSize, boolean includeCrownLand) {
+        this(towns, districts, structures, domainCatalog, pageSize, includeCrownLand, null);
+    }
+
+    /**
+     * @param landmarks PandiO/knk-workspace#985 (LD13): {@code api/landmarks}, whose own regions are managed as
+     *                  {@link ManagedRegionKind#LANDMARK}; null leaves landmarks out. A failed read is a warning, not a
+     *                  failure: landmarks are leaves, so the rest of the hierarchy is still repaired.
+     */
+    public ManagedRegionSpecSource(TownsQueryApi towns, DistrictsQueryApi districts, StructuresQueryApi structures,
+                                   DomainCatalogQueryApi domainCatalog, int pageSize, boolean includeCrownLand,
+                                   net.knightsandkings.knk.core.ports.api.LandmarksApi landmarks) {
+        this.landmarks = landmarks;
         this.includeCrownLand = includeCrownLand;
         this.towns = towns;
         this.districts = districts;
@@ -81,19 +98,29 @@ public class ManagedRegionSpecSource {
                     return Map.<Integer, String>of();
                 });
 
-        return CompletableFuture.allOf(townsFuture, districtsFuture, structuresFuture, typesFuture).thenApply(ignored -> {
+        CompletableFuture<List<net.knightsandkings.knk.core.domain.landmarks.KnkLandmark>> landmarksFuture = landmarks == null
+                ? CompletableFuture.completedFuture(List.of())
+                : landmarks.list(null).exceptionally(error -> {
+                    extraWarnings.add("landmarks unavailable (" + rootMessage(error) + "); their regions are left as they are");
+                    return List.of();
+                });
+
+        return CompletableFuture.allOf(townsFuture, districtsFuture, structuresFuture, typesFuture, landmarksFuture)
+                .thenApply(ignored -> {
             DomainRegionSpecs.Result built = DomainRegionSpecs.build(
                     townsFuture.join(), districtsFuture.join(), structuresFuture.join(), typesFuture.join(), includeCrownLand);
             List<String> warnings = new ArrayList<>(built.warnings());
             warnings.addAll(extraWarnings);
-            if (crownLands.isEmpty()) {
-                return new DomainRegionSpecs.Result(built.specs(), built.skipped(), warnings);
-            }
-            DomainRegionSpecs.Result crown = DomainRegionSpecs.crownLands(crownLands);
             List<ManagedRegionSpec> specs = new ArrayList<>(built.specs());
-            specs.addAll(crown.specs());
             List<DomainRegionSpecs.Skipped> skipped = new ArrayList<>(built.skipped());
-            skipped.addAll(crown.skipped());
+            if (!crownLands.isEmpty()) {
+                DomainRegionSpecs.Result crown = DomainRegionSpecs.crownLands(crownLands);
+                specs.addAll(crown.specs());
+                skipped.addAll(crown.skipped());
+            }
+            DomainRegionSpecs.Result landmarkSpecs = DomainRegionSpecs.landmarks(landmarksFuture.join());
+            specs.addAll(landmarkSpecs.specs());
+            skipped.addAll(landmarkSpecs.skipped());
             return new DomainRegionSpecs.Result(specs, skipped, warnings);
         });
     }

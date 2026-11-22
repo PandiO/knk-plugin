@@ -9,7 +9,7 @@ import net.knightsandkings.knk.core.realtime.EntityChangeRouter;
 /**
  * PandiO/knk-workspace#533 and #593: a domain rule changed in the web app with realtime on reaches the NPC checks.
  * <p>
- * A change to a Town, District, Structure or DomainSubRegion arrives as {@code EntityChanged} (the region → domain map
+ * A change to a Town, District, Structure, DomainSubRegion or (since PandiO/knk-workspace#985) Landmark arrives as {@code EntityChanged} (the region → domain map
  * is cleared by its own handler) and, when it touches AllowEntry or AllowExit, also as {@code DomainAccessChanged}
  * (the WorldGuard flag sync). Neither told NPC navigation, and the NPC checks answer from that map, so a group walked
  * into a district whose entry had just been removed. Both now ask, coalesced into one run, for the {@code rewarm}:
@@ -21,7 +21,7 @@ public final class NavigationDomainChanges {
     /** The coalescer's key: changes within its delay share one re-warm. */
     public static final String KEY = "navigation region domains";
     /** The entity types whose change can change a region's entry or exit rule. */
-    public static final List<String> DOMAIN_TYPES = List.of("Town", "District", "Structure", "DomainSubRegion");
+    public static final List<String> DOMAIN_TYPES = List.of("Town", "District", "Structure", "DomainSubRegion", "Landmark");
 
     private final Coalescer coalescer;
     private final Runnable rewarm;

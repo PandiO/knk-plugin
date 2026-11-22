@@ -34,6 +34,12 @@ public enum ManagedRegionKind {
     RESOURCE_PRODUCTION(30),
     /** v3-only: {@code GateStructure}. v1 had no gate region category; hierarchy only. */
     GATE(30),
+    /**
+     * v3-only: a {@code Landmark}'s own region (landmark-domain DESIGN LD13, PandiO/knk-workspace#985): WorldGuard parent
+     * = the parent domain's main region (top level without one), priority parent + 10 with the structure tier's floor,
+     * no category flags, so it inherits its parent's flags. Not a Structure-tier kind.
+     */
+    LANDMARK(30),
     /** v1 {@code room_N}: a sub-unit inside a house, so it sits above the structure tier. */
     ROOM(40),
     /** v1 {@code arena_N} base region (no v3 domain entity: config-declared only). */
@@ -73,6 +79,7 @@ public enum ManagedRegionKind {
             case "GATE", "GATESTRUCTURE" -> GATE;
             case "HOUSE" -> HOUSE;
             case "PROPERTY", "RESOURCEPROPERTY" -> PROPERTY;
+            case "LANDMARK" -> LANDMARK;
             default -> STRUCTURE;
         });
     }
