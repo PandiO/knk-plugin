@@ -41,7 +41,7 @@ class LandmarkLinkNodesTest {
     }
 
     private static Landmark at(int id, String world, double x, double y, double z) {
-        return new Landmark(id, "L" + id, world, x, y, z, Landmark.Extent.NONE, null, null, null, null, true);
+        return new Landmark(id, "L" + id, world, x, y, z, List.of(), null, null, true);
     }
 
     @Test

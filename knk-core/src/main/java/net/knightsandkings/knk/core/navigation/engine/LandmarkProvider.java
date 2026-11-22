@@ -20,9 +20,11 @@ import net.knightsandkings.knk.core.navigation.model.NavigationModel;
  * <p>Each landmark with {@code NavigationEnabled} gives one candidate: key {@code landmark:<id>} (the id, stable across
  * renames, so a running session survives a rename and ends when the landmark is deleted or disabled), label the name,
  * type word {@code landmark}, id for {@code landmark:#<id>}, detail {@code in <domain>} when linked, source
- * {@value #ID}. The place follows the extent: a Region extent is the region ({@link Candidate.Place.Region}, arrival is
- * WorldGuard containment), a Radius extent the pin with that arrival radius, none the pin within
- * {@code arrive-distance}. Landmarks of every world are offered; the engine lists another world's apart (E11), and the
+ * {@value #ID}. The place follows the area (landmark-domain DESIGN § 7.1 item 4, LD22, PandiO/knk-workspace#985): a
+ * landmark with regions is its main region with the area's other regions ({@link Candidate.Place.Region}, arrival is
+ * WorldGuard containment in any of them, the routing goal the main region), a point-only landmark the pin within
+ * {@code arrive-distance}. The navigation catalogue leaves {@code Landmark} domains out, so each landmark is one
+ * destination. Landmarks of every world are offered; the engine lists another world's apart (E11), and the
  * exclusive scopes above World hide them (E2). Answers from the model only (§ 7.1); the list is built once per model.
  */
 public final class LandmarkProvider implements Provider {
@@ -83,12 +85,14 @@ public final class LandmarkProvider implements Provider {
             place(landmark));
     }
 
-    /** The place of {@code landmark}'s extent. */
+    /**
+     * The place of {@code landmark}'s area (LD22): its main region with the area's other regions
+     * ({@link Candidate.Place.Region#isArea()}), or the pin for a point-only landmark.
+     */
     public static Candidate.Place place(Landmark landmark) {
         return switch (LandmarkExtent.of(landmark)) {
-            case LandmarkExtent.Region region -> new Candidate.Place.Region(landmark.world(), region.regionId());
-            case LandmarkExtent.Cylinder cylinder ->
-                new Candidate.Place.Point(landmark.world(), landmark.x(), landmark.y(), landmark.z(), cylinder.radius());
+            case LandmarkExtent.Area area ->
+                new Candidate.Place.Region(landmark.world(), area.mainRegionId(), area.otherRegionIds());
             case LandmarkExtent.Point point -> new Candidate.Place.Point(landmark.world(), landmark.x(), landmark.y(), landmark.z());
         };
     }

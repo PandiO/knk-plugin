@@ -24,6 +24,7 @@ import org.mockbukkit.mockbukkit.command.ConsoleCommandSenderMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
 import net.knightsandkings.knk.core.domain.landmarks.KnkLandmark;
+import net.knightsandkings.knk.core.domain.landmarks.LandmarkAreaKind;
 import net.knightsandkings.knk.core.domain.landmarks.LandmarkWrite;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.navigation.model.DomainPlace;
@@ -79,7 +80,7 @@ class LandmarkAdminCommandTest {
                 return CompletableFuture.failedFuture(new CompletionException(refuse));
             }
             KnkLandmark saved = new KnkLandmark(nextId++, w.name(), 300, w.pin().world(), w.pin().x(), w.pin().y(), w.pin().z(),
-                0f, 0f, w.domainId(), null, null, w.extent(), w.regionId(), w.radius(), 1.0, true);
+                0f, 0f, w.parentDomainId(), null, null, null, w.areaKind(), w.wgRegionId(), List.of(), false, 1.0, true);
             rows.add(saved);
             return CompletableFuture.completedFuture(saved);
         }
@@ -89,8 +90,8 @@ class LandmarkAdminCommandTest {
             writes.add(w);
             KnkLandmark old = rows.stream().filter(l -> l.id() == id).findFirst().orElseThrow();
             KnkLandmark saved = new KnkLandmark(id, w.name(), old.locationId(), old.world(),
-                w.pin() == null ? old.x() : w.pin().x(), old.y(), old.z(), 0f, 0f, w.domainId(), null, null,
-                old.extent(), old.regionId(), old.radius(), 1.0, true);
+                w.pin() == null ? old.x() : w.pin().x(), old.y(), old.z(), 0f, 0f, w.parentDomainId(), null, null, null,
+                old.areaKind(), old.wgRegionId(), old.subRegionIds(), old.showEnterLeaveMessages(), 1.0, true);
             rows.set(rows.indexOf(old), saved);
             return CompletableFuture.completedFuture(saved);
         }
@@ -133,17 +134,18 @@ class LandmarkAdminCommandTest {
 
     private KnkLandmark landmark(int id, String name, String world, Integer domainId) {
         return new KnkLandmark(id, name, 30 + id, world, 1, 64, 1, 0f, 0f, domainId, domainId == null ? null : "Keep",
-            domainId == null ? null : "Structure", Landmark.Extent.NONE, null, null, 1.0, true);
+            domainId == null ? null : "Structure", domainId == null ? null : "domain_" + domainId, LandmarkAreaKind.NONE, null,
+            List.of(), false, 1.0, true);
     }
 
     @Test
-    void createTakesTheNameTheExtentAndThePlayersPosition() {
+    void createTakesTheNameTheRegionAndThePlayersPosition() {
         run("create Throne room region keep_throne");
 
         LandmarkWrite w = api.writes.get(0);
         assertEquals("Throne room", w.name());
-        assertEquals(Landmark.Extent.REGION, w.extent());
-        assertEquals("keep_throne", w.regionId());
+        assertEquals(LandmarkAreaKind.OWN_REGION, w.areaKind());
+        assertEquals("keep_throne", w.wgRegionId());
         assertEquals("world", w.pin().world());
         assertEquals(100.5, w.pin().x());
         assertNull(w.pin().locationId(), "a new Location");
@@ -151,15 +153,18 @@ class LandmarkAdminCommandTest {
         assertTrue(messages().get(0).contains("Created landmark Throne room (#41) region keep_throne"));
     }
 
+    /** A15 (landmark-domain LD08, #985): the radius form is refused with the usage line; nothing reaches the API. */
     @Test
-    void createWithARadius_andABadRadiusIsRefusedBeforeTheApi() {
+    void createWithARadius_IsRefusedWithTheUsageLine() {
         run("create Old well radius 5");
-        assertEquals(5.0, api.writes.get(0).radius());
-        messages();
+        assertTrue(api.writes.isEmpty());
+        List<String> lines = messages();
+        assertEquals(net.knightsandkings.knk.core.landmarks.LandmarkCommandArgs.RADIUS_GONE, lines.get(0));
+        assertTrue(lines.get(1).startsWith("Usage: /knk landmark create <name> [region <id>]"), lines.toString());
+        assertTrue(!lines.get(1).contains("radius"), "the usage line has no radius form");
 
-        run("create Old well radius 600");
-        assertEquals(1, api.writes.size());
-        assertTrue(messages().get(0).contains("at most 512"));
+        run("create Old well");
+        assertEquals(LandmarkAreaKind.NONE, api.writes.get(0).areaKind(), "a point");
     }
 
     @Test
@@ -199,15 +204,15 @@ class LandmarkAdminCommandTest {
         LandmarkWrite w = api.writes.get(0);
         assertEquals(31, w.pin().locationId(), "the landmark's own Location");
         assertEquals(100.5, w.pin().x());
-        assertEquals(9, w.domainId(), "kept: the API takes domainId as sent");
-        assertNull(w.extent(), "kept");
+        assertEquals(9, w.parentDomainId(), "kept: the API takes parentDomainId as sent");
+        assertNull(w.areaKind(), "kept");
     }
 
     @Test
     void linkTakesADomainByNameOrId_andAnAmbiguousNameAsksForTheId() {
         api.rows.add(landmark(1, "Throne room", "world", null));
         run("link Throne room Keep");
-        assertEquals(9, api.writes.get(0).domainId());
+        assertEquals(9, api.writes.get(0).parentDomainId());
         assertTrue(messages().get(0).contains("Linked Throne room to Keep (Structure)"));
 
         run("link Throne room Market");
@@ -215,14 +220,50 @@ class LandmarkAdminCommandTest {
         assertTrue(messages().get(0).contains("District #10, Structure #11"));
 
         run("link #1 #11");
-        assertEquals(11, api.writes.get(1).domainId());
+        assertEquals(11, api.writes.get(1).parentDomainId());
+    }
+
+    /** A15 (#985): link sets the parent and never offers or takes the landmark itself (a landmark is a domain). */
+    @Test
+    void linkNeverTakesOrOffersTheLandmarkItself_ButAnotherLandmarkCanBeTheParent() {
+        model = new NavigationModel(Instant.now(),
+            List.of(new DomainPlace(9, "Keep", "Structure", null, null, "domain_9", "world", null, true),
+                new DomainPlace(1, "Tower", "Landmark", null, null, "domain_1", "world", null, true),
+                new DomainPlace(2, "Palace", "Landmark", null, null, "domain_2", "world", null, true)),
+            List.of(), null, List.of(new Landmark(1, "Tower", "world", 0, 0, 0, List.of("domain_1"), null, null, true),
+                new Landmark(2, "Palace", "world", 0, 0, 0, List.of("domain_2"), null, null, true)));
+        api.rows.add(landmark(1, "Tower", "world", null));
+
+        assertEquals(List.of("Keep", "Palace"), command.complete(staff, new String[] {"link", "Tower", ""}),
+            "the landmark itself is not offered");
+        run("link Tower #1");
+        assertTrue(api.writes.isEmpty());
+        assertEquals("A landmark can't be its own parent.", messages().get(0));
+
+        run("link Tower Palace");
+        assertEquals(2, api.writes.get(0).parentDomainId(), "another landmark as parent (LD23)");
+    }
+
+    @Test
+    void showTellsTheAreaAndTheParent() {
+        api.rows.add(new KnkLandmark(5, "Tower", 35, "world", 1, 64, 1, 0f, 0f, 9, "Rivia", "Town", "town_9",
+            LandmarkAreaKind.OWN_REGION, "domain_5", List.of("domain_5_sub_1"), true, 1.0, true));
+        api.rows.add(new KnkLandmark(6, "Cross", 36, "world", 1, 64, 1, 0f, 0f, 9, "Rivia", "Town", "town_9",
+            LandmarkAreaKind.LINKED_DOMAIN, null, List.of(), false, 1.0, true));
+        run("show Tower");
+        List<String> lines = messages();
+        assertTrue(lines.get(1).contains("region domain_5 and 1 sub-region"), lines.toString());
+        assertTrue(lines.get(2).contains("Parent: Rivia (Town) #9"), lines.toString());
+        assertTrue(lines.get(3).contains("Enter and leave messages: on"), lines.toString());
+        run("show Cross");
+        assertTrue(messages().get(1).contains("the area of Rivia"));
     }
 
     @Test
     void unlinkSendsNoDomain_deleteDeletes() {
         api.rows.add(landmark(1, "Throne room", "world", 9));
         run("unlink Throne room");
-        assertNull(api.writes.get(0).domainId());
+        assertNull(api.writes.get(0).parentDomainId());
         run("delete Throne room");
         assertEquals(List.of(1), api.deleted);
         assertTrue(messages().get(1).contains("Deleted landmark Throne room (#1)"));
@@ -250,13 +291,13 @@ class LandmarkAdminCommandTest {
     @Test
     void completesActionsLandmarksAndDomains() {
         model = new NavigationModel(Instant.now(), model.domains(), List.of(), null,
-            List.of(new Landmark(1, "Throne room", "world", 0, 0, 0, Landmark.Extent.NONE, null, null, null, null, true)));
+            List.of(new Landmark(1, "Throne room", "world", 0, 0, 0, List.of(), null, null, true)));
         assertEquals(List.of("create", "list", "show", "move", "delete", "link", "unlink"),
             command.complete(staff, new String[] {""}));
         assertEquals(List.of("Throne"), command.complete(staff, new String[] {"show", "t"}));
         assertEquals(List.of("Keep"), command.complete(staff, new String[] {"link", "Throne", "room", "K"}));
-        assertEquals(List.of("radius", "region"), command.complete(staff, new String[] {"create", "Hall", "r"}).stream()
-            .sorted().toList());
+        assertEquals(List.of("region"), command.complete(staff, new String[] {"create", "Hall", "r"}),
+            "no radius keyword (LD08)");
     }
 
     @Test

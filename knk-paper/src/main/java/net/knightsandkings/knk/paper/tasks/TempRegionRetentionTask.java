@@ -6,9 +6,7 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import net.knightsandkings.knk.core.exception.ApiException;
 import net.knightsandkings.knk.core.lootbox.KnkLootboxArea;
-import net.knightsandkings.knk.core.domain.landmarks.KnkLandmark;
 import net.knightsandkings.knk.core.ports.api.DomainsQueryApi;
-import net.knightsandkings.knk.core.ports.api.LandmarksApi;
 import net.knightsandkings.knk.core.ports.api.LootboxesQueryApi;
 import net.knightsandkings.knk.core.ports.api.ProductionSurveyApi;
 import net.knightsandkings.knk.core.production.survey.AreaSpec;
@@ -49,9 +47,9 @@ import java.util.logging.Logger;
  * with the same fresh API lookup ({@link TempRegionCleanupPolicy#decideOrphanedSubRegion}).
  *
  * PandiO/knk-workspace#34: the fresh lookup also asks the lootbox spawn areas ({@link #regionUsageVia}), so an area
- * whose drawn region could not be renamed to {@code lootbox_area_<id>} keeps it. PandiO/knk-workspace#945: and the
- * landmarks ({@link #landmarkUsageVia}), for a landmark region that could not be renamed to {@code landmark_<id>}, and
- * #946 the production areas ({@link #productionAreaUsageVia}, {@code production_area_<id>}).
+ * whose drawn region could not be renamed to {@code lootbox_area_<id>} keeps it, and #946 the production areas
+ * ({@link #productionAreaUsageVia}, {@code production_area_<id>}). The landmark lookup of #945 ({@code landmark_<id>})
+ * is gone since PandiO/knk-workspace#985 (LD14): a landmark is a domain, so the domain lookup covers its regions.
  *
  * PandiO/knk-workspace#269: with {@link #setReleasePass} it also runs {@link TempRegionReleasePass} every few minutes,
  * which removes the temp regions the API released (abandoned drafts, tasks closed without a result) without waiting for
@@ -141,15 +139,6 @@ public class TempRegionRetentionTask {
     }
 
     /**
-     * PandiO/knk-workspace#945: whether a landmark's extent is the region, from {@code GET api/landmarks} (every landmark,
-     * whatever {@code navigation.landmarks} says on this server). A landmark whose drawn region could not be renamed to
-     * {@code landmark_<id>} keeps it. A 404 is an API from before landmarks (no such route), which has none.
-     */
-    public static Function<String, Usage> landmarkUsageVia(LandmarksApi landmarksApi) {
-        return ownerUsageVia("landmark", landmarksApi == null ? null : () -> landmarksApi.list(null), KnkLandmark::regionId, true);
-    }
-
-    /**
      * PandiO/knk-workspace#946: whether a production area's region is the region, from {@code GET api/ProductionAreas}
      * (every area; it answers while {@code Production:Enabled} is off too). An area whose drawn region could not be renamed
      * to {@code production_area_<id>} keeps it, so its survey keeps finding it. A 404 is an API from before production
@@ -164,8 +153,8 @@ public class TempRegionRetentionTask {
     static final long OWNER_LIST_REUSE_MILLIS = 60_000;
 
     /**
-     * #34, #945, #946: the fresh lookup over one kind of owner that lists all its rows in one call (lootbox areas,
-     * landmarks, production areas): in use when a row's region is {@code regionId} (ignoring case), unused when none is,
+     * #34, #946: the fresh lookup over one kind of owner that lists all its rows in one call (lootbox areas,
+     * production areas): in use when a row's region is {@code regionId} (ignoring case), unused when none is,
      * unknown when the list can't be read (the region is kept). The list is fetched at most once a minute
      * ({@link #OWNER_LIST_REUSE_MILLIS}): the cleanup asks per region, and those endpoints share the API's per-IP rate
      * limits with the overview map. A region the cleanup or the release pass may remove is old or already released by
@@ -233,14 +222,15 @@ public class TempRegionRetentionTask {
     }
 
     /**
-     * #34: the fresh lookup the cleanup makes before deleting: a domain ({@link #domainUsageVia}), a lootbox spawn area
-     * ({@link #lootboxAreaUsageVia}), a landmark ({@link #landmarkUsageVia}, #945) or a production area
-     * ({@link #productionAreaUsageVia}, #946) using the region keeps it; deleted only when all of them answer unused.
+     * #34: the fresh lookup the cleanup makes before deleting: a domain ({@link #domainUsageVia}; since
+     * PandiO/knk-workspace#985 also a landmark, which is a domain, LD14), a lootbox spawn area
+     * ({@link #lootboxAreaUsageVia}) or a production area ({@link #productionAreaUsageVia}, #946) using the region keeps
+     * it; deleted only when all of them answer unused.
      */
     public static Function<String, Usage> regionUsageVia(DomainsQueryApi domainsQueryApi, LootboxesQueryApi lootboxesQueryApi,
-                                                         LandmarksApi landmarksApi, ProductionSurveyApi productionSurveyApi) {
+                                                         ProductionSurveyApi productionSurveyApi) {
         return TempRegionCleanupPolicy.inUseByAny(domainUsageVia(domainsQueryApi), lootboxAreaUsageVia(lootboxesQueryApi),
-                landmarkUsageVia(landmarksApi), productionAreaUsageVia(productionSurveyApi));
+                productionAreaUsageVia(productionSurveyApi));
     }
 
     /**
@@ -334,7 +324,7 @@ public class TempRegionRetentionTask {
                         + " used by a domain, lootbox area, landmark or production area" + (keptUnknown > 0 ? ", kept " + keptUnknown + " because the API could not be asked" : ""));
             }
             if (keptInUse > 0) {
-                LOGGER.info("Temp-named regions used by a domain, lootbox area, landmark or production area can be renamed (domain_<id>, lootbox_area_<id>, landmark_<id>, production_area_<id>) with POST /api/Regions/finalize-temp-names");
+                LOGGER.info("Temp-named regions used by a domain, lootbox area, landmark or production area can be renamed (domain_<id>, lootbox_area_<id>, production_area_<id>) with POST /api/Regions/finalize-temp-names");
             }
         } catch (Exception e) {
             LOGGER.warning("Error running temp region retention cleanup: " + e.getMessage());

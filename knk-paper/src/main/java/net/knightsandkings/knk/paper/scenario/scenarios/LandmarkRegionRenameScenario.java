@@ -15,12 +15,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * A region drawn for a landmark becomes {@code landmark_<id>} with exactly the drawn outline and Y range, and the
+ * A region drawn for a landmark becomes {@code domain_<id>} (a landmark is a domain since PandiO/knk-workspace#985, LD14; #945 named it {@code domain_<id>}) with exactly the drawn outline and Y range, and the
  * navigation reads it under that name (landmark smoke test, PandiO/knk-workspace#945): an L-shaped
  * {@code tempregion_worldtask_<n>} five blocks high is renamed through the plugin's region callback server, the call
  * knk-web-api makes when the Landmark form is saved. Afterwards the temp region is gone, the landmark's region has the
  * same points and Y range, and the navigation's region shapes ({@link WorldGuardRegionShapes}, which
- * {@code ModelLandmarks} and the region destination read for a landmark whose extent is {@code landmark_<id>}) resolve
+ * {@code ModelLandmarks} and the region destination read for a landmark whose extent is {@code domain_<id>}) resolve
  * that name to the drawn L: a cell inside it is in, one in its notch is not.
  */
 public final class LandmarkRegionRenameScenario implements Scenario<ScenarioScene> {
@@ -36,13 +36,13 @@ public final class LandmarkRegionRenameScenario implements Scenario<ScenarioScen
 
     @Override
     public String description() {
-        return "A drawn region renamed to landmark_<id> keeps its outline and Y range, and the navigation finds it";
+        return "A drawn landmark region renamed to domain_<id> keeps its outline and Y range, and the navigation finds it";
     }
 
     @Override
     public void define(ScenarioPlan plan, ScenarioScene scene) {
         String temp = "tempregion_worldtask_" + scene.fakeId(31);
-        String finalName = "landmark_" + scene.fakeId(30);
+        String finalName = "domain_" + scene.fakeId(30);
         AtomicReference<List<BlockVector2>> drawn = new AtomicReference<>();
         AtomicReference<CompletableFuture<HttpResponse<String>>> call = new AtomicReference<>();
         plan.act("draw an L-shaped temp region from y 3 to 7", () ->

@@ -9,7 +9,6 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import net.knightsandkings.knk.core.landmarks.LandmarkExtent;
 import net.knightsandkings.knk.core.landmarks.LandmarkWeights;
 import net.knightsandkings.knk.core.roads.build.GridFixture;
 import net.knightsandkings.knk.core.roads.route.RegionShape;
@@ -117,8 +116,8 @@ class WalkPreferenceWeightsTest {
             region(2, 4, 10, 6, 0.25),
             region(3, 0, 9, 3, 2.0),
             LandmarkWeights.of(List.of(
-                new LandmarkWeights.Area(1, new LandmarkWeights.CylinderArea(new LandmarkExtent.Cylinder(6.5, 65, 5.5, 3)),
-                    0.3),
+                new LandmarkWeights.Area(1, new LandmarkWeights.UnionArea(List.of(RegionShape.cuboid(4, 60, 3, 8, 80, 8),
+                    RegionShape.cuboid(6, 60, 0, 9, 80, 4))), 0.3),
                 new LandmarkWeights.Area(2, new LandmarkWeights.RegionArea(RegionShape.cuboid(0, 60, 0, 6, 80, 2)), 0.5),
                 new LandmarkWeights.Area(3, new LandmarkWeights.RegionArea(RegionShape.cuboid(8, 60, 0, 12, 80, 6)), 4.0)),
                 4.0));

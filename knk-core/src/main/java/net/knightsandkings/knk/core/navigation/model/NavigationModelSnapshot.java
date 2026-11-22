@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,9 +70,24 @@ public final class NavigationModelSnapshot {
                        boolean siegeEnabled, boolean generalEnabled, List<String> generalTargets) {
     }
 
-    record LandmarkFile(int id, String name, String world, double x, double y, double z, String extent,
-                        String regionId, Double radius, Integer domainId, String domainName, boolean navigationEnabled,
-                        Double preference) {
+    /**
+     * A landmark. Since PandiO/knk-workspace#985 its area is {@code regionIds} (main region first); a file written
+     * before has {@code extent} and {@code regionId} instead (read: a {@code REGION} extent is that one region, a
+     * {@code RADIUS} or {@code NONE} extent a point, LD08) and they are no longer written.
+     */
+    record LandmarkFile(int id, String name, String world, double x, double y, double z,
+                        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> regionIds,
+                        @JsonInclude(JsonInclude.Include.NON_NULL) String extent,
+                        @JsonInclude(JsonInclude.Include.NON_NULL) String regionId,
+                        Integer domainId, String domainName, boolean navigationEnabled, Double preference) {
+
+        /** The area's regions: {@code regionIds}, else the region of an old {@code REGION} extent, else none. */
+        List<String> areaRegionIds() {
+            if (regionIds != null) {
+                return regionIds;
+            }
+            return "REGION".equalsIgnoreCase(extent) && regionId != null ? List.of(regionId) : List.of();
+        }
     }
 
     record SnapshotFile(int schema, String asOf, List<DomainFile> domains, List<PointFile> locations,
@@ -161,8 +177,8 @@ public final class NavigationModelSnapshot {
         CompassFile compass = new CompassFile(c.item().enabled(), c.item().material(), c.item().displayName(),
             c.item().nameMatch().name(), c.siegeEnabled(), c.generalEnabled(), c.generalTargets());
         List<LandmarkFile> landmarks = model.landmarks().stream()
-            .map(l -> new LandmarkFile(l.id(), l.name(), l.world(), l.x(), l.y(), l.z(), l.extent().name(), l.regionId(),
-                l.radius(), l.domainId(), l.domainName(), l.navigationEnabled(), l.preference()))
+            .map(l -> new LandmarkFile(l.id(), l.name(), l.world(), l.x(), l.y(), l.z(), l.regionIds(), null, null,
+                l.domainId(), l.domainName(), l.navigationEnabled(), l.preference()))
             .toList();
         return new SnapshotFile(SCHEMA, model.asOf().toString(), domains, locations, compass, landmarks);
     }
@@ -195,9 +211,8 @@ public final class NavigationModelSnapshot {
         List<Landmark> landmarks = new ArrayList<>();
         for (LandmarkFile l : stored.landmarks() == null ? List.<LandmarkFile>of() : stored.landmarks()) {
             if (l != null && l.name() != null && l.world() != null) {
-                landmarks.add(new Landmark(l.id(), l.name(), l.world(), l.x(), l.y(), l.z(), Landmark.Extent.parse(l.extent()),
-                    l.regionId(), l.radius(), l.domainId(), l.domainName(), l.navigationEnabled(),
-                    Landmark.preference(l.preference())));
+                landmarks.add(new Landmark(l.id(), l.name(), l.world(), l.x(), l.y(), l.z(), l.areaRegionIds(),
+                    l.domainId(), l.domainName(), l.navigationEnabled(), Landmark.preference(l.preference())));
             }
         }
         return new NavigationModel(asOf, domains, locations, compass, landmarks);

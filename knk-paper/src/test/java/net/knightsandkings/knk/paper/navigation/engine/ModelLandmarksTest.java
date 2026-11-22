@@ -30,9 +30,8 @@ class ModelLandmarksTest {
     private final RegionShapes regions = (world, id) -> "world".equals(world) && "hall".equals(id)
         ? Optional.of(HALL) : Optional.empty();
 
-    private static Landmark landmark(int id, double x, Landmark.Extent extent, String regionId, Double radius,
-                                     double preference) {
-        return new Landmark(id, "L" + id, "world", x, 65, 0.5, extent, regionId, radius, null, null, true, preference);
+    private static Landmark landmark(int id, double x, List<String> regions, double preference) {
+        return new Landmark(id, "L" + id, "world", x, 65, 0.5, regions, null, null, true, preference);
     }
 
     /** Two road nodes: 1 at (0, 64, 0), 2 at (200, 64, 0). */
@@ -50,14 +49,15 @@ class ModelLandmarksTest {
 
     @Test
     void theWeightedAreasOfAWorldWithRegionsResolved() {
-        model(landmark(1, 0.5, Landmark.Extent.REGION, "hall", null, 2.0),
-            landmark(2, 0.5, Landmark.Extent.RADIUS, null, 5.0, 0.5),
-            landmark(3, 0.5, Landmark.Extent.REGION, "cellar", null, 2.0));
+        model(landmark(1, 0.5, List.of("hall"), 2.0),
+            landmark(2, 0.5, List.of(), 0.5),
+            landmark(3, 0.5, List.of("cellar"), 2.0));
         ModelLandmarks landmarks = new ModelLandmarks(() -> holder, regions, 3.0);
 
         List<LandmarkWeights.Area> areas = landmarks.preferenceAreas("world");
 
-        assertEquals(List.of(1, 2), areas.stream().map(LandmarkWeights.Area::landmarkId).toList(), "an unknown region drops");
+        assertEquals(List.of(1), areas.stream().map(LandmarkWeights.Area::landmarkId).toList(),
+            "a point (the old radius landmark, LD08) and an unknown region drop");
         assertSame(HALL, ((LandmarkWeights.RegionArea) areas.get(0).shape()).region());
         assertEquals(3.0, landmarks.preferenceMax());
         assertTrue(landmarks.preferenceAreas("nether").isEmpty());
@@ -75,14 +75,48 @@ class ModelLandmarksTest {
     @Test
     void theLinkNodesAreKeptPerSnapshotAndLandmarkList() {
         RoadNetworkSnapshot road = road();
-        model(landmark(7, 0.5, Landmark.Extent.NONE, null, null, 1.0)); // on node 1
+        model(landmark(7, 0.5, List.of(), 1.0)); // on node 1
         ModelLandmarks landmarks = new ModelLandmarks(() -> holder, regions, 4.0);
 
         Map<Integer, Integer> first = landmarks.linkNodes(road);
         assertEquals(Map.of(1, 7), first);
         assertSame(first, landmarks.linkNodes(road), "the same snapshot and list: kept");
 
-        model(landmark(8, 200.5, Landmark.Extent.NONE, null, null, 1.0)); // on node 2
+        model(landmark(8, 200.5, List.of(), 1.0)); // on node 2
         assertEquals(Map.of(2, 8), landmarks.linkNodes(road), "a new model: computed again");
+    }
+
+    /**
+     * A14 weights side (landmark-domain LD22, #985): a LinkedDomain landmark's area is the parent's main region plus
+     * the parent's sub-regions the server finds by knk-domain-id; the weight covers the union once.
+     */
+    @Test
+    void aLinkedDomainArea_GetsTheParentsSubRegions_FromTheServer() {
+        RegionShape town = RegionShape.cuboid(0, 60, 0, 20, 80, 20);
+        RegionShape annex = RegionShape.cuboid(40, 60, 0, 50, 80, 10);
+        RegionShapes server = new RegionShapes() {
+            @Override
+            public Optional<RegionShape> shape(String world, String regionId) {
+                return switch (regionId) {
+                    case "town_1" -> Optional.of(town);
+                    case "domain_1_sub_2" -> Optional.of(annex);
+                    default -> Optional.empty();
+                };
+            }
+
+            @Override
+            public List<String> domainRegionIds(String world, String regionId) {
+                return "town_1".equals(regionId) ? List.of("domain_1_sub_2") : List.of();
+            }
+        };
+        model(new Landmark(5, "Market cross", "world", 5, 65, 5, List.of("town_1"), 1, "Rivia", true, 2.0));
+
+        List<LandmarkWeights.Area> areas = new ModelLandmarks(() -> holder, server, 4.0).preferenceAreas("world");
+
+        assertEquals(1, areas.size());
+        LandmarkWeights.UnionArea union = (LandmarkWeights.UnionArea) areas.get(0).shape();
+        assertEquals(List.of(town, annex), union.regions());
+        assertEquals(2.0, LandmarkWeights.of(areas, 4.0).within(new int[] {-100, 0, -100, 100, 100, 100})
+            .multiplier(45, 65, 5), "a cell in the parent's sub-region is weighted");
     }
 }

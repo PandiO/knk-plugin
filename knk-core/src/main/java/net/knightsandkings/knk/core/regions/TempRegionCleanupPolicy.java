@@ -18,8 +18,9 @@ import java.util.function.Predicate;
  * </ol>
  * PandiO/knk-workspace#34: lootbox spawn areas draw their regions through the same task and are renamed to
  * {@code lootbox_area_<id>}; the fresh lookup asks them too ({@link #inUseByAny}), so an area whose rename failed keeps
- * its region like a domain does. PandiO/knk-workspace#945/#946: landmarks ({@code landmark_<id>}) and production areas
- * ({@code production_area_<id>}) too.
+ * its region like a domain does. PandiO/knk-workspace#946: production areas ({@code production_area_<id>}) too. A
+ * landmark is a domain since PandiO/knk-workspace#985 (LD14): its regions are {@code domain_<id>}, found by the domain
+ * lookup; the {@code landmark_<id>} owner of #945 is gone.
  * <p>
  * PandiO/knk-workspace#269: a region the API released (its draft was deleted, its task closed without a result, or its
  * session was swept) skips only the age check: {@link #decideRelease}.
@@ -70,7 +71,7 @@ public final class TempRegionCleanupPolicy {
         KEEP_IN_SEVERAL_WORLDS(true),
         /** No (valid) creation timestamp: not drawn by the region task, so never removed. */
         KEEP_NO_TIMESTAMP(true),
-        /** A domain, lootbox area, landmark or production area uses it according to a fresh API lookup. */
+        /** A domain (a landmark too), lootbox area or production area uses it according to a fresh API lookup. */
         KEEP_IN_USE(true),
         /** A player on this server is still running the task. */
         WAIT_TASK_ACTIVE(false),
@@ -146,7 +147,7 @@ public final class TempRegionCleanupPolicy {
     }
 
     /**
-     * #34: one fresh lookup over several owners (domains, lootbox spawn areas, landmarks since #945, production areas since #946): {@link Usage#IN_USE} as soon as one uses
+     * #34: one fresh lookup over several owners (domains, landmarks among them since #985, lootbox spawn areas, production areas since #946): {@link Usage#IN_USE} as soon as one uses
      * the region, {@link Usage#UNUSED} only when every one answered unused, else {@link Usage#UNKNOWN} (an owner that
      * could not be asked, or threw, keeps the region). Owners after the first one that uses it are not asked.
      */

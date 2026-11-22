@@ -1,61 +1,48 @@
 package net.knightsandkings.knk.core.landmarks;
 
+import java.util.List;
 import java.util.Objects;
 
 import net.knightsandkings.knk.core.navigation.model.Landmark;
 
 /**
- * Where a landmark counts as reached (off-road DESIGN § 6.2.1, § 6.3; PandiO/knk-workspace#708), Bukkit-free: its
- * pin only ({@link Point}: within {@code arrive-distance}), a WorldGuard region ({@link Region}: the region test is the
- * game server's), or a cylinder around the pin ({@link Cylinder}). Phase 5.2 weights walk cells inside an extent.
+ * Where a landmark counts as reached (off-road DESIGN § 6.2.1; landmark-domain DESIGN § 7.1 item 4, LD08, LD22,
+ * PandiO/knk-workspace#985), Bukkit-free: its pin only ({@link Point}: within {@code arrive-distance}), or its
+ * {@link Area}, the union of its regions (its own main region and sub-regions, or the parent's for a
+ * {@code LinkedDomain} landmark; the region test is the game server's). The cylinder around the pin is gone: a round
+ * area is a cylinder-shaped region drawn with {@code //sel cyl}.
  */
-public sealed interface LandmarkExtent permits LandmarkExtent.Point, LandmarkExtent.Region, LandmarkExtent.Cylinder {
+public sealed interface LandmarkExtent permits LandmarkExtent.Point, LandmarkExtent.Area {
 
-    /** The extent of {@code landmark}; a Region without a region id or a Radius without a usable radius is a {@link Point}. */
+    /** The extent of {@code landmark}: an {@link Area} when it has regions, else a {@link Point}. */
     static LandmarkExtent of(Landmark landmark) {
         Objects.requireNonNull(landmark, "landmark");
-        return switch (landmark.extent()) {
-            case REGION -> landmark.regionId() == null || landmark.regionId().isBlank()
-                ? new Point() : new Region(landmark.regionId());
-            case RADIUS -> landmark.radius() == null || !(landmark.radius() > 0) || !Double.isFinite(landmark.radius())
-                ? new Point() : new Cylinder(landmark.x(), landmark.y(), landmark.z(), landmark.radius());
-            case NONE -> new Point();
-        };
+        return landmark.hasArea() ? new Area(landmark.regionIds()) : new Point();
     }
 
-    /** No extent: the pin, arrived at within {@code arrive-distance}. */
+    /** No area: the pin, arrived at within {@code arrive-distance}. */
     record Point() implements LandmarkExtent {
     }
 
-    /** A WorldGuard region of the landmark's world. */
-    record Region(String regionId) implements LandmarkExtent {
-        public Region {
-            Objects.requireNonNull(regionId, "regionId");
-        }
-    }
-
     /**
-     * A vertical cylinder around the pin (the sub-region spec's cylinder shape): {@code radius} blocks across, and as
-     * many blocks above and below the pin's feet, so a landmark on one floor of a keep does not count the floors far
-     * above or below it.
+     * The union of WorldGuard regions of the landmark's world, main region first; inside any of them is inside the area.
      */
-    record Cylinder(double x, double y, double z, double radius) implements LandmarkExtent {
-        public Cylinder {
-            if (!(radius > 0) || !Double.isFinite(radius)) {
-                throw new IllegalArgumentException("radius must be positive and finite: " + radius);
+    record Area(List<String> regionIds) implements LandmarkExtent {
+        public Area {
+            regionIds = Landmark.cleanRegionIds(regionIds);
+            if (regionIds.isEmpty()) {
+                throw new IllegalArgumentException("an area needs a region");
             }
         }
 
-        /** Whether the feet position is inside. */
-        public boolean contains(double px, double py, double pz) {
-            return contains(x, y, z, radius, px, py, pz);
+        /** The main region (the routing goal). */
+        public String mainRegionId() {
+            return regionIds.get(0);
         }
 
-        /** The same test for a centre and radius given apart (the navigation session's destination). */
-        public static boolean contains(double cx, double cy, double cz, double radius, double px, double py, double pz) {
-            double dx = px - cx;
-            double dz = pz - cz;
-            return dx * dx + dz * dz <= radius * radius && Math.abs(py - cy) <= radius;
+        /** The other regions (the sub-regions). */
+        public List<String> otherRegionIds() {
+            return regionIds.subList(1, regionIds.size());
         }
     }
 }

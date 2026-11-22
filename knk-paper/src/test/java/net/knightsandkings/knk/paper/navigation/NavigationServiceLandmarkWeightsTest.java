@@ -25,8 +25,8 @@ import org.bukkit.entity.Player;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import net.knightsandkings.knk.core.landmarks.LandmarkExtent;
 import net.knightsandkings.knk.core.landmarks.LandmarkWeights;
+import net.knightsandkings.knk.core.roads.route.RegionShape;
 import net.knightsandkings.knk.core.roads.build.GateCells;
 import net.knightsandkings.knk.core.roads.build.SurfaceGrid;
 import net.knightsandkings.knk.core.roads.links.WalkLinkCandidates;
@@ -63,9 +63,10 @@ class NavigationServiceLandmarkWeightsTest {
     private NavigationService service;
     private final Destination well = Destination.point("Well", WORLD, 15.5, 65, 20.5);
 
-    /** A garden of radius 4 half way to the well, preference 2.0. */
+    /** A garden half way to the well, preference 2.0: a main region and a sub-region, one area (#985, LD22). */
     private final LandmarkWeights.Area garden = new LandmarkWeights.Area(3,
-        new LandmarkWeights.CylinderArea(new LandmarkExtent.Cylinder(8.5, 65, 10.5, 4)), 2.0);
+        new LandmarkWeights.UnionArea(List.of(RegionShape.cuboid(5, 60, 7, 12, 80, 11),
+            RegionShape.cuboid(5, 60, 10, 12, 80, 14))), 2.0);
 
     /** The fake of the model's landmarks (the server's is engine/ModelLandmarks). */
     private final class FakeLandmarks implements NavigationService.Landmarks {
@@ -187,7 +188,7 @@ class NavigationServiceLandmarkWeightsTest {
     @Test
     void aLandmarkFarFromTheLegOrNoneGivesNoWeights() {
         landmarks.areas = List.of(new LandmarkWeights.Area(4,
-            new LandmarkWeights.CylinderArea(new LandmarkExtent.Cylinder(900.5, 65, 900.5, 4)), 2.0));
+            new LandmarkWeights.RegionArea(RegionShape.cuboid(896, 60, 896, 904, 80, 904)), 2.0));
         service.setLandmarks(landmarks);
         assertSame(WalkCellWeights.NONE, lastWalk(null).weights(), "beyond the leg's reach box");
 

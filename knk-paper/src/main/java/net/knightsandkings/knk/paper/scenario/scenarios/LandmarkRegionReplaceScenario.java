@@ -16,7 +16,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Running a landmark's region step again redefines {@code landmark_<id>} in place, and a temp region left from an
+ * Running a landmark's region step again redefines {@code domain_<id>} (a landmark is a domain since PandiO/knk-workspace#985, LD14; #945 named it {@code domain_<id>}) in place, and a temp region left from an
  * earlier failed rename goes (landmark smoke test, PandiO/knk-workspace#945, as KNG-103 does for domains): the
  * landmark's region exists; a new, differently shaped temp region is renamed onto it with {@code replaceRegionId} set to
  * the landmark's region, as the API does. Afterwards there is one region with the landmark's name and the new outline
@@ -33,14 +33,14 @@ public final class LandmarkRegionReplaceScenario implements Scenario<ScenarioSce
 
     @Override
     public String description() {
-        return "A re-drawn landmark region replaces landmark_<id> in place; a previous temp region is removed";
+        return "A re-drawn landmark region replaces domain_<id> in place; a previous temp region is removed";
     }
 
     @Override
     public void define(ScenarioPlan plan, ScenarioScene scene) {
-        String landmark = "landmark_" + scene.fakeId(40);
+        String landmark = "domain_" + scene.fakeId(40);
         String temp = "tempregion_worldtask_" + scene.fakeId(41);
-        String other = "landmark_" + scene.fakeId(42);
+        String other = "domain_" + scene.fakeId(42);
         String oldTemp = "tempregion_worldtask_" + scene.fakeId(43);
         String newTemp = "tempregion_worldtask_" + scene.fakeId(44);
         AtomicReference<List<BlockVector2>> redrawn = new AtomicReference<>();

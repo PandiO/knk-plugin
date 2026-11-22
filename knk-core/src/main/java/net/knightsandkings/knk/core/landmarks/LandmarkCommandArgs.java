@@ -6,72 +6,68 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
-import net.knightsandkings.knk.core.navigation.model.Landmark;
+import net.knightsandkings.knk.core.domain.landmarks.LandmarkAreaKind;
 
 /**
- * The argument rules of {@code /knk landmark} (off-road phase 5.1, PandiO/knk-workspace#708, DESIGN § 4.5), Bukkit-free.
- * Landmark names may have spaces ("Throne room"), so a name is the words up to a keyword ({@code region},
- * {@code radius}) or, where another argument follows, the longest run of words that names an existing landmark. A
+ * The argument rules of {@code /knk landmark} (off-road phase 5.1, PandiO/knk-workspace#708, DESIGN § 4.5; without the
+ * radius form since PandiO/knk-workspace#985, landmark-domain LD08), Bukkit-free. Landmark names may have spaces
+ * ("Throne room"), so a name is the words up to the keyword {@code region} or, where another argument follows, the longest run of words that names an existing landmark. A
  * landmark can always be named by its id, {@code #12}.
  */
 public final class LandmarkCommandArgs {
 
-    /** The largest radius, as the API allows (knk-web-api LandmarkService.MaxRadius). */
-    public static final double MAX_RADIUS = 512;
     /** As the API allows (Landmark.NameMaxLength). */
     public static final int MAX_NAME_LENGTH = 100;
+    /** LD08 (PandiO/knk-workspace#985): the answer to {@code create <name> radius <n>}. */
+    public static final String RADIUS_GONE =
+        "The radius area is gone: draw a round region with //sel cyl, then use region <id>.";
 
     private LandmarkCommandArgs() {
     }
 
-    /** What {@code create <name> [region <id> | radius <n>]} asked for. */
-    public record Create(String name, Landmark.Extent extent, String regionId, Double radius) {
+    /**
+     * What {@code create <name> [region <id>]} asked for: a point ({@link LandmarkAreaKind#NONE}) or its own region
+     * ({@link LandmarkAreaKind#OWN_REGION} with {@code regionId}).
+     */
+    public record Create(String name, LandmarkAreaKind areaKind, String regionId) {
+    }
+
+    /** Thrown for a {@code radius} argument (LD08); the command shows the usage line with it. */
+    public static final class RadiusGone extends IllegalArgumentException {
+        RadiusGone() {
+            super(RADIUS_GONE);
+        }
     }
 
     /**
-     * Parses the words after {@code create}. Throws {@link IllegalArgumentException} with the message to show.
+     * Parses the words after {@code create}. Throws {@link IllegalArgumentException} with the message to show
+     * ({@link RadiusGone} for the removed {@code radius} form).
      */
     public static Create parseCreate(List<String> words) {
         List<String> tokens = clean(words);
-        Landmark.Extent extent = Landmark.Extent.NONE;
+        LandmarkAreaKind areaKind = LandmarkAreaKind.NONE;
         String regionId = null;
-        Double radius = null;
         int nameEnd = tokens.size();
+        // the keyword places of the old form: "<name> radius <n>" or a trailing "radius" ("Radius tower" is a name)
+        if ((tokens.size() >= 3 && tokens.get(tokens.size() - 2).equalsIgnoreCase("radius"))
+            || (tokens.size() >= 2 && tokens.get(tokens.size() - 1).equalsIgnoreCase("radius"))) {
+            throw new RadiusGone();
+        }
         if (tokens.size() >= 2) {
             String keyword = tokens.get(tokens.size() - 2).toLowerCase(Locale.ROOT);
             String value = tokens.get(tokens.size() - 1);
             if (keyword.equals("region")) {
-                extent = Landmark.Extent.REGION;
+                areaKind = LandmarkAreaKind.OWN_REGION;
                 regionId = value;
                 nameEnd = tokens.size() - 2;
-            } else if (keyword.equals("radius")) {
-                extent = Landmark.Extent.RADIUS;
-                radius = parseRadius(value);
-                nameEnd = tokens.size() - 2;
             }
         }
-        if (tokens.size() >= 1 && nameEnd == tokens.size()) {
-            String last = tokens.get(tokens.size() - 1).toLowerCase(Locale.ROOT);
-            if (last.equals("region") || last.equals("radius")) {
-                throw new IllegalArgumentException("Give a value after " + last + ".");
-            }
+        if (tokens.size() >= 1 && nameEnd == tokens.size()
+            && tokens.get(tokens.size() - 1).equalsIgnoreCase("region")) {
+            throw new IllegalArgumentException("Give a value after region.");
         }
         String name = String.join(" ", tokens.subList(0, nameEnd));
-        return new Create(validName(name), extent, regionId, radius);
-    }
-
-    /** A radius above 0 and at most {@link #MAX_RADIUS}. */
-    public static double parseRadius(String text) {
-        double radius;
-        try {
-            radius = Double.parseDouble(text.trim().replace(',', '.'));
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("The radius must be a number of blocks: " + text);
-        }
-        if (!(radius > 0) || radius > MAX_RADIUS || !Double.isFinite(radius)) {
-            throw new IllegalArgumentException("The radius must be above 0 and at most " + (int) MAX_RADIUS + " blocks.");
-        }
-        return radius;
+        return new Create(validName(name), areaKind, regionId);
     }
 
     /** A trimmed name of 1 to {@link #MAX_NAME_LENGTH} characters, not starting with {@code #} (that is an id). */

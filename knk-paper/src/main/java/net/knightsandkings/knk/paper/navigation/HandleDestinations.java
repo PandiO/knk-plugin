@@ -29,7 +29,6 @@ public final class HandleDestinations {
         String name = candidate.label();
         Place place = candidate.place();
         if (place instanceof Place.Point p) {
-            // a landmark's Radius extent (#708): arrived inside its cylinder
             return Destination.point(name, p.world(), p.x(), p.y(), p.z()).withArrivalRadius(p.arrivalRadius());
         }
         if (place instanceof Place.Street s) {
@@ -39,7 +38,9 @@ public final class HandleDestinations {
             return Destination.node(name, n.world(), n.nodeId(), n.floor());
         }
         if (place instanceof Place.Region r) {
-            return Destination.region(name, r.world() == null ? playerWorld : r.world(), r.regionId());
+            Destination region = Destination.region(name, r.world() == null ? playerWorld : r.world(), r.regionId());
+            // a landmark's area (#985, LD22): its other regions count as arrived too
+            return r.isArea() ? region.withAreaRegions(r.areaRegionIds()) : region;
         }
         Place.Domain d = (Place.Domain) place;
         Mode asked = mode == null ? Mode.DEFAULT : mode;

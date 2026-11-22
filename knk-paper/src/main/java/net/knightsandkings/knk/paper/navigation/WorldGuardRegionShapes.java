@@ -39,6 +39,24 @@ public final class WorldGuardRegionShapes implements RegionShapes {
         return region.get().contains(BlockVector3.at((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z)));
     }
 
+    /** {@inheritDoc} Through {@code DomainRegionUnion}: the regions with the same {@code knk-domain-id}. */
+    @Override
+    public List<String> domainRegionIds(String world, String regionId) {
+        Optional<ProtectedRegion> region = region(world, regionId);
+        if (region.isEmpty()) {
+            return List.of();
+        }
+        World bukkitWorld = Bukkit.getWorld(world);
+        RegionManager manager = WorldGuard.getInstance().getPlatform().getRegionContainer().get(BukkitAdapter.adapt(bukkitWorld));
+        List<String> ids = new ArrayList<>();
+        for (ProtectedRegion other : net.knightsandkings.knk.paper.regions.DomainRegionUnion.of(manager, region.get())) {
+            if (other != region.get()) {
+                ids.add(other.getId());
+            }
+        }
+        return ids;
+    }
+
     private static Optional<ProtectedRegion> region(String world, String regionId) {
         if (world == null || regionId == null || regionId.isBlank()) {
             return Optional.empty();

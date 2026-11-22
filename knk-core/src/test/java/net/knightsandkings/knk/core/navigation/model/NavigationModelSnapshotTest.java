@@ -47,7 +47,7 @@ class NavigationModelSnapshotTest {
     @Test
     void unknownPlacesAndLandmarksSurviveTheRoundTrip() throws Exception {
         DomainPlace unknown = new DomainPlace(5, "Keep", "Structure", null, null, null, null, null, false);
-        Landmark throneRoom = new Landmark(12, "Throne Room", "world", 1.5, 70, -3, Landmark.Extent.RADIUS, null, 4.0, 1,
+        Landmark throneRoom = new Landmark(12, "Throne Room", "world", 1.5, 70, -3, List.of(), 1,
             "Kardenna", true);
         NavigationModel model = new NavigationModel(T0, List.of(unknown), List.of(), null, List.of(throneRoom));
         NavigationModelSnapshot snapshot = snapshot();
@@ -163,9 +163,9 @@ class NavigationModelSnapshotTest {
 
     @Test
     void aLandmarksPreferenceSurvivesTheRoundTrip() throws Exception {
-        Landmark hall = new Landmark(14, "Great Hall", "world", 3.5, 70, 8.5, Landmark.Extent.REGION, "great_hall", null,
+        Landmark hall = new Landmark(14, "Great Hall", "world", 3.5, 70, 8.5, List.of("great_hall"),
             null, null, true, 2.5);
-        Landmark garden = new Landmark(15, "Garden", "world", 30.5, 64, 8.5, Landmark.Extent.RADIUS, null, 6.0, null, null,
+        Landmark garden = new Landmark(15, "Garden", "world", 30.5, 64, 8.5, List.of(), null, null,
             false, 0.5);
         NavigationModel model = new NavigationModel(T0, List.of(), List.of(), null, List.of(hall, garden));
         NavigationModelSnapshot snapshot = snapshot();
@@ -197,5 +197,32 @@ class NavigationModelSnapshotTest {
         assertEquals(List.of(1.0, 1.0), landmarks.stream().map(Landmark::preference).toList(),
             "missing = no weight; a broken value as well");
         assertFalse(landmarks.get(0).weighted());
+    }
+
+    // ==================== landmark-domain (PandiO/knk-workspace#985, LD08, LD22): the area's regions ====================
+
+    @Test
+    void theAreasRegionsAreWritten_AndAFileFromBeforeReadsAnOldRegionExtentAsThatRegion() throws Exception {
+        NavigationModelSnapshot snapshot = snapshot();
+        Landmark tower = new Landmark(16, "Tower", "world", 0, 64, 0, List.of("domain_16", "domain_16_sub_1"), 2, "Rivia",
+            true, 2.0);
+        snapshot.write(new NavigationModel(T0, List.of(), List.of(), null, List.of(tower)));
+        JsonNode written = new ObjectMapper().readTree(snapshot.file().toFile()).get("landmarks").get(0);
+        assertEquals("domain_16_sub_1", written.get("regionIds").get(1).asText());
+        assertFalse(written.has("extent"), "the #708 fields are no longer written");
+        assertFalse(written.has("regionId"));
+        assertFalse(written.has("radius"));
+        assertEquals(List.of(tower), snapshot.read().model().landmarks());
+
+        Files.writeString(snapshot.file(), """
+            {"schema":1,"asOf":"2026-11-18T12:00:00Z","domains":[],"locations":[],
+             "landmarks":[{"id":12,"name":"Hall","world":"world","x":1.5,"y":70,"z":-3,"extent":"REGION",
+                           "regionId":"great_hall","navigationEnabled":true},
+                          {"id":13,"name":"Well","world":"world","x":1.5,"y":70,"z":-3,"extent":"RADIUS",
+                           "radius":4.0,"navigationEnabled":true}]}
+            """);
+        List<Landmark> old = snapshot.read().model().landmarks();
+        assertEquals(List.of("great_hall"), old.get(0).regionIds());
+        assertEquals(List.of(), old.get(1).regionIds(), "a radius extent is a point now");
     }
 }
