@@ -744,8 +744,7 @@ public class KnKPlugin extends JavaPlugin {
 
             // Start temp region retention task (regions.temp-retention.days, default 14; never deletes a region a domain
             // or, since PandiO/knk-workspace#34, a lootbox spawn area, since #945 a landmark, since #946 a production area
-            // uses). KNG-258: also
-            // orphaned domain sub-regions, counted from when they were orphaned.
+            // uses). KNG-258: also orphaned domain sub-regions, counted from when they were orphaned.
             tempRegionRetentionTask = new TempRegionRetentionTask(this,
                     Math.max(1, getConfig().getLong("regions.temp-retention.days", 14)), managedRegions::protectsFromCleanup,
                     TempRegionRetentionTask.regionUsageVia(domainsQueryApi, apiClient.getLootboxesQueryApi(),
