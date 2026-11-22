@@ -70,7 +70,7 @@ class PaperScenariosTest {
             "player-command-needs-grant", "player-heal-needs-grant", "player-chat-group-colours", "player-join-loading-hold", "player-menu-click",
             "player-tp-into-closed-gate", "player-rejoin-in-closed-gate", "territory-border-crossing", "rural-structure-region",
             "production-area-survey", "storage-display-double-chest", "player-kit-overflow-inbox",
-            "player-inbox-claim-partial", "player-harvest-regenerate", "player-harvest-tree",
+            "player-inbox-claim-partial", "player-shop-sell-and-buy", "shop-display-stall", "player-harvest-regenerate", "player-harvest-tree",
             "landmark-region-rename-keeps-drawn-bounds", "landmark-region-rerun-replaces-in-place",
             "production-area-region-rename-keeps-drawn-bounds"), names);
     }
@@ -109,7 +109,7 @@ class PaperScenariosTest {
         CommandSender sender = mock(CommandSender.class);
 
         command.execute(sender, new String[] {"list"});
-        verify(sender).sendMessage(contains("Scenarios (76)"));
+        verify(sender).sendMessage(contains("Scenarios (78)"));
         verify(sender).sendMessage(contains("global-region-explosion"));
         verify(sender).sendMessage(contains("player-menu-click"));
     }

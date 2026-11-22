@@ -1231,6 +1231,19 @@ production:
   storage:
     refresh-minutes: 5             # how often the bound containers are re-read (a binding made in the web app shows after this)
     display-refresh-seconds: 30    # at most one refresh of a display this often (chunk load and terminal moves ask for one)
+  # Display stalls (#250, P12): shelves and stalls registered per shop with /knk shop display add (or in the web app)
+  # show the shop's items as floating item displays with a price label: the spot's pin, then the catalogue's pinned
+  # entries, then in-stock items and best sellers; sold-out items are greyed out (hidden when the shop hides them).
+  # Right-click opens the item information menu, shift-right-click the purchase confirmation (every purchase is
+  # confirmed). Spots are the API's list, never found by scanning. Needs production.enabled.
+  shops:
+    displays:
+      refresh-minutes: 5             # how often the display spots are re-read (a spot added in the web app shows after this)
+      selection-refresh-seconds: 30  # how often the shown items are chosen again (stock, prices, best sellers)
+      best-seller-hours: 168         # trade stats window of the best sellers (7 days)
+      item-scale: 0.5                # size of the shown item
+      label: true                    # floating name and price over the item
+      hints: true                    # the label's line with the two clicks
   # Reward inbox (#684, P7): /inbox opens the player's reward inbox (claim what fits); kit and lootbox items that don't fit
   # go to the inbox instead of the ground (offline players' kits too). Inbox cap, expiry and warnings are API game settings
   # (production.delivery). Needs production.enabled; off, kits and lootboxes drop leftovers at the player's feet as before.

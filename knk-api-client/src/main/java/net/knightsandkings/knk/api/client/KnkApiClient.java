@@ -162,6 +162,9 @@ public class KnkApiClient {
     private final net.knightsandkings.knk.core.ports.api.TransportLanesApi transportLanesApi;
     /** Item delivery and the reward inbox (PandiO/knk-workspace#684). */
     private final net.knightsandkings.knk.core.ports.api.ItemDeliveryApi itemDeliveryApi;
+    private final net.knightsandkings.knk.core.ports.api.ShopsApi shopsApi;
+    /** Display stalls (PandiO/knk-workspace#250). */
+    private final net.knightsandkings.knk.core.ports.api.ShopDisplaySpotsApi shopDisplaySpotsApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsQueryApi gameSettingsQueryApi;
     private final net.knightsandkings.knk.core.ports.api.GameSettingsCommandApi gameSettingsCommandApi;
     private final net.knightsandkings.knk.core.ports.api.DomainAccessRulesApi domainAccessRulesApi;
@@ -262,6 +265,10 @@ public class KnkApiClient {
                 objectMapper, authProvider, executor, debugLogging);
         this.itemDeliveryApi = new net.knightsandkings.knk.api.impl.ItemDeliveryApiImpl(baseUrl, httpClient,
                 objectMapper, authProvider, executor, debugLogging);
+        this.shopsApi = new net.knightsandkings.knk.api.impl.ShopsApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
+        this.shopDisplaySpotsApi = new net.knightsandkings.knk.api.impl.ShopDisplaySpotsApiImpl(baseUrl, httpClient,
+                objectMapper, authProvider, executor, debugLogging);
         this.currencyApi = new net.knightsandkings.knk.api.impl.CurrencyApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.categoriesQueryApi = new net.knightsandkings.knk.api.impl.CategoriesQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
         this.gameSettingsQueryApi = new net.knightsandkings.knk.api.impl.GameSettingsQueryApiImpl(baseUrl, httpClient, objectMapper, authProvider, executor, debugLogging);
@@ -342,6 +349,16 @@ public class KnkApiClient {
     /** Item delivery and the reward inbox (PandiO/knk-workspace#684): deliveries, the inbox view and claims. */
     public net.knightsandkings.knk.core.ports.api.ItemDeliveryApi getItemDeliveryApi() {
         return itemDeliveryApi;
+    }
+
+    /** Shops (PandiO/knk-workspace#687): the offer, quotes, purchases, sell quotes and sales. */
+    public net.knightsandkings.knk.core.ports.api.ShopsApi getShopsApi() {
+        return shopsApi;
+    }
+
+    /** Display stalls (PandiO/knk-workspace#250): the display spots and the best sellers per shop. */
+    public net.knightsandkings.knk.core.ports.api.ShopDisplaySpotsApi getShopDisplaySpotsApi() {
+        return shopDisplaySpotsApi;
     }
 
     /** Transport lanes (PandiO/knk-workspace#681): the lane list, lane reports and road connections. */
