@@ -162,6 +162,9 @@ class NavigationServiceTest {
             events::add, Logger.getLogger("test")));
     }
 
+    // guidance-v2 is on by default since PandiO/knk-workspace#990: the tests of today's trail (A16, the kill switch)
+    // pin NavigationConfig.defaults().withGuidanceV2(false).
+
     /**
      * Replaces {@link #service} (what {@link #ticks} drives) with one that has walk paths (KNG-51): the
      * capture and the search are this test's fakes; searches wait for {@link #runSearches}.
@@ -1038,7 +1041,7 @@ class NavigationServiceTest {
         walkCaptureStats = new WalkMeasurements.Capture(9, 3, 4_000_000L, 100L);
         walkFinder = r -> found(wellDetour()).withStats(new WalkSearchStats(42, 90, 7_000_000L,
             WalkSearchStats.Cap.NONE, false));
-        NavigationService walking = walkService(NavigationConfig.defaults());
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(false));
         assertEquals(List.of("no searches since the last reset"), walking.walkMeasurementLines(5));
 
         walking.navigate(player, well());
@@ -1170,8 +1173,7 @@ class NavigationServiceTest {
             searched.add(r);
             return new WalkSearch().find(r);
         };
-        NavigationService walking = walkService(NavigationConfig.defaults());
-        assertFalse(NavigationConfig.defaults().guidanceV2(), "off by default");
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(false));
 
         walking.navigate(player, well());
         runSearches();
@@ -1207,7 +1209,7 @@ class NavigationServiceTest {
 
     @Test
     void aDirectLegDrawsTheStraightLineAtOnceThenAdoptsTheWalkPath() {
-        NavigationService walking = walkService(NavigationConfig.defaults());
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(false));
 
         walking.navigate(player, well());
 
@@ -1322,7 +1324,7 @@ class NavigationServiceTest {
         when(partial.points()).thenReturn(List.of(new double[] {0.5, 64, 0.5}, new double[] {0.5, 64, 6.5},
             new double[] {12.5, 64, 6.5}));
         walkFinder = r -> WalkResult.noPath("target unreachable", 900, partial);
-        NavigationService walking = walkService(NavigationConfig.defaults());
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(false));
         moveTo(40.5, 65, 60.5); // away from the roads, so they cannot help (N13)
         Destination offRoad = Destination.point("Well", NavigationTestNetwork.WORLD, 60.5, 65, 60.5);
 
@@ -1339,7 +1341,7 @@ class NavigationServiceTest {
         assertTrue(walking.walkStatus().contains("partial 1"), walking.walkStatus());
 
         walkFinder = r -> WalkResult.fallback("expansion budget", 20000, partial);
-        NavigationService budget = walkService(NavigationConfig.defaults());
+        NavigationService budget = walkService(NavigationConfig.defaults().withGuidanceV2(false));
         budget.navigate(player, offRoad);
         runSearches();
         assertEquals(NavigationService.DirectLeg.Status.WALKING, legStatus(budget), "a budget run-out uses it too");
@@ -1365,7 +1367,7 @@ class NavigationServiceTest {
 
     @Test
     void theWalkPathIsRecomputedOffThePathAndWhenOldButNeverPerTickOrTwiceInFlight() {
-        NavigationService walking = walkService(NavigationConfig.defaults());
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(false));
         walking.navigate(player, well());
         runSearches();
         ticks(NavigationService.RECHECK_TICKS * 3);
@@ -1444,7 +1446,7 @@ class NavigationServiceTest {
         List<double[]> detour = List.of(new double[] {0.5, 64, 0.5}, new double[] {-15.5, 64, 0.5},
             new double[] {-15.5, 64, 20.5}, new double[] {20.5, 64, 20.5}, new double[] {20.5, 64, 0.5});
         walkFinder = r -> found(detour);
-        NavigationService walking = walkService(NavigationConfig.defaults());
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(false));
         walking.navigate(player, well());
         runSearches();
 
@@ -1481,7 +1483,7 @@ class NavigationServiceTest {
         // KNG-75 step 1: 30 blocks off Main Street the first leg is a walk path to the road, not a straight line
         walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 15.5},
             new double[] {50.5, 64, 0.5}));
-        NavigationService walking = walkService(NavigationConfig.defaults());
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(false));
         moveTo(50.5, 65, 30.5);
 
         walking.navigate(player, cinixKeep());
@@ -1560,7 +1562,7 @@ class NavigationServiceTest {
         WalkPath partial = mock(WalkPath.class);
         when(partial.points()).thenReturn(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 25.5}));
         walkFinder = r -> WalkResult.fallback("length cap", 548, partial);
-        NavigationService walking = walkService(NavigationConfig.defaults());
+        NavigationService walking = walkService(NavigationConfig.defaults().withGuidanceV2(false));
         moveTo(50.5, 65, 30.5);
         walking.navigate(player, cinixKeep());
         runSearches();
@@ -1867,7 +1869,7 @@ class NavigationServiceTest {
     void withTheFlagOffTheNewKeysChangeNothing() {
         // A16: guidance-v2 off - trail-leg-spacing and cursor-jump do nothing; the trail, the HUD, the chat and the
         // events are today's, call for call, and the anchored drawPath is never used
-        walkService(NavigationConfig.defaults());
+        walkService(NavigationConfig.defaults().withGuidanceV2(false));
         tick.set(100);
         forwardsAndBackScenario();
         List<String> today = deepTranscript();
@@ -1880,7 +1882,7 @@ class NavigationServiceTest {
         walkTargets.clear();
         walkSearches.clear(); // the first run's last request (after "heading away") must not reach its old service
         tick.set(100);
-        walkService(NavigationConfig.defaults().withCursorJump(4)
+        walkService(NavigationConfig.defaults().withGuidanceV2(false).withCursorJump(4)
             .withTrail(new NavigationConfig.TrailConfig(30, 10, "DUST", "#E8C66A", 1.5)));
         forwardsAndBackScenario();
 
@@ -1891,6 +1893,9 @@ class NavigationServiceTest {
     @Test
     void withTheFlagOffWalkingBackOnTheRoadKeepsTheTrailAtTheFarthestPoint() {
         // today's behaviour, pinned (A16): the trail is drawn from the farthest point reached
+        service = new NavigationService(new NavigationService.Deps(null, NavigationConfig.defaults().withGuidanceV2(false),
+            w -> network.snapshot, policies, shapes, eligibility, hud, trail, Runnable::run, Runnable::run, tick::get,
+            events::add, Logger.getLogger("test")));
         service.navigate(player, cinixKeep());
         for (int x = 1; x <= 60; x++) {
             moveTo(x + 0.5, 65, 0.5);
@@ -2023,7 +2028,7 @@ class NavigationServiceTest {
     void withTheFlagOffTheStartLegWalkedBackAlongIsHeadingAwayAsToday() {
         walkFinder = r -> found(List.of(new double[] {50.5, 64, 30.5}, new double[] {50.5, 64, 15.5},
             new double[] {50.5, 64, 9.5}));
-        NavigationService off = walkService(NavigationConfig.defaults());
+        NavigationService off = walkService(NavigationConfig.defaults().withGuidanceV2(false));
         moveTo(50.5, 65, 30.5);
         off.navigate(player, cinixKeep());
         runSearches();
@@ -2086,7 +2091,7 @@ class NavigationServiceTest {
         };
 
     private NavigationService plazaService(boolean on) {
-        NavigationConfig config = NavigationConfig.defaults()
+        NavigationConfig config = NavigationConfig.defaults().withGuidanceV2(false)
             .withPlazaLines(new NavigationConfig.PlazaLinesConfig(on, 0.35, 2, 0.65));
         service = new NavigationService(new NavigationService.Deps(null, config, w -> network.snapshot, policies, shapes,
             eligibility, hud, trail, Runnable::run, Runnable::run, tick::get, events::add, Logger.getLogger("test")));
