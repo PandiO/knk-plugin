@@ -4,7 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * SIEGE_WEAPONS § 4.6 (W44): a weapon is pasted into the spot exactly, so the spot task warns, without refusing, when
+ * SIEGE_WEAPONS § 4.6 (W44): a weapon is pasted into the spot exactly, so the spot form's site check rule
+ * (PandiO/knk-workspace#988, answered over the game hub) warns, without refusing, when
  * the layer under the spot isn't solid or the spot's volume isn't clear. Bukkit-free: the paper side answers the
  * {@link BlockProbe} from the world.
  */

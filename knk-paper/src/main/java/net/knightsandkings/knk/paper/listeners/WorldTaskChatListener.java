@@ -124,7 +124,8 @@ public class WorldTaskChatListener implements Listener {
             return true;
         }
 
-        // #799: handlers registered by task type that read chat (the siege weapon spot task)
+        // #799: handlers registered by task type that read chat (the production CaptureRadius task; the siege weapon
+        // spot task it was made for is gone since #988)
         for (var chatInput : handlerRegistry.activeChatInputs(player)) {
             if (chatInput.onPlayerChat(player, message)) {
                 return true;

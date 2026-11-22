@@ -30,7 +30,8 @@ public enum SpotFacing {
     }
 
     /**
-     * The facing nearest to a Minecraft yaw (W5 pre-fill from the admin's look direction). Minecraft's yaw is 0 when
+     * The facing nearest to a Minecraft yaw (until #988 the W5 pre-fill from the admin's look direction; the facing is
+     * now picked in the spot form, this stays for placement). Minecraft's yaw is 0 when
      * looking south (+z), 90 west (-x), 180 north (-z) and 270 (or -90) east (+x); a yaw exactly between two
      * directions rounds clockwise (45 gives west).
      */

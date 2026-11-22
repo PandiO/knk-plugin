@@ -197,7 +197,7 @@ public class WorldTaskHandlerRegistry {
 
     /**
      * PandiO/knk-workspace#799: the handlers that read chat ({@link ChatTaskInput}) and are handling this player now. Empty
-     * unless such a handler (the siege weapon spot task, only with {@code siege.weapons.enabled}) is registered.
+     * unless such a handler (the production {@code CaptureRadius} task) is registered.
      */
     public java.util.List<ChatTaskInput> activeChatInputs(Player player) {
         return allHandlers()
