@@ -157,6 +157,8 @@ public final class NavGroup {
         boolean cut;
         /** Followers ahead of it cut short by a rule: it stops this many spacings further back (a queue, not a pile). */
         int queue;
+        /** With {@link #cut}: the path index its last hand-out stopped before (the door or edge), else -1. */
+        int cutIdx = -1;
         /** The waypoints it has lead into a region it did not stand in, or out of one it stood in, when it got them. */
         boolean sentIntoRegion;
         /** The rules may have changed since it got its waypoints: they are handed out again. */
@@ -665,6 +667,7 @@ public final class NavGroup {
         f.recheck = false;
         f.leavingDoor = false;
         f.cut = false;
+        f.cutIdx = -1;
         normalSpeed(f);
     }
 
@@ -1961,6 +1964,7 @@ public final class NavGroup {
             endArc = arcs.isEmpty() ? a : arcs.get(arcs.size() - 1);
         }
         f.cut = cut;
+        f.cutIdx = cut ? k : -1;
         if (!cut && k > end) {
             // the slot itself: between two path points, or past the path's end (a slot ahead of the leader)
             double along = targetArc - path.arc(end);
@@ -2177,11 +2181,13 @@ public final class NavGroup {
         NavPoint back = null;
         int k = Math.min(f.pathIdx, path.size() - 1);
         double edge = Double.NaN;
+        int edgeIdx = -1;
         for (; k >= 0; k--) {
             NavPoint p = HopPlanner.feet(path.get(k).floor);
             if (!inDoorWay(box, p)) {
                 if (Double.isNaN(edge)) {
                     edge = path.arc(k);
+                    edgeIdx = k;
                 }
                 // behind the followers that stand before the same door already: a queue, not a pile
                 if (edge - path.arc(k) >= f.queue * settings.formation().spacing() || k == 0) {
@@ -2192,6 +2198,7 @@ public final class NavGroup {
         }
         f.recheck = false;
         f.cut = true;
+        f.cutIdx = edgeIdx < 0 ? -1 : edgeIdx + 1; // it stops at the last point before the door's way
         f.heldByRule = true;
         f.progressTick = now;
         if (back == null) {
@@ -2300,6 +2307,17 @@ public final class NavGroup {
         double reach = Math.max(2, settings.hopBlocks() - 2);
         int place = path.nearest(at, 0, leaderIdx + 1);
         int last = Math.min(path.indexAtArc(Math.max(0, slotArc)), leaderIdx);
+        if (f.cut && f.queue > 0 && f.cutIdx > 0 && f.cutIdx <= path.size()) {
+            // held behind others before a door or an edge: its own leg ends at its place in the queue, not on the spot
+            // of the follower before it (PandiO/knk-workspace#958, NavGroupFinishTripTest)
+            int stop = f.cutIdx - 1;
+            double keep = f.queue * settings.formation().spacing();
+            int queuePlace = stop;
+            while (queuePlace > 0 && path.arc(stop) - path.arc(queuePlace) < keep) {
+                queuePlace--;
+            }
+            last = Math.min(last, queuePlace);
+        }
         int from = place;
         if (f.failedTarget >= 0 && f.failedFrom != null && f.failedFrom.horizontalDistance(at) <= 1
             && Math.abs(f.failedFrom.y() - at.y()) < 1) {

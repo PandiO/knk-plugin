@@ -175,12 +175,14 @@ public final class PaperScenarios {
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestRegenerateScenario())
             .register(new net.knightsandkings.knk.paper.scenario.scenarios.PlayerHarvestTreeScenario())
             // Landmark and production area regions drawn through the form's region task (PandiO/knk-workspace#945,
-            // #946). Last on purpose: a scene sits at origin.x + index x 64, and npc-replay-quarry-to-keep fails when
-            // its scene moves (PandiO/knk-workspace#958), so new scenarios go after the NPC replays.
+            // #946)
             .register(new LandmarkRegionRenameScenario())
             .register(new LandmarkRegionReplaceScenario())
             .register(new ProductionAreaRegionRenameScenario())
-            // Landmarks as a Domain subtype (PandiO/knk-workspace#985, A13): last, after the NPC replays (#958)
-            .register(new net.knightsandkings.knk.paper.scenario.scenarios.LandmarkManagedRegionScenario());
+            // Landmarks as a Domain subtype (PandiO/knk-workspace#985, A13)
+            .register(new net.knightsandkings.knk.paper.scenario.scenarios.LandmarkManagedRegionScenario())
+            // PandiO/knk-workspace#958: the quarry-to-keep replay again, in a scene at world x 32768 or beyond: anywhere
+            // from the 45th scenario on (scene index 44, x 32816 with the shipped origin; its first check fails below)
+            .register(NpcSnapshotReplayScenario.pastTheBinade());
     }
 }
