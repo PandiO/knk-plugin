@@ -25,6 +25,14 @@ public final class RouteFollower {
     public static final double PLAZA_ON_LINE = 2.0;
     /** A recovery leg aims at most this many blocks along the line ahead of the NPC unless told otherwise. */
     public static final double RECOVERY_REACH = 16;
+    /**
+     * Steps per block of the grid the line's x and z are put on (PandiO/knk-workspace#958): a multiple of
+     * {@code 1 / LINE_GRID} is exact as a double anywhere within the world border, so the line has the same shape
+     * wherever the route lies. Without it a coordinate's last bits depend on its magnitude (a double has half the
+     * precision at x 32768 and above that it has below), and a line point on a block face (x exactly 1412.0) came
+     * out a hair on one side of the face or the other, which changed the stretch the corridor shaper made.
+     */
+    public static final double LINE_GRID = 4096;
 
     public enum Kind {
         /** Waypoints to follow. */
@@ -117,8 +125,9 @@ public final class RouteFollower {
         if (walkedPoints != null && walkedPoints.length != roadLine.size()) {
             throw new IllegalArgumentException("one walked flag per line point");
         }
+        roadLine = onGrid(roadLine);
         if (walkedPoints == null) {
-            this.line = List.copyOf(HopPlanner.resampleKeepingCorners(roadLine, STEP));
+            this.line = onGrid(HopPlanner.resampleKeepingCorners(roadLine, STEP));
             this.walked = null;
         } else {
             List<NavPoint> points = new ArrayList<>();
@@ -138,7 +147,7 @@ public final class RouteFollower {
                     flags.add(k == piece.size() - 1 ? walkedPoints[i] : walkedPoints[i - 1] && walkedPoints[i]);
                 }
             }
-            this.line = List.copyOf(points);
+            this.line = onGrid(points);
             this.walked = new boolean[flags.size()];
             for (int i = 0; i < flags.size(); i++) {
                 walked[i] = flags.get(i);
@@ -169,6 +178,22 @@ public final class RouteFollower {
             along[i] = along[i - 1] + Math.sqrt(sq(b.x() - a.x()) + sq(b.y() - a.y()) + sq(b.z() - a.z()));
         }
         this.corners = new CornerClearance(line);
+    }
+
+    /** The points with x and z on the {@link #LINE_GRID} (#958); heights as they are. */
+    static List<NavPoint> onGrid(List<NavPoint> points) {
+        List<NavPoint> out = new ArrayList<>(points.size());
+        for (NavPoint p : points) {
+            out.add(onGrid(p));
+        }
+        return List.copyOf(out);
+    }
+
+    /** A point with x and z on the {@link #LINE_GRID} (#958): the nearest multiple of {@code 1 / LINE_GRID}. */
+    static NavPoint onGrid(NavPoint p) {
+        double x = Math.rint(p.x() * LINE_GRID) / LINE_GRID;
+        double z = Math.rint(p.z() * LINE_GRID) / LINE_GRID;
+        return x == p.x() && z == p.z() ? p : new NavPoint(p.world(), x, p.y(), z);
     }
 
     /** Whether the line point at {@code index} is a cell of a walk the walk search planned (link C1). */
