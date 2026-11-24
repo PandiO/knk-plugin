@@ -29,7 +29,10 @@ import net.knightsandkings.knk.paper.scenario.SizedScene;
  *   <li>the hatch open, a profile without {@code open-doors}: the same (an open hatch is no door to open);</li>
  *   <li>the hatch closed, with {@code open-doors}: the NPC opens the hatch on its way up and arrives;</li>
  *   <li>the hatch closed, without {@code open-doors}: the hatch blocks; no walk is planned through it, the NPC never
- *       gets onto the roof and the hatch stays closed.</li>
+ *       gets onto the roof and the hatch stays closed;</li>
+ *   <li>down (PandiO/knk-workspace#956), from the roof to the road with {@code open-doors}, the hatch open: the NPC
+ *       goes down the ladder and arrives, with no stuck spell and no fall;</li>
+ *   <li>down, the hatch closed: the NPC opens it from above, goes down and arrives the same way.</li>
  * </ol>
  * The arriving trips also fail on a stuck spell (the NPC stalled at the ladder, the issue's symptom) and when the leg
  * was not planned with the walk search. Settings: the code defaults with {@code local-legs-clearance} and
@@ -43,14 +46,19 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
 
     static final NpcAccessProfile NO_DOORS = new NpcAccessProfile("no-doors", false, false, Set.of(), Set.of());
 
-    private record Trip(String what, boolean hatchOpen, NpcAccessProfile profile, boolean arrives) {
+    private record Trip(String what, boolean hatchOpen, NpcAccessProfile profile, boolean arrives, boolean down) {
+        Trip(String what, boolean hatchOpen, NpcAccessProfile profile, boolean arrives) {
+            this(what, hatchOpen, profile, arrives, false);
+        }
     }
 
     private static final List<Trip> TRIPS = List.of(
         new Trip("hatch open, open-doors", true, NpcAccessProfile.DEFAULT, true),
         new Trip("hatch open, no open-doors", true, NO_DOORS, true),
         new Trip("hatch closed, open-doors", false, NpcAccessProfile.DEFAULT, true),
-        new Trip("hatch closed, no open-doors", false, NO_DOORS, false));
+        new Trip("hatch closed, no open-doors", false, NO_DOORS, false),
+        new Trip("down, hatch open, open-doors", true, NpcAccessProfile.DEFAULT, true, true),
+        new Trip("down, hatch closed, open-doors", false, NpcAccessProfile.DEFAULT, true, true));
 
     @Override
     public String name() {
@@ -59,7 +67,8 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
 
     @Override
     public String description() {
-        return "An off-road leg up a tower's ladder through its roof hatch: open and closed, with and without open-doors";
+        return "An off-road leg up a tower's ladder through its roof hatch, open and closed, with and without "
+            + "open-doors, and down it from the roof";
     }
 
     @Override
@@ -92,12 +101,15 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
         long[] t = {0, -1};
         long[] before = new long[3];
         int ticks = trip.arrives() ? WALK_TICKS : BLOCKED_TICKS;
-        plan.act("one NPC walks to the roof: " + trip.what(), () -> {
+        NavPoint from = trip.down() ? tower.goal() : tower.start();
+        NavPoint to = trip.down() ? tower.start() : tower.goal();
+        plan.act((trip.down() ? "one NPC walks from the roof to the road: " : "one NPC walks to the roof: ")
+                + trip.what(), () -> {
                 tower.setHatch(trip.hatchOpen());
                 before[0] = stuckSpells(npcs.get());
                 before[1] = npcs.get().service().offRoadWalks();
                 before[2] = npcs.get().metrics().total(Event.FELL);
-                npc.set(npcs.get().spawn(tower.start(), trip.profile()));
+                npc.set(npcs.get().spawn(from, trip.profile()));
                 t[0] = npcs.get().ticks();
                 npcs.get().everyTick(() -> {
                     NpcMover m = npc.get();
@@ -109,7 +121,7 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
                         everOpened.set(true);
                     }
                 });
-                if (!npcs.get().service().navigate(npc.get().id(), tower.goal(), r -> {
+                if (!npcs.get().service().navigate(npc.get().id(), to, r -> {
                     result.set(r);
                     t[1] = npcs.get().ticks() - t[0];
                 })) {
@@ -118,7 +130,8 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
             })
             .await("the trip ends or the time is up", ticks + 20,
                 () -> result.get() != null || npcs.get().ticks() - t[0] >= ticks)
-            .check(trip.arrives() ? "the NPC climbed through the hatch onto the roof"
+            .check(trip.down() ? "the NPC went down the hatch and the ladder to the road, no stuck spell, no fall"
+                : trip.arrives() ? "the NPC climbed through the hatch onto the roof"
                 : "the closed hatch kept the NPC off the roof", () -> {
                 List<String> failures = new ArrayList<>();
                 ScenarioNpcs n = npcs.get();
@@ -126,7 +139,31 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
                 long walks = n.service().offRoadWalks() - before[1];
                 NavPoint at = npc.get().position().orElse(null);
                 report(n, trip, result.get(), t[1], stuck, walks, at, everOpened.get());
-                if (trip.arrives()) {
+                if (trip.down()) {
+                    long fell = n.metrics().total(Event.FELL) - before[2];
+                    if (!(result.get() instanceof NavigationResult.Arrived)) {
+                        failures.add("the NPC did not arrive: " + (result.get() == null ? "still walking after "
+                            + ticks / 20 + " s at " + (at == null ? "-" : NavGeometry.block(at)) : result.get()));
+                    }
+                    if (at == null || at.horizontalDistance(to) > 1.5 || Math.abs(at.y() - to.y()) > 1) {
+                        failures.add("the NPC is not at the road's end: " + (at == null ? "-" : NavGeometry.block(at)));
+                    }
+                    if (stuck > 0) {
+                        failures.add(stuck + " stuck spells on the way");
+                    }
+                    if (fell > 0) {
+                        failures.add(fell + " falls");
+                    }
+                    if (walks == 0) {
+                        failures.add("the leg from the roof was not planned with the walk search");
+                    }
+                    if (!trip.hatchOpen() && !everOpened.get()) {
+                        failures.add("the hatch was never opened");
+                    }
+                    if (!failures.isEmpty()) {
+                        failures.add(lineNear(n, npc.get(), at));
+                    }
+                } else if (trip.arrives()) {
                     if (!(result.get() instanceof NavigationResult.Arrived)) {
                         failures.add("the NPC did not arrive: " + (result.get() == null ? "still walking after "
                             + ticks / 20 + " s at " + (at == null ? "-" : NavGeometry.block(at)) : result.get()));
@@ -159,6 +196,31 @@ public final class NpcLadderHatchScenario implements Scenario<ScenarioScene>, Si
                 n.remove(new ArrayList<>(n.movers()));
                 return failures.isEmpty() ? null : String.join("; ", failures) + n.tail(20);
             });
+    }
+
+    /** For a failed trip down: the route line's points and the trail's first waypoints round the NPC (scene). */
+    private static String lineNear(ScenarioNpcs npcs, NpcMover m, NavPoint at) {
+        StringBuilder out = new StringBuilder("line near it:");
+        net.knightsandkings.knk.core.npc.nav.RouteFollower f = npcs.service().followerOf(m.id());
+        if (f != null && at != null) {
+            for (NavPoint p : f.line()) {
+                if (p.horizontalDistance(at) <= 4 && Math.abs(p.y() - at.y()) <= 5) {
+                    out.append(' ').append(exact(p));
+                }
+            }
+        }
+        out.append("; trail:");
+        List<NavPoint> trail = npcs.service().trailOf(m.id());
+        if (trail != null) {
+            for (NavPoint p : trail.subList(0, Math.min(8, trail.size()))) {
+                out.append(' ').append(exact(p));
+            }
+        }
+        return out.append("; at ").append(at == null ? "-" : exact(at)).toString();
+    }
+
+    private static String exact(NavPoint p) {
+        return String.format(Locale.ROOT, "(%.2f %.2f %.2f)", p.x(), p.y(), p.z());
     }
 
     private static long stuckSpells(ScenarioNpcs npcs) {
