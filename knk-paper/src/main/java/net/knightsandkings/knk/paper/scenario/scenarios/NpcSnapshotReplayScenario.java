@@ -45,6 +45,11 @@ import net.knightsandkings.knk.paper.scenario.SnapshotReplay;
  * group also fails on a lost follower: on the real blocks they came from slots on flight 5's half-block steps at
  * whole-block heights. Since link B5 the group fails on a follower that left its lane on the flights and landings
  * (an own leg back from off its lane there) and on a looping follower ({@link #ownLegs}).
+ * <p>
+ * {@link #pastTheBinade()} (PandiO/knk-workspace#958) is the same replay, with the snapshot's settings only, in a scene
+ * at world x {@value #BINADE} or beyond: before the route line was put on a grid ({@code RouteFollower#LINE_GRID}) the
+ * group fell from the climb there (17 falls) and not further west, because the road's points on the block face x 1412
+ * rounded to the other side of the face.
  */
 public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>, SizedScene {
 
@@ -61,7 +66,36 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
     /** The route's own end in the keep (real feet), past the top hall and two gates. */
     static final double[] END = {1421.5, 85, -515.5};
 
+    /**
+     * The world x a scene of {@link #pastTheBinade()} starts at or beyond (PandiO/knk-workspace#958): from 2^15 on, a
+     * double has one bit less for the fraction, so a route point there rounds differently than below it.
+     */
+    static final int BINADE = 1 << 15;
+
+    private final String name;
+    private final boolean both;
+    private final boolean pastBinade;
     private SnapshotReplay replay;
+
+    /** The replay with both configurations, wherever its scene is. */
+    public NpcSnapshotReplayScenario() {
+        this("npc-replay-quarry-to-keep", true, false);
+    }
+
+    private NpcSnapshotReplayScenario(String name, boolean both, boolean pastBinade) {
+        this.name = name;
+        this.both = both;
+        this.pastBinade = pastBinade;
+    }
+
+    /**
+     * The check of PandiO/knk-workspace#958: the replay with the snapshot's settings (the walks that failed) in a scene
+     * at world x {@value #BINADE} or beyond. Registered from the 45th scenario on (scene index 44 is x 32816 with the
+     * shipped origin); a scene further west fails the scenario's first check, so it never passes without testing that.
+     */
+    public static NpcSnapshotReplayScenario pastTheBinade() {
+        return new NpcSnapshotReplayScenario("npc-replay-quarry-to-keep-past-32768", false, true);
+    }
 
     private SnapshotReplay replay() {
         if (replay == null) {
@@ -72,13 +106,16 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
 
     @Override
     public String name() {
-        return "npc-replay-quarry-to-keep";
+        return name;
     }
 
     @Override
     public String description() {
-        return "The developer's snapshot of quarry-to-keep replayed (real blocks, regions, line, settings); "
-            + "a leader alone and a group of 20 up the stair house";
+        return pastBinade
+            ? "The quarry-to-keep replay with the snapshot's settings in a scene at world x " + BINADE
+                + " or beyond (#958): the same walks as further west"
+            : "The developer's snapshot of quarry-to-keep replayed (real blocks, regions, line, settings); "
+                + "a leader alone and a group of 20 up the stair house";
     }
 
     @Override
@@ -104,6 +141,11 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
         AtomicReference<SnapshotReplay.Placed> placed = new AtomicReference<>();
         List<String> regions = new ArrayList<>();
         List<String> rejected = new ArrayList<>();
+        if (pastBinade) {
+            plan.check("the scene starts at world x " + BINADE + " or beyond (#958)", () -> scene.worldX(0) >= BINADE
+                ? null : "the scene starts at x " + scene.worldX(0) + "; this check needs " + BINADE
+                    + " or beyond (register it later or move testing.scenarios.origin.x east)");
+        }
         plan.act("place the snapshot's blocks", () -> placed.set(replay.placeBlocks(scene)))
             .check("the region files' blocks are placed in the scene", () -> {
                 SnapshotReplay.Placed p = placed.get();
@@ -135,7 +177,9 @@ public final class NpcSnapshotReplayScenario implements Scenario<ScenarioScene>,
                 return rejected.isEmpty() ? null : "rejected " + rejected;
             });
         walks(plan, scene, replay, placed, "the snapshot's settings", java.util.function.UnaryOperator.identity(), END);
-        walks(plan, scene, replay, placed, "the smoke test's settings", NpcSnapshotReplayScenario::smokeTest, GOAL);
+        if (both) {
+            walks(plan, scene, replay, placed, "the smoke test's settings", NpcSnapshotReplayScenario::smokeTest, GOAL);
+        }
     }
 
     /**

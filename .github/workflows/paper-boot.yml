@@ -165,8 +165,10 @@ jobs:
         # Production P6 (#74) adds storage-display-double-chest (about 3 s): 69.
         # Production P8 (#134) adds player-harvest-regenerate and player-harvest-tree (a few seconds each): 73.
         # Landmarks as a Domain subtype L3 (#985) adds landmark-region-is-managed-under-its-parent (a few seconds): 79.
+        # Fix link L3b (#958) adds npc-replay-quarry-to-keep-past-32768 (the replay's walks with the snapshot's settings
+        # in a scene at x 32768 or beyond, about 3.5 minutes): 80.
         env:
-          MIN_SCENARIOS: 76
+          MIN_SCENARIOS: 80
         run: >-
           tools/paper-boot/boot-test.sh
           --server-dir "$RUNNER_TEMP/paper-server"
